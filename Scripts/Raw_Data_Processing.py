@@ -1,0 +1,388 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Created on Mon Aug 16 15:56:05 2021
+
+@author: stuartedris
+
+This script is designed to take a set of raw, 3 hour data from the NARR and
+subset and average the data to reduce it to a managable size. Data will be
+averaged or summed (depending on variable) to a weekly average/sum to 
+correspond with time scales of flash drought indices, which will be calculated
+in a later script. In addition, data will be subsetted to the United States
+in order to focus on it, where the data is most valid and has the most
+observations, and to reduce the size of the data.
+
+This script assumes it is being running in the 'ML_and_FD_in_NARR' directory
+"""
+
+#%%
+# cell 1
+#####################################
+### Import some libraries ###########
+#####################################
+
+import os, sys, warnings
+import numpy as np
+import matplotlib.pyplot as plt
+import matplotlib.colors as mcolors
+import cartopy.crs as ccrs
+import cartopy.feature as cfeature
+import cartopy.mpl.ticker as cticker
+from scipy import stats
+from netCDF4 import Dataset, num2date
+from datetime import datetime, timedelta
+
+
+#%%
+# cell 2
+# Read some of the datasets to examine them
+
+#print(Dataset('./Data/Raw/VSM/soilw.197901.nc', 'r'))
+
+print(Dataset('./Data/Raw/Liquid_VSM/soill.197901.nc', 'r'))
+
+#print(Dataset('./Data/Raw/Soil_Moisture_Content/soilm.1979.nc', 'r'))
+
+print(Dataset('./Data/Raw/Evaporation_accumulation/evap.1979.nc', 'r'))
+
+print(Dataset('./Data/Raw/Potential_Evaporation_accumulation/pevap.1979.nc', 'r'))
+
+print(Dataset('./Data/Raw/Precipitation_accumulation/apcp.1979.nc', 'r'))
+
+print(Dataset('./Data/Raw/Temperature_2m/air.2m.1979.nc', 'r'))
+
+#print(Dataset('./Data/Raw/Temperature_skin/air.sfc.1979.nc', 'r'))
+
+#%%
+# cell 3
+# Create a function to import the nc files
+
+def LoadNC(SName, filename, sm = False, path = './Data/Raw/'):
+    '''
+    This function loads .nc files, specifically raw NARR files. This function takes in the
+    name of the data, and short name of the variable to load the .nc file. 
+    
+    Inputs:
+    - SName: The short name of the variable being loaded. I.e., the name used
+             to call the variable in the .nc file.
+    - filename: The name of the .nc file.
+    - sm: Boolean determining if soil moisture is being loaded (an extra variable and dimension, level,
+          needs to be loaded).
+    - path: The path from the current directory to the directory the .nc file is in.
+    
+    Outputs:
+    - X: A directory containing all the data loaded from the .nc file. The 
+         entry 'lat' contains latitude (space dimensions), 'lon' contains longitude
+         (space dimensions), 'date' contains the dates in a datetime variable
+         (time dimension), 'month' 'day' are the numerical month
+         and day value for the given time (time dimension), 'ymd' contains full
+         datetime values, and 'SName' contains the variable (space and time demsions).
+    '''
+    
+    # Initialize the directory to contain the data
+    X = {}
+    DateFormat = '%Y-%m-%d %H:%M:%S'
+    
+    with Dataset(path + filename, 'r') as nc:
+        # Load the grid
+        lat = nc.variables['lat'][:,:]
+        lon = nc.variables['lon'][:,:]
+#        lat = nc.variables['lat'][:]
+#        lon = nc.variables['lon'][:]
+#        
+#        lon, lat = np.meshgrid(lon, lat)
+#        
+        X['lat'] = lat
+        X['lon'] = lon
+        
+        # Collect the time information
+        time = nc.variables['time'][:]
+        X['time'] = time
+        # dates = np.asarray([datetime.strptime(time[d], DateFormat) for d in range(len(time))])
+        
+        # X['date'] = dates
+        # X['year']  = np.asarray([d.year for d in dates])
+        # X['month'] = np.asarray([d.month for d in dates])
+        # X['day']   = np.asarray([d.day for d in dates])
+        # X['ymd']   = np.asarray([datetime(d.year, d.month, d.day) for d in dates])
+
+        # Collect the data itself
+        if sm is True:
+            X[str(SName)] = nc.variables[str(SName)][:,:,:,:]
+            X['level']    = nc.variables['level'][:]
+        else:
+            X[str(SName)] = nc.variables[str(SName)][:,:,:]
+        
+    return X
+
+
+#%%
+# cell 4
+# Create a function to write a variable to a .nc file
+  
+def WriteNC(var, lat, lon, dates, filename = 'tmp.nc', sm = False, VarName = 'tmp', VarSName = 'tmp', description = 'Description', path = './Data/Processed/'):
+    '''
+    This function is deisgned write data, and additional information such as
+    latitude and longitude and timestamps to a .nc file.
+    
+    Inputs:
+    - var: The variable being written (lat x lon x time format).
+    - lat: The latitude data with the same spatial grid as var.
+    - lon: The longitude data with the same spatial grid as var.
+    - dates: The timestamp for each pentad in var in a %Y-%m-%d format, same time grid as var.
+    - filename: The filename of the .nc file being written.
+    - sm: A boolean value to determin if soil moisture is being written. If true, an additional variable containing
+          the soil depth information is provided.
+    - VarName: The full name of the variable being written (for the nc description).
+    - VarSName: The short name of the variable being written. I.e., the name used
+                to call the variable in the .nc file.
+    - description: A string descriping the data.
+    - path: The path to the directory the data will be written in.
+                
+    Outputs:
+    - None. Data is written to a .nc file.
+    '''
+    
+    # Determine the spatial and temporal lengths
+    I, J, T = var.shape
+    T = len(dates)
+    
+    with Dataset(path + filename, 'w', format = 'NETCDF4') as nc:
+        # Write a description for the .nc file
+        nc.description = description
+
+        
+        # Create the spatial and temporal dimensions
+        nc.createDimension('lat', size = I)
+        nc.createDimension('lon', size = J)
+        nc.createDimension('time', size = T)
+        
+        # Create the lat and lon variables
+        # nc.createVariable('lat', lat.dtype, ('lat', ))
+        # nc.createVariable('lon', lon.dtype, ('lon', ))
+        
+        nc.createVariable('lat', lat.dtype, ('lat', 'lon'))
+        nc.createVariable('lon', lon.dtype, ('lat', 'lon'))
+        
+        # nc.variables['lat'][:] = lat[:]
+        # nc.variables['lon'][:] = lon[:]
+        
+        nc.variables['lat'][:,:] = lat[:,:]
+        nc.variables['lon'][:,:] = lon[:,:]
+        
+        # Create the date variable
+        nc.createVariable('date', str, ('time', ))
+        for n in range(len(dates)):
+            nc.variables['date'][n] = np.str(dates[n])
+            
+        # Create the main variable
+        nc.createVariable(VarSName, var.dtype, ('lat', 'lon', 'time'))
+        nc.variables[str(VarSName)][:,:,:] = var[:,:,:]
+        
+        if sm is True:
+            nc.createVariable('level', str, ())
+            nc.variables['level'] = '1 - 40 cm'
+        else:
+            pass
+            
+            
+#%%
+# cell 5
+# Function to subset any dataset.
+def SubsetData(X, Lat, Lon, LatMin, LatMax, LonMin, LonMax):
+    '''
+    This function is designed to subset data for any gridded dataset, including
+    the non-simple grid used in the NARR dataset, where the size of the subsetted
+    data is unknown. Note this function only makes square subsets with a maximum 
+    and minimum latitude/longitude.
+    
+    Inputs:
+    - X: The variable to be subsetted.
+    - Lat: The gridded latitude data corresponding to X.
+    - Lon: The gridded Longitude data corresponding to X.
+    - LatMax: The maximum latitude of the subsetted data.
+    - LatMin: The minimum latitude of the subsetted data.
+    - LonMax: The maximum longitude of the subsetted data.
+    - LonMin: The minimum longitude of the subsetted data.
+    
+    Outputs:
+    - XSub: The subsetted data.
+    - LatSub: Gridded, subsetted latitudes.
+    - LonSub: Gridded, subsetted longitudes.
+    '''
+    
+    # Collect the original sizes of the data/lat/lon
+    I, J, T = X.shape
+    
+    # Reshape the data into a 2D array and lat/lon to a 1D array for easier referencing.
+    X2D   = X.reshape(I*J, T, order = 'F')
+    Lat1D = Lat.reshape(I*J, order = 'F')
+    Lon1D = Lon.reshape(I*J, order = 'F')
+    
+    # Find the indices in which to make the subset.
+    LatInd = np.where( (Lat1D >= LatMin) & (Lat1D <= LatMax) )[0]
+    LonInd = np.where( (Lon1D >= LonMin) & (Lon1D <= LonMax) )[0]
+    
+    # Find the points where the lat and lon subset overlap. This comprises the subsetted grid.
+    SubInd = np.intersect1d(LatInd, LonInd)
+    
+    # Next find, the I and J dimensions of subsetted grid.
+    Start = 0 # The starting point of the column counting.
+    Count = 1 # Row count starts at 1
+    Isub  = 0 # Start by assuming subsetted column size is 0.
+    
+    for n in range(len(SubInd[:-1])): # Exclude the last value to prevent indexing errors.
+        IndDiff = SubInd[n+1] - SubInd[n] # Obtain difference between this index and the next.
+        if (n+2) == len(SubInd): # At the last value, everything needs to be increased by 2 to account for the missing indice at the end.
+            Isub = np.nanmax([Isub, n+2 - Start]) # Note since this is the last indice, and this row is counted, there is no Count += 1.
+        elif ( (IndDiff > 1) |              # If the difference is greater than 1, or if
+             (np.mod(SubInd[n]+1,I) == 0) ):# SubInd is divisible by I, then a new row 
+                                            # is started in the gridded array.
+            Isub = np.nanmax([Isub, n+1 - Start]) # Determine the highest column count (may not be the same from row to row)
+            Start = n+1 # Start the counting anew.
+            Count = Count + 1 # Increment the row count by 1 as the next row is entered.
+        else:
+            pass
+        
+    # At the end, Count has the total number of rows in the subset.
+    Jsub = Count
+    
+    # Next, the column size may not be the same from row to row. The rows with
+    # with columns less than Isub need to be filled in. 
+    # Start by finding how many placeholders are needed.
+    PH = Isub * Jsub - len(SubInd) # Total number of needed points - number in the subset
+    
+    # Initialize the variable that will hold the needed indices.
+    PlaceHolder = np.ones((PH)) * np.nan
+    
+    # Fill the placeholder values with the indices needed to complete a Isub x Jsub matrix
+    Start = 0
+    m = 0
+    
+    for n in range(len(SubInd[:-1])):
+        # Identify when row changes occur.
+        IndDiff = SubInd[n+1] - SubInd[n]
+        if (n+2) == len(SubInd): # For the end of last row, an n+2 is needed to account for the missing index (SubInd[:-1] was used)
+            ColNum = n+2-Start
+            PlaceHolder[m:m+Isub-ColNum] = SubInd[n+1] + np.arange(1, 1+Isub-ColNum)
+            # Note this is the last value, so nothing else needs to be incremented up.
+        elif ( (IndDiff > 1) | (np.mod(SubInd[n]+1,I) == 0) ):
+            # Determine how many columns this row has.
+            ColNum = n+1-Start
+            
+            # Fill the placeholder with the next index(ices) when the row has less than
+            # the maximum number of columns (Isub)
+            PlaceHolder[m:m+Isub-ColNum] = SubInd[n] + np.arange(1, 1+Isub-ColNum)
+            
+            # Increment the placeholder index by the number of entries filled.
+            m = m + Isub - ColNum
+            Start = n+1
+            
+        
+        else:
+            pass
+    
+    # Next, convert the placeholders to integer indices.
+    PlaceHolderInt = PlaceHolder.astype(int)
+    
+    # Add and sort the placeholders to the indices.
+    SubIndTotal = np.sort(np.concatenate((SubInd, PlaceHolderInt), axis = 0))
+    
+    # The placeholder indices are technically outside of the desired subset. So
+    # turn those values to NaN so they do not effect calculations.
+    # (In theory, X2D is not the same variable as X, so the original dataset 
+    #  should remain untouched.)
+    X2D[PlaceHolderInt,:] = np.nan
+    
+    # Collect the subset of the data, lat, and lon
+    XSub = X2D[SubIndTotal,:]
+    LatSub = Lat1D[SubIndTotal]
+    LonSub = Lon1D[SubIndTotal]
+    
+    # Reorder the data back into a 3D array, and lat and lon into gridded 2D arrays
+    XSub = XSub.reshape(Isub, Jsub, T, order = 'F')
+    LatSub = LatSub.reshape(Isub, Jsub, order = 'F')
+    LonSub = LonSub.reshape(Isub, Jsub, order = 'F')
+    
+    # Return the the subsetted data
+    return XSub, LatSub, LonSub
+
+
+#%%
+# cell 6
+# Load in a sample file to examine and test it.
+path = './Data/Raw/Liquid_VSM/'
+filename = 'soill.197901.nc'
+
+sm = LoadNC(SName = 'soill', filename = filename, sm = True, path = path)
+# Note the main variable, soill, has dimensions time x level x y ("lat") x x ("lon")
+
+# Examine the data
+print(sm['level'])
+print(sm['time'])
+
+
+# Turn incorrectly labeled positive longtitude values back to negative
+for i in range(len(sm['lon'][:,0])):
+    ind = np.where( sm['lon'][i,:] > 0 )[0]
+    sm['lon'][i,ind] = -1*sm['lon'][i,ind]
+
+#%%
+# cell 7
+# To examine the data and grid further, plot some of the data.
+
+# Lonitude and latitude tick information
+lat_int = 15
+lon_int = 10
+
+lat_label = np.arange(-90, 90, lat_int)
+lon_label = np.arange(-180, 180, lon_int)
+
+#lon_formatter = cticker.LongitudeFormatter()
+#lat_formatter = cticker.LatitudeFormatter()
+
+# Projection information
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Colorbar information
+cmin = -0.5; cmax = 0.5; cint = 0.05
+clevs = np.arange(cmin, cmax+cint, cint)
+nlevs = len(clevs) - 1
+cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Figure
+fig = plt.figure(figsize = [12, 16])
+ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+ax.coastlines()
+
+ax.set_xticks(lon_label, crs = ccrs.PlateCarree())
+ax.set_yticks(lat_label, crs = ccrs.PlateCarree())
+ax.set_xticklabels(lon_label, fontsize = 16)
+ax.set_yticklabels(lat_label, fontsize = 16)
+
+ax.xaxis.tick_bottom()
+ax.yaxis.tick_left()
+
+
+cs = ax.contourf(sm['lon'], sm['lat'], sm['soill'][0,0,:,:], levels = clevs, cmap = cmap, 
+                  transform = data_proj, extend = 'both', zorder = 1)
+
+cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbar = fig.colorbar(cs, cax = cbax)
+
+ax.set_extent([np.nanmin(sm['lon']), np.nanmax(sm['lon']), np.nanmin(sm['lat']), np.nanmax(sm['lat'])], 
+                crs = fig_proj)
+
+plt.show(block = False)
+
+
+
+
+
+
