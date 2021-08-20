@@ -33,6 +33,9 @@ from scipy import stats
 from netCDF4 import Dataset, num2date
 from datetime import datetime, timedelta
 
+# Define function and library names
+FunctionNames = ['os', 'sys', 'np', 'plt', 'mcolors', 'ccrs', 'cfeature', 'cticker', 'stats', 'Dataset', 'num2date', 'datetime', 'timedelta', 'LoadNC', 'WriteNC', 'SubsetData', 'DateRange', 'this', 'FunctionNames']
+
 
 #%%
 # cell 2
@@ -154,16 +157,16 @@ def WriteNC(var, lat, lon, dates, filename = 'tmp.nc', sm = False, VarName = 'tm
 
         
         # Create the spatial and temporal dimensions
-        nc.createDimension('lat', size = I)
-        nc.createDimension('lon', size = J)
+        nc.createDimension('x', size = I)
+        nc.createDimension('y', size = J)
         nc.createDimension('time', size = T)
         
         # Create the lat and lon variables
         # nc.createVariable('lat', lat.dtype, ('lat', ))
         # nc.createVariable('lon', lon.dtype, ('lon', ))
         
-        nc.createVariable('lat', lat.dtype, ('lat', 'lon'))
-        nc.createVariable('lon', lon.dtype, ('lat', 'lon'))
+        nc.createVariable('lat', lat.dtype, ('x', 'y'))
+        nc.createVariable('lon', lon.dtype, ('x', 'y'))
         
         # nc.variables['lat'][:] = lat[:]
         # nc.variables['lon'][:] = lon[:]
@@ -177,7 +180,7 @@ def WriteNC(var, lat, lon, dates, filename = 'tmp.nc', sm = False, VarName = 'tm
             nc.variables['date'][n] = np.str(dates[n])
             
         # Create the main variable
-        nc.createVariable(VarSName, var.dtype, ('lat', 'lon', 'time'))
+        nc.createVariable(VarSName, var.dtype, ('x', 'y', 'time'))
         nc.variables[str(VarSName)][:,:,:] = var[:,:,:]
         
         if sm is True:
@@ -311,6 +314,23 @@ def SubsetData(X, Lat, Lon, LatMin, LatMax, LonMin, LonMax):
 
 #%%
 # cell 6
+# Create a function to generate a range of datetimes
+def DateRange(StartDate, EndDate):
+    '''
+    This function takes in two dates and outputs all the dates inbetween
+    those two dates.
+    
+    Inputs:
+        StartDate - A datetime. The starting date of the interval.
+        EndDate - A datetime. The ending date of the interval.
+        
+    Outputs:
+        All dates between StartDate and EndDate (inclusive)
+    '''
+    for n in range(int((EndDate - StartDate).days) + 1):
+        yield StartDate + timedelta(n) 
+#%%
+# cell 7
 # Load in a sample file to examine and test it.
 path = './Data/Raw/Liquid_VSM/'
 filename = 'soill.197901.nc'
@@ -329,7 +349,7 @@ for i in range(len(sm['lon'][:,0])):
     sm['lon'][i,ind] = -1*sm['lon'][i,ind]
 
 #%%
-# cell 7
+# cell 8
 # To examine the data and grid further, plot some of the data.
 
 # Lonitude and latitude tick information
@@ -380,6 +400,189 @@ ax.set_extent([np.nanmin(sm['lon']), np.nanmax(sm['lon']), np.nanmin(sm['lat']),
                 crs = fig_proj)
 
 plt.show(block = False)
+
+
+#%%
+# cell 9
+# Process the data to a more managable size (computer normally freezes if working with 2+ variables at their current size)
+
+# First clear any data that might be loaded. Large amounts of data are about to be processed, and anything else should
+#   be cleared for more space and better performance
+this = sys.modules[__name__]
+for n in dir():
+    if (n[0] != '_') & (n not in FunctionNames):
+        delattr(this, n)
+        
+
+# Determine which variable is being processed.
+data = 'temp'
+# data = 'evap'
+# data = 'pevap'
+# data = 'precip'
+# data = 'soilmoist'
+
+# Create a range of datetimes
+date_gen = DateRange(datetime(1979, 1, 1), datetime(2020, 12, 31))
+dates = np.asarray([date for date in date_gen])
+
+years  = np.asarray([date.year for date in dates])
+months = np.asarray([date.month for date in dates])
+days   = np.asarray([date.day for date in dates])
+
+NumYears  = len(np.unique(years))
+NumMonths = len(np.unique(months))
+
+# Determine the location and filenames of the variable
+if data == 'temp':
+    path = './Data/Raw/Temperature_2m/'
+    filenames = ['tmp'] * NumYears
+    indvid_fn = 'air.2m.'
+    OutFile = 'temperature_2m.NARR.CONUS.weekly.nc'
+    
+    VarName = '2m Temeprature'
+    SName = 'air'
+    SNameOut = 'temp'
+    
+    description = ''
+    
+elif data == 'evap':
+    path = './Data/Raw/Evaporation_accumulation/'
+    filenames = ['tmp'] * NumYears
+    indvid_fn = 'evap.'
+    OutFile = 'evaporation.NARR.CONUS.weekly.nc'
+    
+    VarName = 'Accumulated Evaporation'
+    SName = 'evap'
+    SNameOut = 'evap'
+    
+    description = ''
+    
+elif data == 'pevap':
+    path = './Data/Raw/Potential_Evaporation_accumulation/'
+    filenames = ['tmp'] * NumYears
+    indvid_fn = 'pevap.'
+    OutFile = 'potential_evaporation.NARR.CONUS.weekly.nc'
+    
+    VarName = 'Accumulated Potential Evaporation'
+    SName = 'pevap'
+    SNameOut = 'pevap'
+    
+    description = ''
+    
+elif data == 'precip':
+    path = './Data/Raw/Precipitation_accumulation/'
+    filenames = ['tmp'] * NumYears
+    indvid_fn = 'apcp.'
+    OutFile = 'accumulated_precipitation.NARR.CONUS.weekly.nc'
+    
+    VarName = 'Accumulated Precipitation'
+    SName = 'apcp'
+    SNameOut = 'precip'
+    
+    description = ''
+    
+else: # The remaining scenario is data = soilmoist
+    path = './Data/Raw/Liquid_VSM/'
+    filenames = ['tmp'] * NumYears * NumMonths # Note the soil moisture data is in monthly files, not yearly
+    indvid_fn = 'soill.'
+    OutFile = 'soil_moisture.NARR.CONUS.weekly.nc'
+    
+    VarName = 'Liquid Volumetic Soil Moisture'
+    SName = 'soill'
+    SNameOut = 'soilm'
+    
+    description = ''
+    
+# Constuct the filenames
+for n in range(len(filenames)):
+    if data == 'soilmoist': # Soil moisture data is monthly
+        filenames[n] = indvid_fn + str(np.unique(years)[n]) + str(np.unique(months)[n]) + '.nc'
+    else: # All other files are yearly
+        filenames[n] = indvid_fn + str(np.unique(years)[n]) + '.nc'
+        
+
+# Load a sample file to get dimesions
+examp = LoadNC(SName = 'soill', filename = 'soill.197901.nc', sm = True, path = './Data/Raw/Liquid_VSM/')
+T, l, I, J = examp['soill'].shape
+T = dates.size
+
+# Initialize the combined data
+RawData = np.ones((T, I, J)) * np.nan
+
+# Load all the data for the chosen variable.
+t = 0
+for fn in filenames:
+    if data == 'soilmoist': # Soil moisture data files are monthly, and first 3 levels (0 - 40 cm) need to be averaged
+        X = LoadNC(SName = SName, filename = fn, sm = False, path = path)
+        VarTime = X[str(SName)].shape[0]
+        RawData[t:t+VarTime,:,:] = np.nanmean(X[str(SName)][:,0:2,:,:], axis = 1)
+        
+        t = t + VarTime + 1
+        
+    else:
+        X = LoadNC(SName = SName, filename = fn, sm = False, path = path)
+        VarTime = X[str(SName)].shape[0]
+        RawData[t:t+VarTime,:,:] = X[str(SName)][:,:,:]
+        
+        t = t + VarTime + 1
+        
+# Delete leap days for simplicity
+ind = np.where( (months == 2) & (days == 29) )[0]
+RawData[ind,:,:] = []
+dates[ind] = []
+
+# Correct longitudes
+for i in range(len(X['lon'][:,0])):
+    ind = np.where( X['lon'][i,:] > 0 )[0]
+    X['lon'][i,ind] = -1*X['lon'][i,ind]
+    
+    
+# Average or sum data to a weekly timescale.
+DataWeekly = np.ones((T/7, I, J)) * np.nan
+
+for t in range(int(T/7)):
+    if (data == 'evap') | (data == 'pevap') | (data == ' precip'):
+        DataWeekly[t,:,:] = np.nansum(RawData[n:n+6,:,:])
+    else:
+        DataWeekly[t,:,:] = np.nanmean(RawData[n:n+6,:,:])
+        
+    n = n + 7
+
+# Make the time variable last in the list
+DataWeeklyT = np.ones((I, J, T/7)) * np.nan
+for t in range(int(T/7)):
+    DataWeeklyT[:,:,t] = DataWeekly[t,:,:]
+
+
+
+# Subset the data to focus on the U.S.
+LatMin = 25
+LatMax = 50
+LonMin = -130
+LonMax = -65
+
+DataProcessed, LatSub, LonSub = SubsetData(DataWeeklyT, X['lat'], X['lon'], 
+                                           LatMin = LatMin, LatMax = LatMax, 
+                                           LonMin = LonMin, LonMax = LonMax)
+
+
+# Write the data to a file.
+OutPath = './Data/Processed_Data/'
+if data == 'soilmoist':
+    WriteNC(DataProcessed, LatSub, LonSub, dates, filename = OutFile, sm = True, 
+            VarName = VarName, VarSName = SNameOut, description = description, 
+            path = OutPath)
+else: 
+    WriteNC(DataProcessed, LatSub, LonSub, dates, filename = OutFile, sm = False, 
+            VarName = VarName, VarSName = SNameOut, description = description, 
+            path = OutPath)
+
+# Repeat this cell for all NARR variables collected.
+
+
+
+
+
 
 
 
