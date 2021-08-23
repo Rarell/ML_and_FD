@@ -34,7 +34,7 @@ from netCDF4 import Dataset, num2date
 from datetime import datetime, timedelta
 
 # Define function and library names
-FunctionNames = ['os', 'sys', 'np', 'plt', 'mcolors', 'ccrs', 'cfeature', 'cticker', 'stats', 'Dataset', 'num2date', 'datetime', 'timedelta', 'LoadNC', 'WriteNC', 'SubsetData', 'DateRange', 'this', 'FunctionNames']
+FunctionNames = ['os', 'sys', 'np', 'plt', 'mcolors', 'ccrs', 'cfeature', 'cticker', 'stats', 'Dataset', 'num2date', 'datetime', 'timedelta', 'LoadNC', 'WriteNC', 'SubsetData', 'DailyMean', 'DateRange', 'this', 'FunctionNames']
 
 
 #%%
@@ -124,7 +124,7 @@ def LoadNC(SName, filename, sm = False, path = './Data/Raw/'):
 # cell 4
 # Create a function to write a variable to a .nc file
   
-def WriteNC(var, lat, lon, dates, filename = 'tmp.nc', sm = False, VarName = 'tmp', VarSName = 'tmp', description = 'Description', path = './Data/Processed/'):
+def WriteNC(var, lat, lon, dates, filename = 'tmp.nc', sm = False, VarSName = 'tmp', description = 'Description', path = './Data/Processed/'):
     '''
     This function is deisgned write data, and additional information such as
     latitude and longitude and timestamps to a .nc file.
@@ -321,16 +321,52 @@ def DateRange(StartDate, EndDate):
     those two dates.
     
     Inputs:
-        StartDate - A datetime. The starting date of the interval.
-        EndDate - A datetime. The ending date of the interval.
+    - StartDate - A datetime. The starting date of the interval.
+    - EndDate - A datetime. The ending date of the interval.
         
     Outputs:
-        All dates between StartDate and EndDate (inclusive)
+    - All dates between StartDate and EndDate (inclusive)
     '''
     for n in range(int((EndDate - StartDate).days) + 1):
         yield StartDate + timedelta(n) 
+        
+
 #%%
 # cell 7
+# A cell to calculate a daily mean.
+def DailyMean(X, summation = False):
+    '''
+    This function is designed to take raw, 3-hourly NARR data and average/sum
+    it to daily data.
+    
+    Inputs:
+    - X: the 3 or 4D data that is being averaged/summed to a daily format.
+    - summation: A boolean value indicating whether the data is compressed 
+                 to a daily mean or daily accumulation.
+    
+    Outputs:
+    - X_daily: The variable X in a daily mean/accumulation format.
+    '''
+    
+    T, I, J = X.shape
+    
+    T = int(T/8) # The NARR data is 3 hourly, so the daily data will have a temporal size of T/8 (8 = 24/3)
+    
+    X_daily = np.ones((T, I, J)) * np.nan
+    
+    hour_stamp = 0
+    for t in range(T):
+        if summation == True:
+            X_daily[t,:,:] = np.nansum(X[hour_stamp:hour_stamp+8,:,:], axis = 0)
+        else:
+            X_daily[t,:,:] = np.nanmean(X[hour_stamp:hour_stamp+8,:,:], axis = 0)
+            
+        hour_stamp = hour_stamp + 8
+            
+    return X_daily
+    
+#%%
+# cell 8
 # Load in a sample file to examine and test it.
 path = './Data/Raw/Liquid_VSM/'
 filename = 'soill.197901.nc'
@@ -349,7 +385,7 @@ for i in range(len(sm['lon'][:,0])):
     sm['lon'][i,ind] = -1*sm['lon'][i,ind]
 
 #%%
-# cell 8
+# cell 9
 # To examine the data and grid further, plot some of the data.
 
 # Lonitude and latitude tick information
@@ -403,7 +439,7 @@ plt.show(block = False)
 
 
 #%%
-# cell 9
+# cell 10
 # Process the data to a more managable size (computer normally freezes if working with 2+ variables at their current size)
 
 # First clear any data that might be loaded. Large amounts of data are about to be processed, and anything else should
@@ -422,6 +458,7 @@ data = 'temp'
 # data = 'soilmoist'
 
 # Create a range of datetimes
+print('Constructing dates')
 date_gen = DateRange(datetime(1979, 1, 1), datetime(2020, 12, 31))
 dates = np.asarray([date for date in date_gen])
 
@@ -432,6 +469,9 @@ days   = np.asarray([date.day for date in dates])
 NumYears  = len(np.unique(years))
 NumMonths = len(np.unique(months))
 
+
+
+
 # Determine the location and filenames of the variable
 if data == 'temp':
     path = './Data/Raw/Temperature_2m/'
@@ -439,7 +479,6 @@ if data == 'temp':
     indvid_fn = 'air.2m.'
     OutFile = 'temperature_2m.NARR.CONUS.weekly.nc'
     
-    VarName = '2m Temeprature'
     SName = 'air'
     SNameOut = 'temp'
     
@@ -451,7 +490,6 @@ elif data == 'evap':
     indvid_fn = 'evap.'
     OutFile = 'evaporation.NARR.CONUS.weekly.nc'
     
-    VarName = 'Accumulated Evaporation'
     SName = 'evap'
     SNameOut = 'evap'
     
@@ -463,7 +501,6 @@ elif data == 'pevap':
     indvid_fn = 'pevap.'
     OutFile = 'potential_evaporation.NARR.CONUS.weekly.nc'
     
-    VarName = 'Accumulated Potential Evaporation'
     SName = 'pevap'
     SNameOut = 'pevap'
     
@@ -475,7 +512,6 @@ elif data == 'precip':
     indvid_fn = 'apcp.'
     OutFile = 'accumulated_precipitation.NARR.CONUS.weekly.nc'
     
-    VarName = 'Accumulated Precipitation'
     SName = 'apcp'
     SNameOut = 'precip'
     
@@ -487,19 +523,25 @@ else: # The remaining scenario is data = soilmoist
     indvid_fn = 'soill.'
     OutFile = 'soil_moisture.NARR.CONUS.weekly.nc'
     
-    VarName = 'Liquid Volumetic Soil Moisture'
     SName = 'soill'
     SNameOut = 'soilm'
     
     description = ''
-    
+
+
+
+
 # Constuct the filenames
+print('Constructing filenames')
 for n in range(len(filenames)):
     if data == 'soilmoist': # Soil moisture data is monthly
         filenames[n] = indvid_fn + str(np.unique(years)[n]) + str(np.unique(months)[n]) + '.nc'
     else: # All other files are yearly
         filenames[n] = indvid_fn + str(np.unique(years)[n]) + '.nc'
         
+
+
+
 
 # Load a sample file to get dimesions
 examp = LoadNC(SName = 'soill', filename = 'soill.197901.nc', sm = True, path = './Data/Raw/Liquid_VSM/')
@@ -509,53 +551,81 @@ T = dates.size
 # Initialize the combined data
 RawData = np.ones((T, I, J)) * np.nan
 
+
+
+
 # Load all the data for the chosen variable.
+print('Loading files')
 t = 0
 for fn in filenames:
     if data == 'soilmoist': # Soil moisture data files are monthly, and first 3 levels (0 - 40 cm) need to be averaged
-        X = LoadNC(SName = SName, filename = fn, sm = False, path = path)
-        VarTime = X[str(SName)].shape[0]
-        RawData[t:t+VarTime,:,:] = np.nanmean(X[str(SName)][:,0:2,:,:], axis = 1)
+        X = LoadNC(SName = SName, filename = fn, sm = True, path = path)
+        DailyX = DailyMean(np.nanmean(X[str(SName)][:,0:2,:,:], axis = 1), summation = False)
         
-        t = t + VarTime + 1
+        
+    elif (data == 'evap') | (data == 'pevap') | (data == ' precip'):
+        X = LoadNC(SName = SName, filename = fn, sm = False, path = path)
+        DailyX = DailyMean(X[str(SName)][:,:,:], summation = True)
         
     else:
         X = LoadNC(SName = SName, filename = fn, sm = False, path = path)
-        VarTime = X[str(SName)].shape[0]
-        RawData[t:t+VarTime,:,:] = X[str(SName)][:,:,:]
-        
-        t = t + VarTime + 1
-        
+        DailyX = DailyMean(X[str(SName)][:,:,:], summation = False)
+
+    VarTime = DailyX.shape[0]
+    RawData[t:t+VarTime,:,:] = DailyX[:,:,:] # slices are not inclusive at the end id10t.
+    
+    t = t + VarTime
+
+
+
+
 # Delete leap days for simplicity
+print('Removing leap days')
+    
 ind = np.where( (months == 2) & (days == 29) )[0]
-RawData[ind,:,:] = []
-dates[ind] = []
+RawData = np.delete(RawData, ind, axis = 0)
+dates = np.delete(dates, ind, axis = 0)
+T = dates.size
+
+
+
 
 # Correct longitudes
+print('Correcting longitudes')
+
 for i in range(len(X['lon'][:,0])):
     ind = np.where( X['lon'][i,:] > 0 )[0]
     X['lon'][i,ind] = -1*X['lon'][i,ind]
     
+
+
+
     
 # Average or sum data to a weekly timescale.
-DataWeekly = np.ones((T/7, I, J)) * np.nan
+print('Reducing data to weekly timescale')
+DataWeekly = np.ones((int(T/7), I, J)) * np.nan
 
 for t in range(int(T/7)):
     if (data == 'evap') | (data == 'pevap') | (data == ' precip'):
-        DataWeekly[t,:,:] = np.nansum(RawData[n:n+6,:,:])
+        DataWeekly[t,:,:] = np.nansum(RawData[n:n+7,:,:])
     else:
-        DataWeekly[t,:,:] = np.nanmean(RawData[n:n+6,:,:])
+        DataWeekly[t,:,:] = np.nanmean(RawData[n:n+7,:,:])
         
     n = n + 7
 
+
+
+
 # Make the time variable last in the list
-DataWeeklyT = np.ones((I, J, T/7)) * np.nan
+DataWeeklyT = np.ones((I, J, int(T/7))) * np.nan
 for t in range(int(T/7)):
     DataWeeklyT[:,:,t] = DataWeekly[t,:,:]
 
 
 
+
 # Subset the data to focus on the U.S.
+print('Subsetting data')
 LatMin = 25
 LatMax = 50
 LonMin = -130
@@ -566,16 +636,18 @@ DataProcessed, LatSub, LonSub = SubsetData(DataWeeklyT, X['lat'], X['lon'],
                                            LonMin = LonMin, LonMax = LonMax)
 
 
+
+
+
 # Write the data to a file.
+print('Writing data')
 OutPath = './Data/Processed_Data/'
 if data == 'soilmoist':
     WriteNC(DataProcessed, LatSub, LonSub, dates, filename = OutFile, sm = True, 
-            VarName = VarName, VarSName = SNameOut, description = description, 
-            path = OutPath)
+            VarSName = SNameOut, description = description, path = OutPath)
 else: 
     WriteNC(DataProcessed, LatSub, LonSub, dates, filename = OutFile, sm = False, 
-            VarName = VarName, VarSName = SNameOut, description = description, 
-            path = OutPath)
+            VarSName = SNameOut, description = description, path = OutPath)
 
 # Repeat this cell for all NARR variables collected.
 
