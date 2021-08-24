@@ -482,7 +482,21 @@ if data == 'temp':
     SName = 'air'
     SNameOut = 'temp'
     
-    description = ''
+    description = 'This file contains the 2m temperature (K) data from the ' +\
+                  'North American Regional Reanalysis dataset. The data is ' +\
+                  'subsetted to focus on the contential U.S., and averaged to ' +\
+                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'Dec. 31 2020. Variables are:\n' +\
+                  'temp: Weekly average temperature (K) at 2 meters above ' +\
+                  'ground level. Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for temp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for temp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in temp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
     
 elif data == 'evap':
     path = './Data/Raw/Evaporation_accumulation/'
@@ -493,7 +507,21 @@ elif data == 'evap':
     SName = 'evap'
     SNameOut = 'evap'
     
-    description = ''
+    description = 'This file contains the evaporation (kg m^-2) data from the ' +\
+                  'North American Regional Reanalysis dataset. The data is ' +\
+                  'subsetted to focus on the contential U.S., and summed to ' +\
+                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'Dec. 31 2020. Variables are:\n' +\
+                  'evap: Weekly accumulation of evaporation (kg m^-2). ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for evap. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for evap. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in evap. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
     
 elif data == 'pevap':
     path = './Data/Raw/Potential_Evaporation_accumulation/'
@@ -504,7 +532,21 @@ elif data == 'pevap':
     SName = 'pevap'
     SNameOut = 'pevap'
     
-    description = ''
+    description = 'This file contains the potential evaporation (kg m^-2) data from the ' +\
+                  'North American Regional Reanalysis dataset. The data is ' +\
+                  'subsetted to focus on the contential U.S., and summed to ' +\
+                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'Dec. 31 2020. Variables are:\n' +\
+                  'pevap: Weekly accumulation of potential evaporation (kg m^-2). ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for pevap. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for pevap. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in pevap. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
     
 elif data == 'precip':
     path = './Data/Raw/Precipitation_accumulation/'
@@ -515,7 +557,21 @@ elif data == 'precip':
     SName = 'apcp'
     SNameOut = 'precip'
     
-    description = ''
+    description = 'This file contains the accumulated precipitation (kg m^-2) data from the ' +\
+                  'North American Regional Reanalysis dataset. The data is ' +\
+                  'subsetted to focus on the contential U.S., and summed to ' +\
+                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'Dec. 31 2020. Variables are:\n' +\
+                  'apcp: Weekly accumulation of precipitaiton (kg m^-2). ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
     
 else: # The remaining scenario is data = soilmoist
     path = './Data/Raw/Liquid_VSM/'
@@ -526,7 +582,22 @@ else: # The remaining scenario is data = soilmoist
     SName = 'soill'
     SNameOut = 'soilm'
     
-    description = ''
+    description = 'This file contains the 1 - 40 cm average volumetric soil moisture (fraction) data from the ' +\
+                  'North American Regional Reanalysis dataset. The data is ' +\
+                  'subsetted to focus on the contential U.S., and averaged to ' +\
+                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'Dec. 31 2020. Variables are:\n' +\
+                  'soil: Weekly average volumetric soil moisture (fraction) between 1 - 40 cm depths. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for soilm. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for soilm. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in soilm. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.\n' +\
+                  'level: A string giving the soil depth over which soilm was averaged.'
 
 
 
@@ -554,13 +625,13 @@ RawData = np.ones((T, I, J)) * np.nan
 
 
 
-# Load all the data for the chosen variable.
+# Load all the data for the chosen variable and reduce it to the daily timescale.
 print('Loading files')
 t = 0
 for fn in filenames:
     if data == 'soilmoist': # Soil moisture data files are monthly, and first 3 levels (0 - 40 cm) need to be averaged
         X = LoadNC(SName = SName, filename = fn, sm = True, path = path)
-        DailyX = DailyMean(np.nanmean(X[str(SName)][:,0:2,:,:], axis = 1), summation = False)
+        DailyX = DailyMean(np.nanmean(X[str(SName)][:,0:3,:,:], axis = 1), summation = False)
         
         
     elif (data == 'evap') | (data == 'pevap') | (data == ' precip'):
@@ -572,7 +643,7 @@ for fn in filenames:
         DailyX = DailyMean(X[str(SName)][:,:,:], summation = False)
 
     VarTime = DailyX.shape[0]
-    RawData[t:t+VarTime,:,:] = DailyX[:,:,:] # slices are not inclusive at the end id10t.
+    RawData[t:t+VarTime,:,:] = DailyX[:,:,:]
     
     t = t + VarTime
 
@@ -605,11 +676,12 @@ for i in range(len(X['lon'][:,0])):
 print('Reducing data to weekly timescale')
 DataWeekly = np.ones((int(T/7), I, J)) * np.nan
 
+n = 0
 for t in range(int(T/7)):
     if (data == 'evap') | (data == 'pevap') | (data == ' precip'):
-        DataWeekly[t,:,:] = np.nansum(RawData[n:n+7,:,:])
+        DataWeekly[t,:,:] = np.nansum(RawData[n:n+7,:,:], axis = 0)
     else:
-        DataWeekly[t,:,:] = np.nanmean(RawData[n:n+7,:,:])
+        DataWeekly[t,:,:] = np.nanmean(RawData[n:n+7,:,:], axis = 0)
         
     n = n + 7
 
@@ -643,10 +715,10 @@ DataProcessed, LatSub, LonSub = SubsetData(DataWeeklyT, X['lat'], X['lon'],
 print('Writing data')
 OutPath = './Data/Processed_Data/'
 if data == 'soilmoist':
-    WriteNC(DataProcessed, LatSub, LonSub, dates, filename = OutFile, sm = True, 
+    WriteNC(DataProcessed, LatSub, LonSub, dates[::7], filename = OutFile, sm = True, 
             VarSName = SNameOut, description = description, path = OutPath)
 else: 
-    WriteNC(DataProcessed, LatSub, LonSub, dates, filename = OutFile, sm = False, 
+    WriteNC(DataProcessed, LatSub, LonSub, dates[::7], filename = OutFile, sm = False, 
             VarSName = SNameOut, description = description, path = OutPath)
 
 # Repeat this cell for all NARR variables collected.
@@ -654,8 +726,57 @@ else:
 
 
 
+#%%
+# cell 11
+# Plot some of the data to test it and check for errors.
+
+# Lonitude and latitude tick information
+lat_int = 15
+lon_int = 10
+
+lat_label = np.arange(-90, 90, lat_int)
+lon_label = np.arange(-180, 180, lon_int)
+
+#lon_formatter = cticker.LongitudeFormatter()
+#lat_formatter = cticker.LatitudeFormatter()
+
+# Projection information
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Colorbar information
+cmin = 260; cmax = 310; cint = 5.0 # Temperature values
+clevs = np.arange(cmin, cmax+cint, cint)
+nlevs = len(clevs) - 1
+cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Figure
+fig = plt.figure(figsize = [12, 16])
+ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+ax.coastlines()
+
+ax.set_xticks(lon_label, crs = ccrs.PlateCarree())
+ax.set_yticks(lat_label, crs = ccrs.PlateCarree())
+ax.set_xticklabels(lon_label, fontsize = 16)
+ax.set_yticklabels(lat_label, fontsize = 16)
+
+ax.xaxis.tick_bottom()
+ax.yaxis.tick_left()
 
 
+cs = ax.contourf(LonSub, LatSub, DataProcessed[:,:,-1], levels = clevs, cmap = cmap,
+                  transform = data_proj, extend = 'both', zorder = 1)
+
+cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbar = fig.colorbar(cs, cax = cbax)
+
+ax.set_extent([LonMin, LonMax, LatMin, LatMax], crs = fig_proj)
+
+plt.show(block = False)
 
 
 
