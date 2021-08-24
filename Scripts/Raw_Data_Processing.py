@@ -91,24 +91,13 @@ def LoadNC(SName, filename, sm = False, path = './Data/Raw/'):
         # Load the grid
         lat = nc.variables['lat'][:,:]
         lon = nc.variables['lon'][:,:]
-#        lat = nc.variables['lat'][:]
-#        lon = nc.variables['lon'][:]
-#        
-#        lon, lat = np.meshgrid(lon, lat)
-#        
+
         X['lat'] = lat
         X['lon'] = lon
         
         # Collect the time information
         time = nc.variables['time'][:]
         X['time'] = time
-        # dates = np.asarray([datetime.strptime(time[d], DateFormat) for d in range(len(time))])
-        
-        # X['date'] = dates
-        # X['year']  = np.asarray([d.year for d in dates])
-        # X['month'] = np.asarray([d.month for d in dates])
-        # X['day']   = np.asarray([d.day for d in dates])
-        # X['ymd']   = np.asarray([datetime(d.year, d.month, d.day) for d in dates])
 
         # Collect the data itself
         if sm is True:
@@ -161,15 +150,9 @@ def WriteNC(var, lat, lon, dates, filename = 'tmp.nc', sm = False, VarSName = 't
         nc.createDimension('y', size = J)
         nc.createDimension('time', size = T)
         
-        # Create the lat and lon variables
-        # nc.createVariable('lat', lat.dtype, ('lat', ))
-        # nc.createVariable('lon', lon.dtype, ('lon', ))
-        
+        # Create the lat and lon variables       
         nc.createVariable('lat', lat.dtype, ('x', 'y'))
         nc.createVariable('lon', lon.dtype, ('x', 'y'))
-        
-        # nc.variables['lat'][:] = lat[:]
-        # nc.variables['lon'][:] = lon[:]
         
         nc.variables['lat'][:,:] = lat[:,:]
         nc.variables['lon'][:,:] = lon[:,:]
@@ -394,8 +377,6 @@ lon_int = 10
 lat_label = np.arange(-90, 90, lat_int)
 lon_label = np.arange(-180, 180, lon_int)
 
-#lon_formatter = cticker.LongitudeFormatter()
-#lat_formatter = cticker.LatitudeFormatter()
 
 # Projection information
 data_proj = ccrs.PlateCarree()
@@ -740,8 +721,6 @@ lon_int = 10
 lat_label = np.arange(-90, 90, lat_int)
 lon_label = np.arange(-180, 180, lon_int)
 
-#lon_formatter = cticker.LongitudeFormatter()
-#lat_formatter = cticker.LatitudeFormatter()
 
 # Projection information
 data_proj = ccrs.PlateCarree()
