@@ -329,7 +329,6 @@ def DateRange(StartDate, EndDate):
     '''
     for n in range(int((EndDate - StartDate).days) + 1):
         yield StartDate + timedelta(n) 
-        
 
 #%%
 # cell 7
@@ -451,11 +450,11 @@ for n in dir():
         
 
 # Determine which variable is being processed.
-data = 'temp'
+# data = 'temp'
 # data = 'evap'
 # data = 'pevap'
 # data = 'precip'
-# data = 'soilmoist'
+data = 'soilmoist'
 
 # Create a range of datetimes
 print('Constructing dates')
@@ -469,6 +468,7 @@ days   = np.asarray([date.day for date in dates])
 NumYears  = len(np.unique(years))
 NumMonths = len(np.unique(months))
 
+YearMonths = np.array([datetime(year, month, 1) for year in np.unique(years) for month in np.unique(months)]) # Create a datetime that iterate 1 month per time step
 
 
 
@@ -606,7 +606,10 @@ else: # The remaining scenario is data = soilmoist
 print('Constructing filenames')
 for n in range(len(filenames)):
     if data == 'soilmoist': # Soil moisture data is monthly
-        filenames[n] = indvid_fn + str(np.unique(years)[n]) + str(np.unique(months)[n]) + '.nc'
+        if YearMonths[n].month < 10:
+            filenames[n] = indvid_fn + str(YearMonths[n].year) + '0' + str(YearMonths[n].month) + '.nc'
+        else:
+            filenames[n] = indvid_fn + str(YearMonths[n].year) + str(YearMonths[n].month) + '.nc'
     else: # All other files are yearly
         filenames[n] = indvid_fn + str(np.unique(years)[n]) + '.nc'
         
@@ -745,7 +748,10 @@ data_proj = ccrs.PlateCarree()
 fig_proj  = ccrs.PlateCarree()
 
 # Colorbar information
-cmin = 260; cmax = 310; cint = 5.0 # Temperature values
+# cmin = 260; cmax = 310; cint = 5.0 # Temperature values
+# cmin = 0; cmax = 50; cint = 1 # Evaporation and potential evaporation values
+# cmin = 0; cmax = 2; cint = 0.1 # Accumulated precipitation values
+cmin = 0; cmax = 0.5; cint = 0.05 # Volumetric soil moisture values
 clevs = np.arange(cmin, cmax+cint, cint)
 nlevs = len(clevs) - 1
 cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
