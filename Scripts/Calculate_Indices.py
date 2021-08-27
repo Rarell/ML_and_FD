@@ -17,6 +17,18 @@ Flash drought indices emitted:
        anomalies in ET and f_PET [= ET/PET] will be referred to as the evapotranspiration
        index (ETI) and ESI, respectively." (Section 2. a. 1), paragraph 3) This means the 
        ESI is identical to SESR and is thus omitted from calculations here.
+
+
+
+Full citations for the referenced papers can be found at:
+- Christian et al. 2019 (for SESR): https://doi.org/10.1175/JHM-D-18-0198.1
+- Hobbins et al. 2016 (for EDDI): https://doi.org/10.1175/JHM-D-15-0121.1
+- Li et al. 2020a (for SEDI): https://doi.org/10.1016/j.catena.2020.104763
+- Li et al. 2020b (for SAPEI): https://doi.org/10.1175/JHM-D-19-0298.1
+- Hunt et al. 2009 (for SMI): https://doi.org/10.1002/joc.1749
+- Otkin et al. 2021 (for FDII): https://doi.org/10.3390/atmos12060741
+- Vicente-Serrano et al. 2010 (for SPEI): https://doi.org/10.1175/2009JCLI2909.1
+- Anderson et al. 2013 (for ESI): https://doi.org/10.1175/2010JCLI3812.1
 """
 
 
@@ -267,6 +279,8 @@ OutPath = './Data/Indices/'
 ### Calculate SESR ###
 ######################
 
+# Details in SESR can be found in the Christian et al. 2019 paper.
+
 # Obtain the evaporative stress ratio (ESR); the ratio of ET to PET
 ESR = ET['evap']/PET['pevap']
 
@@ -388,6 +402,7 @@ plt.show(block = False)
 ### Calculate EDDI ###
 ######################
 
+# Details are found in the Hobbins et al. 2016 paper.
 
 # Initialize the set of probabilities of getting a certain PET.
 I, J, T = PET['pevap'].shape
@@ -543,11 +558,134 @@ plt.show(block = False)
 #%%
 # cell 11
 
+######################
+### Calculate SEDI ###
+######################
+
+# Details on SEDI can be found in the Li et al. 2020a paper.
+
+# Where SESR is the standardized ratio of ET to PET, SEDI is the standardardized difference of ET to PET
+ED = ET['evap'] - PET['pevap']
+
+EDMean, EDstd = CalculateClimatology(ED, week = True)
+
+# Calculate SEDI; it is the standardized ED
+I, J, T = ED.shape
+
+SEDI = np.ones((I, J, T)) * np.nan
+
+for n, date in enumerate(OneYear[::7]):
+    ind = np.where( (date.month == ET['month']) & (date.day == ET['day']) )[0]
+    
+    for t in ind:
+        SEDI[:,:,t] = (ED[:,:,t] - EDMean[:,:,n])/EDstd[:,:,n]
+        
+        
+# Write the SESR data
+description = 'This file contains the standardized evapotranspiration deficit index ' +\
+                  '(SEDI; unitless), calculated from evaporation and potential ' +\
+                  'evaporation from the North American Regional Reanalysis ' +\
+                  'dataset. Details on SESR and its calculations can be found ' +\
+                  'in Li et al. 2020 (https://doi.org/10.1016/j.catena.2020.104763). ' +\
+                  'The data is subsetted to focus on the contential ' +\
+                  'U.S., and it is on the weekly timescale. Data ranges form ' +\
+                  'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
+                  'sedi: Weekly SESR (unitless) data. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
+
+
+WriteNC(SEDI, ET['lat'], ET['lon'], ET['date'], filename = 'sedi.NARR.CONUS.weekly.nc', 
+        VarSName = 'sedi', description = description, path = OutPath)
+
+#%%
+# cell 12
+# Create a plot of SEDI to check calculations
+
+# Determine the date to be examined
+ExamineDate = datetime(2012, 8, 1)
+
+ind = np.where(PET['ymd'] == ExamineDate)[0]
+
+
+
+# Lonitude and latitude tick information
+lat_int = 10
+lon_int = 10
+
+lat_label = np.arange(-90, 90, lat_int)
+lon_label = np.arange(-180, 180, lon_int)
+
+LonFormatter = cticker.LongitudeFormatter()
+LatFormatter = cticker.LatitudeFormatter()
+
+# Projection information
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Colorbar information
+cmin = -3; cmax = 3; cint = 0.5
+clevs = np.arange(cmin, cmax+cint, cint)
+nlevs = len(clevs) - 1
+cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Create the figure
+fig = plt.figure(figsize = [12, 16])
+ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+# Set title
+ax.set_title('SEDI for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+
+# Set borders
+ax.coastlines()
+ax.add_feature(cfeature.STATES, edgecolor = 'black')
+
+# Set tick information
+ax.set_xticks(lon_label, crs = ccrs.PlateCarree())
+ax.set_yticks(lat_label, crs = ccrs.PlateCarree())
+ax.set_xticklabels(lon_label, fontsize = 16)
+ax.set_yticklabels(lat_label, fontsize = 16)
+
+ax.xaxis.set_major_formatter(LonFormatter)
+ax.yaxis.set_major_formatter(LatFormatter)
+
+ax.xaxis.tick_bottom()
+ax.yaxis.tick_left()
+
+# Plot the data
+cs = ax.contourf(ET['lon'], ET['lat'], SEDI[:,:,ind], levels = clevs, cmap = cmap,
+                  transform = data_proj, extend = 'both', zorder = 1)
+
+# Create and set the colorbar
+cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbar = fig.colorbar(cs, cax = cbax)
+
+# Set the extent
+ax.set_extent([-130, -65, 25, 50], crs = fig_proj)
+
+plt.show(block = False)
+
+
+
+
+#%%
+# cell 13
+
 #######################
 ### Calculate SAPEI ###
 #######################
 
-
+# Details for SAPEI can be found in the Li et al. 2020b paper.
 
 
 
