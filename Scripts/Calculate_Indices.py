@@ -46,6 +46,7 @@ import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import cartopy.mpl.ticker as cticker
 from scipy import stats
+from scipy.special import gamma
 from netCDF4 import Dataset, num2date
 from datetime import datetime, timedelta
 
@@ -692,10 +693,209 @@ plt.show(block = False)
 
 
 
+#%%
+# cell 15
+
+######################
+### Calculate SPEI ###
+######################
+
+# Details for SPEI can be found in the Vicente-Serrano et al. 2010 paper.
+
+# Determine the moisture deficit
+D = P['precip'] - PET['pevap']
+
+# Initialize some needed variables.
+I, J, T = P['precip'].size
+N = np.unique(P['year']) # Number of observations per time series
+
+frequencies = np.ones((I, J, T)) * np.nan
+PWM0 = np.ones((I, J, OneYear.size)) * np.nan # Probability weighted moment of 0
+PWM1 = np.ones((I, J, OneYear.size)) * np.nan # Probability weighted moment of 1
+PWM2 = np.ones((I, J, OneYear.size)) * np.nan # Probability weighted moment of 2
+
+# Determine the frequency estimator and moments according to equation in section 3 of the Vicente-Serrano et al. 2010 paper
+for t, date in enumerate(OneYear):
+    ind = np.where( (P['month'] == date.month) & (P['day'] == date.day) )[0]
+    
+    # Get the frequency estimator
+    frequencies[:,:,ind] = (stats.mstats.rankdata(D[:,:,ind]) - 0.35)/N
+    
+    # Get the moments
+    PWM0[:,:,t] = np.nansum(((1 - frequencies[:,:,ind])**0)*D[:,:,ind], axis = -1)/N
+    PWM1[:,:,t] = np.nansum(((1 - frequencies[:,:,ind])**1)*D[:,:,ind], axis = -1)/N
+    PWM2[:,:,t] = np.nansum(((1 - frequencies[:,:,ind])**2)*D[:,:,ind], axis = -1)/N
+
+
+
+# Calculate the parameters of log-logistic distribution, using the equations in the Vicente-Serrano et al. 2010 paper
+alpha = np.ones((I, J, OneYear.size)) * np.nan # Scale parameter
+beta  = np.ones((I, J, OneYear.size)) * np.nan # Shape parameter
+gamm  = np.ones((I, J, OneYear.size)) * np.nan # Origin parameter; not gamm refers to the gamma parameter, but preserves the name gamma for the imported gamam function.
+
+beta  = (2*PWM1 - PWM0)/(6*PWM1 - PWM0 - 6*PWM2)
+alpha = (PWM0 - 2*PWM1)*beta/(gamma(1 + 1/beta)*gamma(1-1/beta))
+gamm  = PWM0 - (PWM0 - 2*PWM1)*beta
+
+# Obtain the cumulative distribution of the deficit.
+F = (1 + (alpha/(D - gamm))**beta)**-1
+
+
+# Finally, use this to obtain the probabilities and convert the data to a standardized normal distribution
+prob = 1 - F
+SPEI = np.ones((I, J, T)) * np.nan
+
+# Define the constants given in Vicente-Serrano et al. 2010
+C0 = 2.515517
+C1 = 0.802853
+C2 = 0.010328
+
+d1 = 1.432788
+d2 = 0.189269
+d3 = 0.001308    
+    
+# Reorder data to reduce number of embedded loops
+prob2d = prob.reshape(I*J, T, order = 'F')
+SPEI2d = SPEI.reshape(I*J, T, order = 'F')
+
+
+# Calculate SPEI based on the inverse normal approximation given in Vicente-Serrano et al. 2010, Sec. 3
+SPEISign = 1
+for ij in range(I*J):
+    for t in range(T):
+        if prob2d[ij,t] <= 0.5:
+            prob2d[ij,t] = prob2d[ij,t]
+            EDDISign = 1
+        else:
+            prob2d[ij,t] = 1 - prob2d[ij,t]
+            EDDISign = -1
+            
+        W = np.sqrt(-2 * np.log(prob2d[ij,t]))
+        
+        SPEI2d[ij,t] = SPEISign * (W - (C0 + C1 * W + C2 * (W**2))/(1 + d1 * W + d2 * (W**2) + d3 * (W**3)))
+        
+# Reorder the data back to 3D
+SPEI = SPEI2d.reshape(I, J, T, order = 'F')
+
+
+# Write the SPEI data
+description = 'This file contains the standardized precipitation evapotranspiration index ' +\
+                  '(SPEI; unitless), calculated from precipitation and potential ' +\
+                  'evaporation from the North American Regional Reanalysis ' +\
+                  'dataset. Details on SPEI and its calculations can be found ' +\
+                  'in Vicente-Serrano et al. 2010 (https://doi.org/10.1175/2009JCLI2909.1). ' +\
+                  'The data is subsetted to focus on the contential ' +\
+                  'U.S., and it is on the weekly timescale. Data ranges form ' +\
+                  'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
+                  'eddi: Weekly EDDI (unitless) data. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
+
+
+WriteNC(SPEI, P['lat'], P['lon'], P['date'], filename = 'spei.NARR.CONUS.weekly.nc', 
+        VarSName = 'spei', description = description, path = OutPath)
 
 
 
 
+#%%
+# cell 16
+# Create a plot of EDDI to check the calculations
+
+# Determine the date to be examined
+ExamineDate = datetime(2012, 8, 1)
+
+ind = np.where(P['ymd'] == ExamineDate)[0]
+
+
+
+# Lonitude and latitude tick information
+lat_int = 10
+lon_int = 10
+
+lat_label = np.arange(-90, 90, lat_int)
+lon_label = np.arange(-180, 180, lon_int)
+
+LonFormatter = cticker.LongitudeFormatter()
+LatFormatter = cticker.LatitudeFormatter()
+
+# Projection information
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Colorbar information
+cmin = -3; cmax = 3; cint = 0.5
+clevs = np.arange(cmin, cmax+cint, cint)
+nlevs = len(clevs) - 1
+cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Create the figure
+fig = plt.figure(figsize = [12, 16])
+ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+# Set title
+ax.set_title('SPEI for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+
+# Set borders
+ax.coastlines()
+ax.add_feature(cfeature.STATES, edgecolor = 'black')
+
+# Set tick information
+ax.set_xticks(lon_label, crs = ccrs.PlateCarree())
+ax.set_yticks(lat_label, crs = ccrs.PlateCarree())
+ax.set_xticklabels(lon_label, fontsize = 16)
+ax.set_yticklabels(lat_label, fontsize = 16)
+
+ax.xaxis.set_major_formatter(LonFormatter)
+ax.yaxis.set_major_formatter(LatFormatter)
+
+ax.xaxis.tick_bottom()
+ax.yaxis.tick_left()
+
+# Plot the data
+cs = ax.contourf(P['lon'], P['lat'], SPEI[:,:,ind], levels = clevs, cmap = cmap,
+                  transform = data_proj, extend = 'both', zorder = 1)
+
+# Create and set the colorbar
+cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbar = fig.colorbar(cs, cax = cbax)
+
+# Set the extent
+ax.set_extent([-130, -65, 25, 50], crs = fig_proj)
+
+plt.show(block = False)
+
+#%%
+# cell 17
+
+#####################
+### Calculate SMI ###
+#####################
+
+# Details for SMI can be found in the Hunt et al. 2009 paper.
+
+
+
+
+
+#%%
+# cell 19
+
+######################
+### Calculate FDII ###
+######################
+
+# Details for FDII can be found in the Otkin et al. 2021 paper.
 
 
 
