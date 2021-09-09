@@ -172,7 +172,7 @@ def WriteNC(var, lat, lon, dates, filename = 'tmp.nc', VarSName = 'tmp', descrip
 # cell 4
 # Calculate the climatological means and standard deviations
   
-def CalculateClimatology(var, week = True):
+def CalculateClimatology(var, pentad = True):
     '''
     The function takes in a 3 dimensional variable (2 dimensional space and time)
     and calculates climatological values (mean and standard deviation) for each
@@ -197,8 +197,8 @@ def CalculateClimatology(var, week = True):
     I, J, T = var.shape
     
     # Count the number of years
-    if week is True:
-        yearLen = int(365/7)
+    if pentad is True:
+        yearLen = int(365/5)
     else:
         yearLen = int(365)
         
@@ -255,11 +255,15 @@ def DateRange(StartDate, EndDate):
 
 path = './Data/Processed_Data/'
 
-T   = LoadNC('temp', 'temperature_2m.NARR.CONUS.weekly.nc', sm = False, path = path)
-ET  = LoadNC('evap', 'evaporation.NARR.CONUS.weekly.nc', sm = False, path = path)
-PET = LoadNC('pevap', 'potential_evaporation.NARR.CONUS.weekly.nc', sm = False, path = path)
-P   = LoadNC('precip', 'accumulated_precipitation.NARR.CONUS.weekly.nc', sm = False, path = path)
-SM  = LoadNC('soilm', 'soil_moisture.NARR.CONUS.weekly.nc', sm = True, path = path)
+T    = LoadNC('temp', 'temperature_2m.NARR.CONUS.pentad.nc', sm = False, path = path)
+ET   = LoadNC('evap', 'evaporation.NARR.CONUS.pentad.nc', sm = False, path = path)
+PET  = LoadNC('pevap', 'potential_evaporation.NARR.CONUS.pentad.nc', sm = False, path = path)
+P    = LoadNC('precip', 'accumulated_precipitation.NARR.CONUS.pentad.nc', sm = False, path = path)
+SM   = LoadNC('soilm', 'soil_moisture.NARR.CONUS.pentad.nc', sm = True, path = path)
+SM00 = LoadNC('soilm', 'soil_moisture.00cm.NARR.CONUS.pentad.nc', sm = True, path = path)
+SM10 = LoadNC('soilm', 'soil_moisture.10cm.NARR.CONUS.pentad.nc', sm = True, path = path)
+SM40 = LoadNC('soilm', 'soil_moisture.40cm.NARR.CONUS.pentad.nc', sm = True, path = path)
+
 
 
 # In addition, calculate a datetime array that is 1 year in length
@@ -286,7 +290,7 @@ OutPath = './Data/Indices/'
 ESR = ET['evap']/PET['pevap']
 
 # Determine the climatological mean and standard deviations of ESR
-ESRMean, ESRstd = CalculateClimatology(ESR, week = True)
+ESRMean, ESRstd = CalculateClimatology(ESR, pentad = True)
 
 # Calculate SESR; it is the standardized ESR
 I, J, T = ESR.shape
@@ -309,7 +313,7 @@ description = 'This file contains the standardized evaporative stress ratio ' +\
                   'The data is subsetted to focus on the contential ' +\
                   'U.S., and it is on the weekly timescale. Data ranges form ' +\
                   'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
-                  'sesr: Weekly SESR (unitless) data. ' +\
+                  'sesr: Pentad SESR (unitless) data. ' +\
                   'Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for apcp. ' +\
                   'Variable format is x by y.\n' +\
@@ -321,7 +325,7 @@ description = 'This file contains the standardized evaporative stress ratio ' +\
                   'simplicity. Variable format is time.'
 
 
-WriteNC(SESR, ET['lat'], ET['lon'], ET['date'], filename = 'sesr.NARR.CONUS.weekly.nc', 
+WriteNC(SESR, ET['lat'], ET['lon'], ET['date'], filename = 'sesr.NARR.CONUS.pentad.nc', 
         VarSName = 'sesr', description = description, path = OutPath)
 
 
@@ -466,7 +470,7 @@ description = 'This file contains the evaporative demand drought index ' +\
                   'The data is subsetted to focus on the contential ' +\
                   'U.S., and it is on the weekly timescale. Data ranges form ' +\
                   'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
-                  'eddi: Weekly EDDI (unitless) data. ' +\
+                  'eddi: Pentad EDDI (unitless) data. ' +\
                   'Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for apcp. ' +\
                   'Variable format is x by y.\n' +\
@@ -478,7 +482,7 @@ description = 'This file contains the evaporative demand drought index ' +\
                   'simplicity. Variable format is time.'
 
 
-WriteNC(EDDI, PET['lat'], PET['lon'], PET['date'], filename = 'eddi.NARR.CONUS.weekly.nc', 
+WriteNC(EDDI, PET['lat'], PET['lon'], PET['date'], filename = 'eddi.NARR.CONUS.pentad.nc', 
         VarSName = 'eddi', description = description, path = OutPath)
 
 
@@ -568,7 +572,7 @@ plt.show(block = False)
 # Where SESR is the standardized ratio of ET to PET, SEDI is the standardardized difference of ET to PET
 ED = ET['evap'] - PET['pevap']
 
-EDMean, EDstd = CalculateClimatology(ED, week = True)
+EDMean, EDstd = CalculateClimatology(ED, pentad = True)
 
 # Calculate SEDI; it is the standardized ED
 I, J, T = ED.shape
@@ -586,12 +590,12 @@ for n, date in enumerate(OneYear[::7]):
 description = 'This file contains the standardized evapotranspiration deficit index ' +\
                   '(SEDI; unitless), calculated from evaporation and potential ' +\
                   'evaporation from the North American Regional Reanalysis ' +\
-                  'dataset. Details on SESR and its calculations can be found ' +\
+                  'dataset. Details on SEDI and its calculations can be found ' +\
                   'in Li et al. 2020 (https://doi.org/10.1016/j.catena.2020.104763). ' +\
                   'The data is subsetted to focus on the contential ' +\
                   'U.S., and it is on the weekly timescale. Data ranges form ' +\
                   'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
-                  'sedi: Weekly SESR (unitless) data. ' +\
+                  'sedi: Pentad SEDI (unitless) data. ' +\
                   'Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for apcp. ' +\
                   'Variable format is x by y.\n' +\
@@ -603,7 +607,7 @@ description = 'This file contains the standardized evapotranspiration deficit in
                   'simplicity. Variable format is time.'
 
 
-WriteNC(SEDI, ET['lat'], ET['lon'], ET['date'], filename = 'sedi.NARR.CONUS.weekly.nc', 
+WriteNC(SEDI, ET['lat'], ET['lon'], ET['date'], filename = 'sedi.NARR.CONUS.pentad.nc', 
         VarSName = 'sedi', description = description, path = OutPath)
 
 #%%
@@ -784,12 +788,12 @@ SAPEI = SAPEI2d.reshape(I, J, T, order = 'F')
 description = 'This file contains the standardized antecedent precipitation evapotranspiration index ' +\
                   '(SAPEI; unitless), calculated from precipitation and potential ' +\
                   'evaporation from the North American Regional Reanalysis ' +\
-                  'dataset. Details on SPEI and its calculations can be found ' +\
+                  'dataset. Details on SAPEI and its calculations can be found ' +\
                   'in LI et al. 2020 (https://doi.org/10.1175/JHM-D-19-0298.1). ' +\
                   'The data is subsetted to focus on the contential ' +\
                   'U.S., and it is on the weekly timescale. Data ranges form ' +\
                   'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
-                  'eddi: Weekly EDDI (unitless) data. ' +\
+                  'sapei: Pentad SAPEI (unitless) data. ' +\
                   'Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for apcp. ' +\
                   'Variable format is x by y.\n' +\
@@ -801,7 +805,7 @@ description = 'This file contains the standardized antecedent precipitation evap
                   'simplicity. Variable format is time.'
 
 
-WriteNC(SAPEI, P['lat'], P['lon'], P['date'], filename = 'sapei.NARR.CONUS.weekly.nc', 
+WriteNC(SAPEI, P['lat'], P['lon'], P['date'], filename = 'sapei.NARR.CONUS.pentad.nc', 
         VarSName = 'sapei', description = description, path = OutPath)
 
 
@@ -844,7 +848,7 @@ fig = plt.figure(figsize = [12, 16])
 ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set title
-ax.set_title('SPEI for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+ax.set_title('SAPEI for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
 
 # Set borders
 ax.coastlines()
@@ -969,7 +973,7 @@ description = 'This file contains the standardized precipitation evapotranspirat
                   'The data is subsetted to focus on the contential ' +\
                   'U.S., and it is on the weekly timescale. Data ranges form ' +\
                   'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
-                  'eddi: Weekly EDDI (unitless) data. ' +\
+                  'spei: Pentad SPEI (unitless) data. ' +\
                   'Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for apcp. ' +\
                   'Variable format is x by y.\n' +\
@@ -981,7 +985,7 @@ description = 'This file contains the standardized precipitation evapotranspirat
                   'simplicity. Variable format is time.'
 
 
-WriteNC(SPEI, P['lat'], P['lon'], P['date'], filename = 'spei.NARR.CONUS.weekly.nc', 
+WriteNC(SPEI, P['lat'], P['lon'], P['date'], filename = 'spei.NARR.CONUS.pentad.nc', 
         VarSName = 'spei', description = description, path = OutPath)
 
 
@@ -1066,9 +1070,143 @@ plt.show(block = False)
 
 # Details for SMI can be found in the Hunt et al. 2009 paper.
 
+# In a similar vain to the Hunt et al. paper, SMI will be determined for 10, 25, and 40 cm averages of VSM
+# These are then averaged together.
+
+
+# Initialize some variables
+WPPercentile = 5
+FCPercentile = 95
+
+I, J, T = SM['soilm'].shape
+GrowInd = np.where( (SM['month'] >= 4) & (SM['month'] <= 10) )[0] # Percentiles are determined from growing season values.
+
+SMI = np.ones((I, J, T)) * np.nan
+
+# Reshape data into a 2D size.
+VSM_00_2d = SM00['soilm'].reshape(I*J, T, order = 'F')
+VSM_10_2d = SM10['soilm'].reshape(I*J, T, order = 'F')
+VSM_40_2d = SM40['soilm'].reshape(I*J, T, order = 'F')
+
+SMI2d = SMI.reshape(I*J, T, order = 'F')
+
+for ij in range(I*J):
+    # First determine the wilting point and field capacity. This is done by examining 5th and 95th percentiles.
+    VSM_WP_00 = stats.percentileofscore(VSM_00_2d[ij,GrowInd], WPPercentile)
+    VSM_WP_10 = stats.percentileofscore(VSM_10_2d[ij,GrowInd], WPPercentile)
+    VSM_WP_40 = stats.percentileofscore(VSM_40_2d[ij,GrowInd], WPPercentile)
+    
+    VSM_FC_00 = stats.percentileofscore(VSM_00_2d[ij,GrowInd], FCPercentile)
+    VSM_FC_10 = stats.percentileofscore(VSM_10_2d[ij,GrowInd], FCPercentile)
+    VSM_FC_40 = stats.percentileofscore(VSM_40_2d[ij,GrowInd], FCPercentile)
+    
+    # Determine the SMI at each level based on equation in section 1 of Hunt et al. 2009
+    SMI00 = -5 + 10*(VSM_00_2d[ij,:] - VSM_WP_00)/(VSM_FC_00 - VSM_WP_00)
+    SMI10 = -5 + 10*(VSM_10_2d[ij,:] - VSM_WP_10)/(VSM_FC_10 - VSM_WP_10)
+    SMI40 = -5 + 10*(VSM_40_2d[ij,:] - VSM_WP_40)/(VSM_FC_40 - VSM_WP_40)
+    
+    # Average these values together to get the full SMI
+    SMI2d[ij,:] = np.nanmean(np.concatenate((SMI00, SMI10, SMI40), axis = 1), axis = 1)
+    
+    
+# Reshape data back to a 3D array.
+SMI = SMI2d.reshape(I, J, T, order = 'F')
+
+
+# Write the SMI data
+description = 'This file contains the soil moisture index ' +\
+                  '(SMI; unitless), calculated from volumetric soil moisture ' +\
+                  'at depths of 0, 10, and 40 cm from the North American Regional Reanalysis ' +\
+                  'dataset. Details on SMI and its calculations can be found ' +\
+                  'in Hunt et al. 2009 (https://doi.org/10.1002/joc.1749). ' +\
+                  'The data is subsetted to focus on the contential ' +\
+                  'U.S., and it is on the weekly timescale. Data ranges form ' +\
+                  'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
+                  'smi: Pentad SMI (unitless) data. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
+
+
+WriteNC(SMI, SM['lat'], SM['lon'], SM['date'], filename = 'smi.NARR.CONUS.pentad.nc', 
+        VarSName = 'smi', description = description, path = OutPath)
+
+
+#%%
+# cell 18
+# Create a plot of SMI to check the calculations
+
+# Determine the date to be examined
+ExamineDate = datetime(2012, 8, 1)
+
+ind = np.where(P['ymd'] == ExamineDate)[0]
 
 
 
+# Lonitude and latitude tick information
+lat_int = 10
+lon_int = 10
+
+lat_label = np.arange(-90, 90, lat_int)
+lon_label = np.arange(-180, 180, lon_int)
+
+LonFormatter = cticker.LongitudeFormatter()
+LatFormatter = cticker.LatitudeFormatter()
+
+# Projection information
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Colorbar information
+cmin = -3; cmax = 3; cint = 0.5
+clevs = np.arange(cmin, cmax+cint, cint)
+nlevs = len(clevs) - 1
+cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Create the figure
+fig = plt.figure(figsize = [12, 16])
+ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+# Set title
+ax.set_title('SMI for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+
+# Set borders
+ax.coastlines()
+ax.add_feature(cfeature.STATES, edgecolor = 'black')
+
+# Set tick information
+ax.set_xticks(lon_label, crs = ccrs.PlateCarree())
+ax.set_yticks(lat_label, crs = ccrs.PlateCarree())
+ax.set_xticklabels(lon_label, fontsize = 16)
+ax.set_yticklabels(lat_label, fontsize = 16)
+
+ax.xaxis.set_major_formatter(LonFormatter)
+ax.yaxis.set_major_formatter(LatFormatter)
+
+ax.xaxis.tick_bottom()
+ax.yaxis.tick_left()
+
+# Plot the data
+cs = ax.contourf(SM['lon'], SM['lat'], SMI[:,:,ind], levels = clevs, cmap = cmap,
+                  transform = data_proj, extend = 'both', zorder = 1)
+
+# Create and set the colorbar
+cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbar = fig.colorbar(cs, cax = cbax)
+
+# Set the extent
+ax.set_extent([-130, -65, 25, 50], crs = fig_proj)
+
+plt.show(block = False)
 
 #%%
 # cell 19
@@ -1079,6 +1217,236 @@ plt.show(block = False)
 
 # Details for FDII can be found in the Otkin et al. 2021 paper.
 
+# Define some base constants
+PER_BASE = 15 # Minimum percentile drop in 4 pentads
+T_BASE   = 4
+DRO_BASE = 20 # Percentiles must be below the 20th percentile to be in drought
+
+# Next, FDII can be calculated with the standardized soil moisture, or percentiles.
+# Use percentiles for consistancy with Otkin et al. 2021
+I, J, T = SM['soilm'].shape
+SMPer = np.ones((I, J, T)) * np.nan
+
+SM2d    = SM['soilm'].reshape(I*J, T, order = 'F')
+SMPer2d = SMPer.reshape(I*J, T, order = 'F')
+
+for t in range(T):
+    ind = np.where( (SM['ymd'][t].day == SM['day']) & (SM['ymd'][t].month == SM['month']) )[0]
+    
+    for ij in range(I*J):
+        SMPer2d[ij,t] = stats.percentileofscore(SM2d[ij,ind], SM2d[ij,t])
+        
+# Determine the rapid intensification based on percentile changes based on equation 1 in Otkin et al. 2021 (and detailed in section 2.2 of the same paper)
+FD_INT = np.ones((I, J, T)) * np.nan
+FD_INT2d = FD_INT.reshape(I*J, T, order = 'F')
+
+for ij in range(I*J):
+    for t in range(T-2): # Note the last two day is excluded as there is no change to examine
+    
+        obs = np.ones((9)) * np.nan # Note, the method detail in Otkin et al. 2021 involves looking ahead 2 to 10 pentads (9 entries total)
+        for npend in np.arange(2, 10+1, 1):
+            npend = int(npend)
+            if (t+npend) > T: # If t + npend is in the future (beyond the dataset), break the loop and use NaNs for obs instead
+                break         # This should not effect results as this will only occur in November to December, outside of the growing season.
+            else:
+                obs[npend-2] = (SMPer2d[ij,t+npend] - SMPer2d[ij,t])/npend # Note m is the number of pentads the system is corrently looking ahead to.
+        
+        # If the maximum change in percentiles is less than the base change requirement (15 percentiles in 4 pentads), set FD_INT to 0.
+        #  Otherwise, determine FD_INT according to eq. 1 in Otkin et al. 2021
+        if np.nanmax(obs) < (PER_BASE/T_BASE):
+            FD_INT2d[ij,t] = 0
+        else:
+            FD_INT2d[ij,t] = ((PER_BASE/T_BASE)**(-1)) * np.nanmax(obs)
+            
+
+# Next determine the drought severity component using equation 2 in Otkin et al. 2021 (and detailed in section 2.2 of the same paper)
+DRO_SEV = np.ones((I, J ,T)) * np.nan
+DRO_SEV2d = DRO_SEV.reshape(I*J, T, order = 'F')
+
+DRO_SEV2d[:,0] = 0 # Initialize the first entry to 0, since there is no rapid intensification before it
+
+for ij in range(I*J):
+    for t in range(1, T-1):
+        if (FD_INT2d[ij,t] > 0) & (FD_INT2d[ij, t+1] == 0):
+            obs = np.ones((18)) * np.nan # In Otkin et al. 2021, the DRO_SEV can look up to 18 pentads (90 days) in the future for its calculation
+            
+            Dro_Sum = 0
+            for npent in np.arange(0, 18, 1):
+                
+                if (t+npend) > T:       # For simplicity, set DRO_SEV to 0 when near the end of the dataset (this should not impact anything as it is not in
+                    DRO_SEV2d[ij,t] = 0 # the growing season)
+                    break
+                else:
+                    if SMPer2d[ij,t+npent] > DRO_BASE: # Terminate the summation and calculate DRO_SEV if SM is no longer below the base percentile for drought
+                        if npent < 4:
+                            # DRO_SEV is set to 0 if drought was not consistent for at least 4 pentads after rapid intensificaiton (i.e., little to no impact)
+                            DRO_SEV2d[ij,t] = 0
+                            break
+                        else:
+                            DRO_SEV2d[ij,t] = Dro_Sum/npent
+                            break
+                            
+                    Dro_Sum = Dro_Sum + (DRO_BASE - SMPer2d[ij,t+npent])
+        
+        # In continuing consistency with Otkin et al. 2021, if the pentad does not immediately follow rapid intensification, drought is set 0
+        else:
+            DRO_SEV2d[ij,t] = 0
+            continue
+    
+# Reorder the data back into 3D data
+FD_INT  = FD_INT2d.reshape(I, J, T, order = 'F')
+DRO_SEV = DRO_SEV2d.reshape(I, J, T, order = 'F')
+
+# Finally, FDII is the product of the components
+FDII = FD_INT * DRO_SEV
+
+# Since FDII has its own rapid intensification and drought components pre-defined, it is worth saving these as well.
+
+# Save the FD_INT variable
+description = 'This file contains the rapid intensification component of FDII, ' +\
+                  'calculated from volumetric soil moisture averaged from ' +\
+                  'depths of 0 to 40 cm from the North American Regional Reanalysis ' +\
+                  'dataset. Details on FDII, its components, and their calculations can be found ' +\
+                  'in Otkin et al. 2021 (https://doi.org/10.3390/atmos12060741). ' +\
+                  'The data is subsetted to focus on the contential ' +\
+                  'U.S., and it is on the weekly timescale. Data ranges form ' +\
+                  'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
+                  'ric: Pentad FDII rapid intensification component (ric; unitless) data. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
+
+
+WriteNC(FD_INT, SM['lat'], SM['lon'], SM['date'], filename = 'fd_int.NARR.CONUS.pentad.nc', 
+        VarSName = 'ric', description = description, path = OutPath)
+
+
+# Save the DOR_SEV variable
+description = 'This file contains the drought component of FDII, ' +\
+                  'calculated from volumetric soil moisture averaged from ' +\
+                  'depths of 0 to 40 cm from the North American Regional Reanalysis ' +\
+                  'dataset. Details on FDII, its components, and their calculations can be found ' +\
+                  'in Otkin et al. 2021 (https://doi.org/10.3390/atmos12060741). ' +\
+                  'The data is subsetted to focus on the contential ' +\
+                  'U.S., and it is on the weekly timescale. Data ranges form ' +\
+                  'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
+                  'dc: Pentad FDII drought component (dc; unitless) data. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
+
+
+WriteNC(DRO_SEV, SM['lat'], SM['lon'], SM['date'], filename = 'dro_sev.NARR.CONUS.pentad.nc', 
+        VarSName = 'dc', description = description, path = OutPath)
+
+
+# Finally, save the FDII data
+description = 'This file contains the flash drought intensity index (FDII; unitless), ' +\
+                  'calculated from volumetric soil moisture averaged from ' +\
+                  'depths of 0 to 40 cm from the North American Regional Reanalysis ' +\
+                  'dataset. Details on FDII, its components, and their calculations can be found ' +\
+                  'in Otkin et al. 2021 (https://doi.org/10.3390/atmos12060741). ' +\
+                  'The data is subsetted to focus on the contential ' +\
+                  'U.S., and it is on the weekly timescale. Data ranges form ' +\
+                  'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
+                  'fdii: Pentad FDII (unitless) data. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
+
+
+WriteNC(FDII, SM['lat'], SM['lon'], SM['date'], filename = 'fdii.NARR.CONUS.pentad.nc', 
+        VarSName = 'fdii', description = description, path = OutPath)
+
+
+
+#%%
+# cell 20
+# Create a plot of FDII to check the calculations
+
+# Determine the date to be examined
+ExamineDate = datetime(2012, 8, 1)
+
+ind = np.where(P['ymd'] == ExamineDate)[0]
+
+
+
+# Lonitude and latitude tick information
+lat_int = 10
+lon_int = 10
+
+lat_label = np.arange(-90, 90, lat_int)
+lon_label = np.arange(-180, 180, lon_int)
+
+LonFormatter = cticker.LongitudeFormatter()
+LatFormatter = cticker.LatitudeFormatter()
+
+# Projection information
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Colorbar information
+cmin = -3; cmax = 3; cint = 0.5
+clevs = np.arange(cmin, cmax+cint, cint)
+nlevs = len(clevs) - 1
+cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Create the figure
+fig = plt.figure(figsize = [12, 16])
+ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+# Set title
+ax.set_title('FDII for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+
+# Set borders
+ax.coastlines()
+ax.add_feature(cfeature.STATES, edgecolor = 'black')
+
+# Set tick information
+ax.set_xticks(lon_label, crs = ccrs.PlateCarree())
+ax.set_yticks(lat_label, crs = ccrs.PlateCarree())
+ax.set_xticklabels(lon_label, fontsize = 16)
+ax.set_yticklabels(lat_label, fontsize = 16)
+
+ax.xaxis.set_major_formatter(LonFormatter)
+ax.yaxis.set_major_formatter(LatFormatter)
+
+ax.xaxis.tick_bottom()
+ax.yaxis.tick_left()
+
+# Plot the data
+cs = ax.contourf(SM['lon'], SM['lat'], FDII[:,:,ind], levels = clevs, cmap = cmap,
+                  transform = data_proj, extend = 'both', zorder = 1)
+
+# Create and set the colorbar
+cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbar = fig.colorbar(cs, cax = cbax)
+
+# Set the extent
+ax.set_extent([-130, -65, 25, 50], crs = fig_proj)
+
+plt.show(block = False)
 
 
 
