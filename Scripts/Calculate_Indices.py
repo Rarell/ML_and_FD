@@ -297,7 +297,7 @@ I, J, T = ESR.shape
 
 SESR = np.ones((I, J, T)) * np.nan
 
-for n, date in enumerate(OneYear[::7]):
+for n, date in enumerate(OneYear[::5]):
     ind = np.where( (date.month == ET['month']) & (date.day == ET['day']) )[0]
     
     for t in ind:
@@ -334,9 +334,9 @@ WriteNC(SESR, ET['lat'], ET['lon'], ET['date'], filename = 'sesr.NARR.CONUS.pent
 # Create a plot of SESR to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 8, 1)
+ExamineDate = datetime(2012, 7, 30)
 
-ind = np.where(ET['ymd'] == ExamineDate)[0]
+ind = np.where(ET['ymd'] == ExamineDate)[0][0]
 
 
 
@@ -358,7 +358,7 @@ fig_proj  = ccrs.PlateCarree()
 cmin = -3; cmax = 3; cint = 0.5
 clevs = np.arange(cmin, cmax+cint, cint)
 nlevs = len(clevs) - 1
-cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+cmap  = plt.get_cmap(name = 'RdBu', lut = nlevs)
 
 data_proj = ccrs.PlateCarree()
 fig_proj  = ccrs.PlateCarree()
@@ -368,7 +368,7 @@ fig = plt.figure(figsize = [12, 16])
 ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set title
-ax.set_title('SESR for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+ax.set_title('SESR for ' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
 
 # Set borders
 ax.coastlines()
@@ -391,7 +391,7 @@ cs = ax.contourf(ET['lon'], ET['lat'], SESR[:,:,ind], levels = clevs, cmap = cma
                   transform = data_proj, extend = 'both', zorder = 1)
 
 # Create and set the colorbar
-cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbax = fig.add_axes([0.92, 0.375, 0.02, 0.25])
 cbar = fig.colorbar(cs, cax = cbax)
 
 # Set the extent
@@ -415,7 +415,7 @@ I, J, T = PET['pevap'].shape
 prob = np.ones((I, J, T)) * np.nan
 EDDI = np.ones((I, J, T)) * np.nan
 
-N = np.unique(PET['year']) # Number of observations per time series
+N = np.unique(PET['year']).size # Number of observations per time series
 
 # Define the constants given in Hobbins et al. 2016
 C0 = 2.515517
@@ -427,7 +427,7 @@ d2 = 0.189269
 d3 = 0.001308
 
 # Determine the probabilities of getting PET at time t.
-for date in OneYear:
+for date in OneYear[::5]:
     ind = np.where( (PET['month'] == date.month) & (PET['day'] == date.day) )[0]
     
     # Collect the rank of the time series. Note in Hobbins et al. 2016, maximum PET is assigned rank 1 (so min PET has the highest rank)
@@ -492,9 +492,9 @@ WriteNC(EDDI, PET['lat'], PET['lon'], PET['date'], filename = 'eddi.NARR.CONUS.p
 # Create a plot of EDDI to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 8, 1)
+ExamineDate = datetime(2012, 7, 30)
 
-ind = np.where(PET['ymd'] == ExamineDate)[0]
+ind = np.where(PET['ymd'] == ExamineDate)[0][0]
 
 
 
@@ -513,7 +513,7 @@ data_proj = ccrs.PlateCarree()
 fig_proj  = ccrs.PlateCarree()
 
 # Colorbar information
-cmin = -3; cmax = 3; cint = 0.5
+cmin = -2; cmax = 2; cint = 0.5
 clevs = np.arange(cmin, cmax+cint, cint)
 nlevs = len(clevs) - 1
 cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
@@ -526,7 +526,7 @@ fig = plt.figure(figsize = [12, 16])
 ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set title
-ax.set_title('EDDI for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+ax.set_title('EDDI for ' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
 
 # Set borders
 ax.coastlines()
@@ -549,7 +549,7 @@ cs = ax.contourf(PET['lon'], PET['lat'], EDDI[:,:,ind], levels = clevs, cmap = c
                   transform = data_proj, extend = 'both', zorder = 1)
 
 # Create and set the colorbar
-cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbax = fig.add_axes([0.92, 0.375, 0.02, 0.25])
 cbar = fig.colorbar(cs, cax = cbax)
 
 # Set the extent
@@ -579,7 +579,7 @@ I, J, T = ED.shape
 
 SEDI = np.ones((I, J, T)) * np.nan
 
-for n, date in enumerate(OneYear[::7]):
+for n, date in enumerate(OneYear[::5]):
     ind = np.where( (date.month == ET['month']) & (date.day == ET['day']) )[0]
     
     for t in ind:
@@ -615,9 +615,9 @@ WriteNC(SEDI, ET['lat'], ET['lon'], ET['date'], filename = 'sedi.NARR.CONUS.pent
 # Create a plot of SEDI to check calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 8, 1)
+ExamineDate = datetime(2012, 7, 25)
 
-ind = np.where(PET['ymd'] == ExamineDate)[0]
+ind = np.where(PET['ymd'] == ExamineDate)[0][0]
 
 
 
@@ -639,7 +639,7 @@ fig_proj  = ccrs.PlateCarree()
 cmin = -3; cmax = 3; cint = 0.5
 clevs = np.arange(cmin, cmax+cint, cint)
 nlevs = len(clevs) - 1
-cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+cmap  = plt.get_cmap(name = 'RdBu', lut = nlevs)
 
 data_proj = ccrs.PlateCarree()
 fig_proj  = ccrs.PlateCarree()
@@ -649,7 +649,7 @@ fig = plt.figure(figsize = [12, 16])
 ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set title
-ax.set_title('SEDI for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+ax.set_title('SEDI for ' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
 
 # Set borders
 ax.coastlines()
@@ -672,7 +672,7 @@ cs = ax.contourf(ET['lon'], ET['lat'], SEDI[:,:,ind], levels = clevs, cmap = cma
                   transform = data_proj, extend = 'both', zorder = 1)
 
 # Create and set the colorbar
-cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbax = fig.add_axes([0.92, 0.375, 0.02, 0.25])
 cbar = fig.colorbar(cs, cax = cbax)
 
 # Set the extent
@@ -697,7 +697,7 @@ a = 0.903 # Note this decay rate is defined by keeping the total decay (13%) aft
           # (see Li et al. 2020b sections 3a and 4a).
 
 # Initialize the moisture deficit D
-I, J, T = P['precip'].size
+I, J, T = P['precip'].shape
 D = np.zeros((I, J, T))
 
 NDays = 100 # Number of days in the decay/memory
@@ -705,6 +705,7 @@ counters = np.arange(1, (NDays/5)+1)
 
 for t in range(T):
     for i in counters:
+        i = int(i)
         if i > t:
             break
         
@@ -713,7 +714,7 @@ for t in range(T):
         D[:,:,t] = D[:,:,t] + moistDeficit
 
 # From here, continue to perform the transformation of D from a log-logistic distribution to normal as detailed in Vicente-Serrano et al. 2010
-N = np.unique(P['year']) # Number of observations per time series
+N = np.unique(P['year']).size # Number of observations per time series
 
 frequencies = np.ones((I, J, T)) * np.nan
 PWM0 = np.ones((I, J, OneYear.size)) * np.nan # Probability weighted moment of 0
@@ -721,7 +722,7 @@ PWM1 = np.ones((I, J, OneYear.size)) * np.nan # Probability weighted moment of 1
 PWM2 = np.ones((I, J, OneYear.size)) * np.nan # Probability weighted moment of 2
 
 # Determine the frequency estimator and moments according to equation in section 3 of the Vicente-Serrano et al. 2010 paper
-for t, date in enumerate(OneYear):
+for t, date in enumerate(OneYear[::5]):
     ind = np.where( (P['month'] == date.month) & (P['day'] == date.day) )[0]
     
     # Get the frequency estimator
@@ -816,7 +817,7 @@ WriteNC(SAPEI, P['lat'], P['lon'], P['date'], filename = 'sapei.NARR.CONUS.penta
 # Determine the date to be examined
 ExamineDate = datetime(2012, 8, 1)
 
-ind = np.where(P['ymd'] == ExamineDate)[0]
+ind = np.where(P['ymd'] == ExamineDate)[0][0]
 
 
 
@@ -848,7 +849,7 @@ fig = plt.figure(figsize = [12, 16])
 ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set title
-ax.set_title('SAPEI for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+ax.set_title('SAPEI for ' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
 
 # Set borders
 ax.coastlines()
@@ -871,7 +872,7 @@ cs = ax.contourf(P['lon'], P['lat'], SAPEI[:,:,ind], levels = clevs, cmap = cmap
                   transform = data_proj, extend = 'both', zorder = 1)
 
 # Create and set the colorbar
-cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbax = fig.add_axes([0.92, 0.375, 0.02, 0.25])
 cbar = fig.colorbar(cs, cax = cbax)
 
 # Set the extent
@@ -892,8 +893,8 @@ plt.show(block = False)
 D = P['precip'] - PET['pevap']
 
 # Initialize some needed variables.
-I, J, T = P['precip'].size
-N = np.unique(P['year']) # Number of observations per time series
+I, J, T = P['precip'].shape
+N = np.unique(P['year']).size # Number of observations per time series
 
 frequencies = np.ones((I, J, T)) * np.nan
 PWM0 = np.ones((I, J, OneYear.size)) * np.nan # Probability weighted moment of 0
@@ -901,7 +902,7 @@ PWM1 = np.ones((I, J, OneYear.size)) * np.nan # Probability weighted moment of 1
 PWM2 = np.ones((I, J, OneYear.size)) * np.nan # Probability weighted moment of 2
 
 # Determine the frequency estimator and moments according to equation in section 3 of the Vicente-Serrano et al. 2010 paper
-for t, date in enumerate(OneYear):
+for t, date in enumerate(OneYear[::5]):
     ind = np.where( (P['month'] == date.month) & (P['day'] == date.day) )[0]
     
     # Get the frequency estimator
@@ -996,9 +997,9 @@ WriteNC(SPEI, P['lat'], P['lon'], P['date'], filename = 'spei.NARR.CONUS.pentad.
 # Create a plot of SPEI to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 8, 1)
+ExamineDate = datetime(2012, 7, 30)
 
-ind = np.where(P['ymd'] == ExamineDate)[0]
+ind = np.where(P['ymd'] == ExamineDate)[0][0]
 
 
 
@@ -1030,7 +1031,7 @@ fig = plt.figure(figsize = [12, 16])
 ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set title
-ax.set_title('SPEI for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+ax.set_title('SPEI for ' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
 
 # Set borders
 ax.coastlines()
@@ -1053,7 +1054,7 @@ cs = ax.contourf(P['lon'], P['lat'], SPEI[:,:,ind], levels = clevs, cmap = cmap,
                   transform = data_proj, extend = 'both', zorder = 1)
 
 # Create and set the colorbar
-cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbax = fig.add_axes([0.92, 0.375, 0.02, 0.25])
 cbar = fig.colorbar(cs, cax = cbax)
 
 # Set the extent
@@ -1143,9 +1144,9 @@ WriteNC(SMI, SM['lat'], SM['lon'], SM['date'], filename = 'smi.NARR.CONUS.pentad
 # Create a plot of SMI to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 8, 1)
+ExamineDate = datetime(2012, 7, 30)
 
-ind = np.where(P['ymd'] == ExamineDate)[0]
+ind = np.where(P['ymd'] == ExamineDate)[0][0]
 
 
 
@@ -1177,7 +1178,7 @@ fig = plt.figure(figsize = [12, 16])
 ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set title
-ax.set_title('SMI for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+ax.set_title('SMI for ' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
 
 # Set borders
 ax.coastlines()
@@ -1200,7 +1201,7 @@ cs = ax.contourf(SM['lon'], SM['lat'], SMI[:,:,ind], levels = clevs, cmap = cmap
                   transform = data_proj, extend = 'both', zorder = 1)
 
 # Create and set the colorbar
-cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbax = fig.add_axes([0.92, 0.375, 0.02, 0.25])
 cbar = fig.colorbar(cs, cax = cbax)
 
 # Set the extent
@@ -1383,9 +1384,9 @@ WriteNC(FDII, SM['lat'], SM['lon'], SM['date'], filename = 'fdii.NARR.CONUS.pent
 # Create a plot of FDII to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 8, 1)
+ExamineDate = datetime(2012, 7, 30)
 
-ind = np.where(P['ymd'] == ExamineDate)[0]
+ind = np.where(P['ymd'] == ExamineDate)[0][0]
 
 
 
@@ -1417,7 +1418,7 @@ fig = plt.figure(figsize = [12, 16])
 ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set title
-ax.set_title('FDII for the week of' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+ax.set_title('FDII for ' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
 
 # Set borders
 ax.coastlines()
@@ -1440,7 +1441,7 @@ cs = ax.contourf(SM['lon'], SM['lat'], FDII[:,:,ind], levels = clevs, cmap = cma
                   transform = data_proj, extend = 'both', zorder = 1)
 
 # Create and set the colorbar
-cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
+cbax = fig.add_axes([0.92, 0.375, 0.02, 0.25])
 cbar = fig.colorbar(cs, cax = cbax)
 
 # Set the extent
