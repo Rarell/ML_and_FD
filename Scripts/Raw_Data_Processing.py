@@ -29,12 +29,13 @@ import matplotlib.colors as mcolors
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import cartopy.mpl.ticker as cticker
+from fnmatch import fnmatch
 from scipy import stats
 from netCDF4 import Dataset, num2date
 from datetime import datetime, timedelta
 
 # Define function and library names
-FunctionNames = ['os', 'sys', 'np', 'plt', 'mcolors', 'ccrs', 'cfeature', 'cticker', 'stats', 'Dataset', 'num2date', 'datetime', 'timedelta', 'LoadNC', 'WriteNC', 'SubsetData', 'DailyMean', 'DateRange', 'this', 'FunctionNames']
+FunctionNames = ['os', 'sys', 'np', 'plt', 'mcolors', 'ccrs', 'cfeature', 'cticker', 'fnmatch', 'stats', 'Dataset', 'num2date', 'datetime', 'timedelta', 'LoadNC', 'WriteNC', 'SubsetData', 'DailyMean', 'DateRange', 'this', 'FunctionNames']
 
 
 #%%
@@ -113,7 +114,7 @@ def LoadNC(SName, filename, sm = False, path = './Data/Raw/'):
 # cell 4
 # Create a function to write a variable to a .nc file
   
-def WriteNC(var, lat, lon, dates, filename = 'tmp.nc', sm = False, VarSName = 'tmp', description = 'Description', path = './Data/Processed/'):
+def WriteNC(var, lat, lon, dates, filename = 'tmp.nc', sm = False, level = 'tmp', VarSName = 'tmp', description = 'Description', path = './Data/Processed/'):
     '''
     This function is deisgned write data, and additional information such as
     latitude and longitude and timestamps to a .nc file.
@@ -168,7 +169,7 @@ def WriteNC(var, lat, lon, dates, filename = 'tmp.nc', sm = False, VarSName = 't
         
         if sm is True:
             nc.createVariable('level', str, ())
-            nc.variables['level'] = '1 - 40 cm'
+            nc.variables['level'] = str(level)
         else:
             pass
             
@@ -435,7 +436,10 @@ for n in dir():
 # data = 'evap'
 # data = 'pevap'
 # data = 'precip'
-data = 'soilmoist'
+# data = 'soilmoist'
+# data = 'soilmoist00'
+# data = 'soilmoist10'
+data = 'soilmoist40'
 
 # Create a range of datetimes
 print('Constructing dates')
@@ -458,7 +462,7 @@ if data == 'temp':
     path = './Data/Raw/Temperature_2m/'
     filenames = ['tmp'] * NumYears
     indvid_fn = 'air.2m.'
-    OutFile = 'temperature_2m.NARR.CONUS.weekly.nc'
+    OutFile = 'temperature_2m.NARR.CONUS.pentad.nc'
     
     SName = 'air'
     SNameOut = 'temp'
@@ -483,7 +487,7 @@ elif data == 'evap':
     path = './Data/Raw/Evaporation_accumulation/'
     filenames = ['tmp'] * NumYears
     indvid_fn = 'evap.'
-    OutFile = 'evaporation.NARR.CONUS.weekly.nc'
+    OutFile = 'evaporation.NARR.CONUS.pentad.nc'
     
     SName = 'evap'
     SNameOut = 'evap'
@@ -508,7 +512,7 @@ elif data == 'pevap':
     path = './Data/Raw/Potential_Evaporation_accumulation/'
     filenames = ['tmp'] * NumYears
     indvid_fn = 'pevap.'
-    OutFile = 'potential_evaporation.NARR.CONUS.weekly.nc'
+    OutFile = 'potential_evaporation.NARR.CONUS.pentad.nc'
     
     SName = 'pevap'
     SNameOut = 'pevap'
@@ -533,7 +537,7 @@ elif data == 'precip':
     path = './Data/Raw/Precipitation_accumulation/'
     filenames = ['tmp'] * NumYears
     indvid_fn = 'apcp.'
-    OutFile = 'accumulated_precipitation.NARR.CONUS.weekly.nc'
+    OutFile = 'accumulated_precipitation.NARR.CONUS.pentad.nc'
     
     SName = 'apcp'
     SNameOut = 'precip'
@@ -553,15 +557,105 @@ elif data == 'precip':
                   'start of the week for the corresponding time point in apcp. Dates ' +\
                   'are in %Y-%m-%d format. Leap days were excluded for ' +\
                   'simplicity. Variable format is time.'
+                  
+elif data == 'soilmoist00':
+    path = './Data/Raw/Liquid_VSM/'
+    filenames = ['tmp'] * NumYears * NumMonths # Note the soil moisture data is in monthly files, not yearly
+    indvid_fn = 'soill.'
+    OutFile = 'soil_moisture.00cm.NARR.CONUS.pentad.nc'
     
+    SName = 'soill'
+    SNameOut = 'soilm'
+    level = '0 cm'
+    
+    depth = int(0)
+    
+    description = 'This file contains the 0 cm volumetric soil moisture (fraction) data from the ' +\
+                  'North American Regional Reanalysis dataset. The data is ' +\
+                  'subsetted to focus on the contential U.S., and averaged to ' +\
+                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'Dec. 31 2020. Variables are:\n' +\
+                  'soil: Weekly average volumetric soil moisture (fraction) between 1 - 40 cm depths. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for soilm. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for soilm. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in soilm. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.\n' +\
+                  'level: A string giving the soil depth.'
+
+elif data == 'soilmoist10':
+    path = './Data/Raw/Liquid_VSM/'
+    filenames = ['tmp'] * NumYears * NumMonths # Note the soil moisture data is in monthly files, not yearly
+    indvid_fn = 'soill.'
+    OutFile = 'soil_moisture.10cm.NARR.CONUS.pentad.nc'
+    
+    depth = int(1)
+    
+    SName = 'soill'
+    SNameOut = 'soilm'
+    level = '10 cm'
+    
+    description = 'This file contains the 10 cm volumetric soil moisture (fraction) data from the ' +\
+                  'North American Regional Reanalysis dataset. The data is ' +\
+                  'subsetted to focus on the contential U.S., and averaged to ' +\
+                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'Dec. 31 2020. Variables are:\n' +\
+                  'soil: Weekly average volumetric soil moisture (fraction) between 1 - 40 cm depths. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for soilm. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for soilm. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in soilm. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.\n' +\
+                  'level: A string giving the soil depth.'
+                  
+elif data == 'soilmoist40':
+    path = './Data/Raw/Liquid_VSM/'
+    filenames = ['tmp'] * NumYears * NumMonths # Note the soil moisture data is in monthly files, not yearly
+    indvid_fn = 'soill.'
+    OutFile = 'soil_moisture.40cm.NARR.CONUS.pentad.nc'
+    
+    depth = int(2)
+    
+    SName = 'soill'
+    SNameOut = 'soilm'
+    level = '40 cm'
+    
+    description = 'This file contains the 40 cm volumetric soil moisture (fraction) data from the ' +\
+                  'North American Regional Reanalysis dataset. The data is ' +\
+                  'subsetted to focus on the contential U.S., and averaged to ' +\
+                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'Dec. 31 2020. Variables are:\n' +\
+                  'soil: Weekly average volumetric soil moisture (fraction) between 1 - 40 cm depths. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for soilm. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for soilm. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in soilm. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.\n' +\
+                  'level: A string giving the soil depth.'
+
 else: # The remaining scenario is data = soilmoist
     path = './Data/Raw/Liquid_VSM/'
     filenames = ['tmp'] * NumYears * NumMonths # Note the soil moisture data is in monthly files, not yearly
     indvid_fn = 'soill.'
-    OutFile = 'soil_moisture.NARR.CONUS.weekly.nc'
+    OutFile = 'soil_moisture.NARR.CONUS.pentad.nc'
+    
+    depth = np.arange(0, 3+1, 1)
     
     SName = 'soill'
     SNameOut = 'soilm'
+    level = '0 - 40 cm'
     
     description = 'This file contains the 1 - 40 cm average volumetric soil moisture (fraction) data from the ' +\
                   'North American Regional Reanalysis dataset. The data is ' +\
@@ -586,7 +680,7 @@ else: # The remaining scenario is data = soilmoist
 # Constuct the filenames
 print('Constructing filenames')
 for n in range(len(filenames)):
-    if data == 'soilmoist': # Soil moisture data is monthly
+    if fnmatch(data, 'soilmoist*'): # Soil moisture data is monthly
         if YearMonths[n].month < 10:
             filenames[n] = indvid_fn + str(YearMonths[n].year) + '0' + str(YearMonths[n].month) + '.nc'
         else:
@@ -613,9 +707,12 @@ RawData = np.ones((T, I, J)) * np.nan
 print('Loading files')
 t = 0
 for fn in filenames:
-    if data == 'soilmoist': # Soil moisture data files are monthly, and first 3 levels (0 - 40 cm) need to be averaged
+    if fnmatch(data, 'soilmoist*'): # Soil moisture data files are monthly, and first 3 levels (0 - 40 cm) need to be averaged
         X = LoadNC(SName = SName, filename = fn, sm = True, path = path)
-        DailyX = DailyMean(np.nanmean(X[str(SName)][:,0:3,:,:], axis = 1), summation = False)
+        if fnmatch(data, 'soilmoist?0'):
+            DailyX = DailyMean(X[str(SName)][:,depth,:,:], summation = False)
+        else:
+            DailyX = DailyMean(np.nanmean(X[str(SName)][:,depth,:,:], axis = 1), summation = False)
         
         
     elif (data == 'evap') | (data == 'pevap') | (data == ' precip'):
@@ -656,26 +753,26 @@ for i in range(len(X['lon'][:,0])):
 
 
     
-# Average or sum data to a weekly timescale.
-print('Reducing data to weekly timescale')
-DataWeekly = np.ones((int(T/7), I, J)) * np.nan
+# Average or sum data to a pentad timescale.
+print('Reducing data to pentad timescale')
+DataPentad = np.ones((int(T/5), I, J)) * np.nan
 
 n = 0
-for t in range(int(T/7)):
+for t in range(int(T/5)):
     if (data == 'evap') | (data == 'pevap') | (data == ' precip'):
-        DataWeekly[t,:,:] = np.nansum(RawData[n:n+7,:,:], axis = 0)
+        DataPentad[t,:,:] = np.nansum(RawData[n:n+5,:,:], axis = 0)
     else:
-        DataWeekly[t,:,:] = np.nanmean(RawData[n:n+7,:,:], axis = 0)
+        DataPentad[t,:,:] = np.nanmean(RawData[n:n+5,:,:], axis = 0)
         
-    n = n + 7
+    n = n + 5
 
 
 
 
 # Make the time variable last in the list
-DataWeeklyT = np.ones((I, J, int(T/7))) * np.nan
-for t in range(int(T/7)):
-    DataWeeklyT[:,:,t] = DataWeekly[t,:,:]
+DataPentadT = np.ones((I, J, int(T/5))) * np.nan
+for t in range(int(T/5)):
+    DataPentadT[:,:,t] = DataPentad[t,:,:]
 
 
 
@@ -687,7 +784,7 @@ LatMax = 50
 LonMin = -130
 LonMax = -65
 
-DataProcessed, LatSub, LonSub = SubsetData(DataWeeklyT, X['lat'], X['lon'], 
+DataProcessed, LatSub, LonSub = SubsetData(DataPentadT, X['lat'], X['lon'], 
                                            LatMin = LatMin, LatMax = LatMax, 
                                            LonMin = LonMin, LonMax = LonMax)
 
@@ -698,11 +795,11 @@ DataProcessed, LatSub, LonSub = SubsetData(DataWeeklyT, X['lat'], X['lon'],
 # Write the data to a file.
 print('Writing data')
 OutPath = './Data/Processed_Data/'
-if data == 'soilmoist':
-    WriteNC(DataProcessed, LatSub, LonSub, dates[::7], filename = OutFile, sm = True, 
+if fnmatch(data, 'soilmoist*'):
+    WriteNC(DataProcessed, LatSub, LonSub, dates[::5], filename = OutFile, sm = True, level = level,
             VarSName = SNameOut, description = description, path = OutPath)
 else: 
-    WriteNC(DataProcessed, LatSub, LonSub, dates[::7], filename = OutFile, sm = False, 
+    WriteNC(DataProcessed, LatSub, LonSub, dates[::5], filename = OutFile, sm = False, 
             VarSName = SNameOut, description = description, path = OutPath)
 
 # Repeat this cell for all NARR variables collected.
