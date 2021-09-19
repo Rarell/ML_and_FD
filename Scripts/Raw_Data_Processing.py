@@ -46,6 +46,8 @@ FunctionNames = ['os', 'sys', 'np', 'plt', 'mcolors', 'ccrs', 'cfeature', 'ctick
 
 print(Dataset('./Data/Raw/Liquid_VSM/soill.197901.nc', 'r'))
 
+print(Dataset('./Data/Raw/Baseflow_Runoff/bgrun.1979.nc', 'r'))
+
 #print(Dataset('./Data/Raw/Soil_Moisture_Content/soilm.1979.nc', 'r'))
 
 print(Dataset('./Data/Raw/Evaporation_accumulation/evap.1979.nc', 'r'))
@@ -436,6 +438,7 @@ for n in dir():
 # data = 'evap'
 # data = 'pevap'
 # data = 'precip'
+# data = 'runoff'
 # data = 'soilmoist'
 # data = 'soilmoist00'
 # data = 'soilmoist10'
@@ -470,9 +473,9 @@ if data == 'temp':
     description = 'This file contains the 2m temperature (K) data from the ' +\
                   'North American Regional Reanalysis dataset. The data is ' +\
                   'subsetted to focus on the contential U.S., and averaged to ' +\
-                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'the pentad timescale. Data ranges form Jan. 1 1979 to ' +\
                   'Dec. 31 2020. Variables are:\n' +\
-                  'temp: Weekly average temperature (K) at 2 meters above ' +\
+                  'temp: Pentad average temperature (K) at 2 meters above ' +\
                   'ground level. Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for temp. ' +\
                   'Variable format is x by y.\n' +\
@@ -495,9 +498,9 @@ elif data == 'evap':
     description = 'This file contains the evaporation (kg m^-2) data from the ' +\
                   'North American Regional Reanalysis dataset. The data is ' +\
                   'subsetted to focus on the contential U.S., and summed to ' +\
-                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'the pentad timescale. Data ranges form Jan. 1 1979 to ' +\
                   'Dec. 31 2020. Variables are:\n' +\
-                  'evap: Weekly accumulation of evaporation (kg m^-2). ' +\
+                  'evap: Pentad accumulation of evaporation (kg m^-2). ' +\
                   'Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for evap. ' +\
                   'Variable format is x by y.\n' +\
@@ -520,9 +523,9 @@ elif data == 'pevap':
     description = 'This file contains the potential evaporation (kg m^-2) data from the ' +\
                   'North American Regional Reanalysis dataset. The data is ' +\
                   'subsetted to focus on the contential U.S., and summed to ' +\
-                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'the pentad timescale. Data ranges form Jan. 1 1979 to ' +\
                   'Dec. 31 2020. Variables are:\n' +\
-                  'pevap: Weekly accumulation of potential evaporation (kg m^-2). ' +\
+                  'pevap: Pentad accumulation of potential evaporation (kg m^-2). ' +\
                   'Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for pevap. ' +\
                   'Variable format is x by y.\n' +\
@@ -545,9 +548,34 @@ elif data == 'precip':
     description = 'This file contains the accumulated precipitation (kg m^-2) data from the ' +\
                   'North American Regional Reanalysis dataset. The data is ' +\
                   'subsetted to focus on the contential U.S., and summed to ' +\
-                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'the pentad timescale. Data ranges form Jan. 1 1979 to ' +\
                   'Dec. 31 2020. Variables are:\n' +\
-                  'apcp: Weekly accumulation of precipitaiton (kg m^-2). ' +\
+                  'apcp: Pentad accumulation of precipitaiton (kg m^-2). ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
+                  
+elif data == 'runoff':
+    path = './Data/Raw/Baseflow_Runoff/'
+    filenames = ['tmp'] * NumYears
+    indvid_fn = 'bgrun.'
+    OutFile = 'baseflow_runoff.NARR.CONUS.pentad.nc'
+    
+    SName = 'bgrun'
+    SNameOut = 'ro'
+    
+    description = 'This file contains the accumulated baseflow runoff (kg m^-2) data from the ' +\
+                  'North American Regional Reanalysis dataset. The data is ' +\
+                  'subsetted to focus on the contential U.S., and summed to ' +\
+                  'the pentad timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'Dec. 31 2020. Variables are:\n' +\
+                  'ro: Pentad accumulation of runoff (kg m^-2). ' +\
                   'Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for apcp. ' +\
                   'Variable format is x by y.\n' +\
@@ -573,9 +601,9 @@ elif data == 'soilmoist00':
     description = 'This file contains the 0 cm volumetric soil moisture (fraction) data from the ' +\
                   'North American Regional Reanalysis dataset. The data is ' +\
                   'subsetted to focus on the contential U.S., and averaged to ' +\
-                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'the pentad timescale. Data ranges form Jan. 1 1979 to ' +\
                   'Dec. 31 2020. Variables are:\n' +\
-                  'soil: Weekly average volumetric soil moisture (fraction) between 1 - 40 cm depths. ' +\
+                  'soilm: Pentad average volumetric soil moisture (fraction) between 1 - 40 cm depths. ' +\
                   'Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for soilm. ' +\
                   'Variable format is x by y.\n' +\
@@ -602,9 +630,9 @@ elif data == 'soilmoist10':
     description = 'This file contains the 10 cm volumetric soil moisture (fraction) data from the ' +\
                   'North American Regional Reanalysis dataset. The data is ' +\
                   'subsetted to focus on the contential U.S., and averaged to ' +\
-                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'the pentad timescale. Data ranges form Jan. 1 1979 to ' +\
                   'Dec. 31 2020. Variables are:\n' +\
-                  'soil: Weekly average volumetric soil moisture (fraction) between 1 - 40 cm depths. ' +\
+                  'soilm: Pentad average volumetric soil moisture (fraction) between 1 - 40 cm depths. ' +\
                   'Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for soilm. ' +\
                   'Variable format is x by y.\n' +\
@@ -631,9 +659,9 @@ elif data == 'soilmoist40':
     description = 'This file contains the 40 cm volumetric soil moisture (fraction) data from the ' +\
                   'North American Regional Reanalysis dataset. The data is ' +\
                   'subsetted to focus on the contential U.S., and averaged to ' +\
-                  'the weekly timescale. Data ranges form Jan. 1 1979 to ' +\
+                  'the pentad timescale. Data ranges form Jan. 1 1979 to ' +\
                   'Dec. 31 2020. Variables are:\n' +\
-                  'soil: Weekly average volumetric soil moisture (fraction) between 1 - 40 cm depths. ' +\
+                  'soilm: Pentad average volumetric soil moisture (fraction) between 1 - 40 cm depths. ' +\
                   'Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for soilm. ' +\
                   'Variable format is x by y.\n' +\
@@ -715,7 +743,7 @@ for fn in filenames:
             DailyX = DailyMean(np.nanmean(X[str(SName)][:,depth,:,:], axis = 1), summation = False)
         
         
-    elif (data == 'evap') | (data == 'pevap') | (data == ' precip'):
+    elif (data == 'evap') | (data == 'pevap') | (data == ' precip') | (data == 'runoff'):
         X = LoadNC(SName = SName, filename = fn, sm = False, path = path)
         DailyX = DailyMean(X[str(SName)][:,:,:], summation = True)
         
@@ -759,7 +787,7 @@ DataPentad = np.ones((int(T/5), I, J)) * np.nan
 
 n = 0
 for t in range(int(T/5)):
-    if (data == 'evap') | (data == 'pevap') | (data == ' precip'):
+    if (data == 'evap') | (data == 'pevap') | (data == 'precip') | (data == 'runoff'):
         DataPentad[t,:,:] = np.nansum(RawData[n:n+5,:,:], axis = 0)
     else:
         DataPentad[t,:,:] = np.nanmean(RawData[n:n+5,:,:], axis = 0)
