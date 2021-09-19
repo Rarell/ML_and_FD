@@ -12,7 +12,7 @@ to new files in the ./Data/Indices/ directory for future use.
 
 This script assumes it is being running in the 'ML_and_FD_in_NARR' directory
 
-Flash drought indices emitted:
+Flash drought indices omitted:
 - ESI: In Anderson et al. 2013 (https://doi.org/10.1175/2010JCLI3812.1) "Standardized
        anomalies in ET and f_PET [= ET/PET] will be referred to as the evapotranspiration
        index (ETI) and ESI, respectively." (Section 2. a. 1), paragraph 3) This means the 
@@ -243,9 +243,129 @@ def CalculateClimatology(var, pentad = True):
     
     return ClimMean, ClimStd
 
-
 #%%
 # cell 5
+# Function to subset any dataset.
+def SubsetData(X, Lat, Lon, LatMin, LatMax, LonMin, LonMax):
+    '''
+    This function is designed to subset data for any gridded dataset, including
+    the non-simple grid used in the NARR dataset, where the size of the subsetted
+    data is unknown. Note this function only makes square subsets with a maximum 
+    and minimum latitude/longitude.
+    
+    Inputs:
+    - X: The variable to be subsetted.
+    - Lat: The gridded latitude data corresponding to X.
+    - Lon: The gridded Longitude data corresponding to X.
+    - LatMax: The maximum latitude of the subsetted data.
+    - LatMin: The minimum latitude of the subsetted data.
+    - LonMax: The maximum longitude of the subsetted data.
+    - LonMin: The minimum longitude of the subsetted data.
+    
+    Outputs:
+    - XSub: The subsetted data.
+    - LatSub: Gridded, subsetted latitudes.
+    - LonSub: Gridded, subsetted longitudes.
+    '''
+    
+    # Collect the original sizes of the data/lat/lon
+    I, J, T = X.shape
+    
+    # Reshape the data into a 2D array and lat/lon to a 1D array for easier referencing.
+    X2D   = X.reshape(I*J, T, order = 'F')
+    Lat1D = Lat.reshape(I*J, order = 'F')
+    Lon1D = Lon.reshape(I*J, order = 'F')
+    
+    # Find the indices in which to make the subset.
+    LatInd = np.where( (Lat1D >= LatMin) & (Lat1D <= LatMax) )[0]
+    LonInd = np.where( (Lon1D >= LonMin) & (Lon1D <= LonMax) )[0]
+    
+    # Find the points where the lat and lon subset overlap. This comprises the subsetted grid.
+    SubInd = np.intersect1d(LatInd, LonInd)
+    
+    # Next find, the I and J dimensions of subsetted grid.
+    Start = 0 # The starting point of the column counting.
+    Count = 1 # Row count starts at 1
+    Isub  = 0 # Start by assuming subsetted column size is 0.
+    
+    for n in range(len(SubInd[:-1])): # Exclude the last value to prevent indexing errors.
+        IndDiff = SubInd[n+1] - SubInd[n] # Obtain difference between this index and the next.
+        if (n+2) == len(SubInd): # At the last value, everything needs to be increased by 2 to account for the missing indice at the end.
+            Isub = np.nanmax([Isub, n+2 - Start]) # Note since this is the last indice, and this row is counted, there is no Count += 1.
+        elif ( (IndDiff > 1) |              # If the difference is greater than 1, or if
+             (np.mod(SubInd[n]+1,I) == 0) ):# SubInd is divisible by I, then a new row 
+                                            # is started in the gridded array.
+            Isub = np.nanmax([Isub, n+1 - Start]) # Determine the highest column count (may not be the same from row to row)
+            Start = n+1 # Start the counting anew.
+            Count = Count + 1 # Increment the row count by 1 as the next row is entered.
+        else:
+            pass
+        
+    # At the end, Count has the total number of rows in the subset.
+    Jsub = Count
+    
+    # Next, the column size may not be the same from row to row. The rows with
+    # with columns less than Isub need to be filled in. 
+    # Start by finding how many placeholders are needed.
+    PH = Isub * Jsub - len(SubInd) # Total number of needed points - number in the subset
+    
+    # Initialize the variable that will hold the needed indices.
+    PlaceHolder = np.ones((PH)) * np.nan
+    
+    # Fill the placeholder values with the indices needed to complete a Isub x Jsub matrix
+    Start = 0
+    m = 0
+    
+    for n in range(len(SubInd[:-1])):
+        # Identify when row changes occur.
+        IndDiff = SubInd[n+1] - SubInd[n]
+        if (n+2) == len(SubInd): # For the end of last row, an n+2 is needed to account for the missing index (SubInd[:-1] was used)
+            ColNum = n+2-Start
+            PlaceHolder[m:m+Isub-ColNum] = SubInd[n+1] + np.arange(1, 1+Isub-ColNum)
+            # Note this is the last value, so nothing else needs to be incremented up.
+        elif ( (IndDiff > 1) | (np.mod(SubInd[n]+1,I) == 0) ):
+            # Determine how many columns this row has.
+            ColNum = n+1-Start
+            
+            # Fill the placeholder with the next index(ices) when the row has less than
+            # the maximum number of columns (Isub)
+            PlaceHolder[m:m+Isub-ColNum] = SubInd[n] + np.arange(1, 1+Isub-ColNum)
+            
+            # Increment the placeholder index by the number of entries filled.
+            m = m + Isub - ColNum
+            Start = n+1
+            
+        
+        else:
+            pass
+    
+    # Next, convert the placeholders to integer indices.
+    PlaceHolderInt = PlaceHolder.astype(int)
+    
+    # Add and sort the placeholders to the indices.
+    SubIndTotal = np.sort(np.concatenate((SubInd, PlaceHolderInt), axis = 0))
+    
+    # The placeholder indices are technically outside of the desired subset. So
+    # turn those values to NaN so they do not effect calculations.
+    # (In theory, X2D is not the same variable as X, so the original dataset 
+    #  should remain untouched.)
+    X2D[PlaceHolderInt,:] = np.nan
+    
+    # Collect the subset of the data, lat, and lon
+    XSub = X2D[SubIndTotal,:]
+    LatSub = Lat1D[SubIndTotal]
+    LonSub = Lon1D[SubIndTotal]
+    
+    # Reorder the data back into a 3D array, and lat and lon into gridded 2D arrays
+    XSub = XSub.reshape(Isub, Jsub, T, order = 'F')
+    LatSub = LatSub.reshape(Isub, Jsub, order = 'F')
+    LonSub = LonSub.reshape(Isub, Jsub, order = 'F')
+    
+    # Return the the subsetted data
+    return XSub, LatSub, LonSub
+
+#%%
+# cell 6
 # Create a function to generate a range of datetimes
 def DateRange(StartDate, EndDate):
     '''
@@ -263,7 +383,7 @@ def DateRange(StartDate, EndDate):
         yield StartDate + timedelta(n) 
 
 #%%
-# cell 6
+# cell 7
 # Load all the data files
 
 path = './Data/Processed_Data/'
@@ -292,7 +412,57 @@ OutPath = './Data/Indices/'
 
 
 #%%
-# cell 7
+# cell 8
+# Load and subset the land-sea mask
+
+# Create a function to load 2D data
+def load2Dnc(filename, SName, path = './Data/'):
+    '''
+    This function loads 2 dimensional .nc files (e.g., the lat or lon files/
+    only spatial files). Function is simple as these files only contain the raw data.
+    
+    Inputs:
+    - filename: The filename of the .nc file to be loaded.
+    - SName: The short name of the variable in the .nc file (i.e., the name to
+             call when loading the data)
+    - Path: The path from the present direction to the directory the file is in.
+    
+    Outputs:
+    - var: The main variable in the .nc file.
+    '''
+    
+    with Dataset(path + filename, 'r') as nc:
+        var = nc.variables[SName][:,:]
+        
+    return var
+
+
+# Load the mask data
+mask = load2Dnc('land.nc', 'land')
+lat = load2Dnc('lat_narr.nc', 'lat') # Dataset is lat x lon
+lon = load2Dnc('lon_narr.nc', 'lon') # Dataset is lat x lon
+
+# Turn positive lon values into negative
+for i in range(len(lon[:,0])):
+    ind = np.where( lon[i,:] > 0 )[0]
+    lon[i,ind] = -1*lon[i,ind]
+
+# Turn mask from time x lat x lon into lat x lon x time
+T, I, J = mask.shape
+
+maskNew = np.ones((I, J, T)) * np.nan
+maskNew[:,:,0] = mask[0,:,:] # No loop is needed since the time dimension has length 1
+
+# Subset the data to the same subset as the criteria data
+LatMin = 25
+LatMax = 50
+LonMin = -130
+LonMax = -65
+maskSub, LatSub, LonSub = SubsetData(maskNew, lat, lon, LatMin = LatMin, LatMax = LatMax,
+                                     LonMin = LonMin, LonMax = LonMax) 
+
+#%%
+# cell 9
 
 ######################
 ### Calculate SESR ###
@@ -321,7 +491,10 @@ for n, date in enumerate(OneYear[::5]):
     for t in ind:
         SESR[:,:,t] = (ESR[:,:,t] - ESRMean[:,:,n])/ESRstd[:,:,n]
         
-        
+
+# Remove any sea data points
+SESR[maskSub[:,:,0] == 0] = np.nan
+
 # Write the SESR data
 description = 'This file contains the standardized evaporative stress ratio ' +\
                   '(SESR; unitless), calculated from evaporation and potential ' +\
@@ -348,7 +521,7 @@ WriteNC(SESR, ET['lat'], ET['lon'], ET['date'], filename = 'sesr.NARR.CONUS.pent
 
 
 #%%
-# cell 8
+# cell 10
 # Create a plot of SESR to check the calculations
 
 # Determine the date to be examined
@@ -419,7 +592,7 @@ plt.show(block = False)
 
 
 #%%
-# cell 9
+# cell 11
 
 ######################
 ### Calculate EDDI ###
@@ -479,6 +652,9 @@ for ij in range(I*J):
 # Reorder the data back to 3D
 EDDI = EDDI2d.reshape(I, J, T, order = 'F')
 
+# Remove any sea data points
+EDDI[maskSub[:,:,0] == 0] = np.nan
+
 # Write the EDDI data
 description = 'This file contains the evaporative demand drought index ' +\
                   '(EDDI; unitless), calculated from potential ' +\
@@ -506,7 +682,7 @@ WriteNC(EDDI, PET['lat'], PET['lon'], PET['date'], filename = 'eddi.NARR.CONUS.p
 
 
 #%%
-# cell 10
+# cell 12
 # Create a plot of EDDI to check the calculations
 
 # Determine the date to be examined
@@ -579,7 +755,7 @@ plt.show(block = False)
 
 
 #%%
-# cell 11
+# cell 13
 
 ######################
 ### Calculate SEDI ###
@@ -603,6 +779,9 @@ for n, date in enumerate(OneYear[::5]):
     for t in ind:
         SEDI[:,:,t] = (ED[:,:,t] - EDMean[:,:,n])/EDstd[:,:,n]
         
+
+# Remove any sea data points
+SEDI[maskSub[:,:,0] == 0] = np.nan
         
 # Write the SESR data
 description = 'This file contains the standardized evapotranspiration deficit index ' +\
@@ -629,11 +808,11 @@ WriteNC(SEDI, ET['lat'], ET['lon'], ET['date'], filename = 'sedi.NARR.CONUS.pent
         VarSName = 'sedi', description = description, path = OutPath)
 
 #%%
-# cell 12
+# cell 14
 # Create a plot of SEDI to check calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 7, 25)
+ExamineDate = datetime(2012, 7, 30)
 
 ind = np.where(PET['ymd'] == ExamineDate)[0][0]
 
@@ -702,7 +881,7 @@ plt.show(block = False)
 
 
 #%%
-# cell 13
+# cell 15
 
 #######################
 ### Calculate SAPEI ###
@@ -809,6 +988,8 @@ for ij in range(I*J):
 # Reorder the data back to 3D
 SAPEI = SAPEI2d.reshape(I, J, T, order = 'F')
 
+# Remove any sea data points
+SAPEI[maskSub[:,:,0] == 0] = np.nan
 
 # Write the SAPEI data
 description = 'This file contains the standardized antecedent precipitation evapotranspiration index ' +\
@@ -836,11 +1017,11 @@ WriteNC(SAPEI, P['lat'], P['lon'], P['date'], filename = 'sapei.NARR.CONUS.penta
 
 
 #%%
-# cell 14
+# cell 16
 # Create a plot of SAPEI to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 7, 25)
+ExamineDate = datetime(2012, 7, 30)
 
 ind = np.where(P['ymd'] == ExamineDate)[0][0]
 
@@ -906,7 +1087,7 @@ ax.set_extent([-130, -65, 25, 50], crs = fig_proj)
 plt.show(block = False)
 
 #%%
-# cell 15
+# cell 17
 
 ######################
 ### Calculate SPEI ###
@@ -995,6 +1176,8 @@ for ij in range(I*J):
 # Reorder the data back to 3D
 SPEI = SPEI2d.reshape(I, J, T, order = 'F')
 
+# Remove any sea data points
+SPEI[maskSub[:,:,0] == 0] = np.nan
 
 # Write the SPEI data
 description = 'This file contains the standardized precipitation evapotranspiration index ' +\
@@ -1024,11 +1207,11 @@ WriteNC(SPEI, P['lat'], P['lon'], P['date'], filename = 'spei.NARR.CONUS.pentad.
 
 
 #%%
-# cell 16
+# cell 18
 # Create a plot of SPEI to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 7, 25)
+ExamineDate = datetime(2012, 7, 30)
 
 ind = np.where(P['ymd'] == ExamineDate)[0][0]
 
@@ -1094,7 +1277,7 @@ ax.set_extent([-130, -65, 25, 50], crs = fig_proj)
 plt.show(block = False)
 
 #%%
-# cell 17
+# cell 19
 
 #####################
 ### Calculate SMI ###
@@ -1144,6 +1327,8 @@ for ij in range(I*J):
 # Reshape data back to a 3D array.
 SMI = SMI2d.reshape(I, J, T, order = 'F')
 
+# Remove any sea data points
+SMI[maskSub[:,:,0] == 0] = np.nan
 
 # Write the SMI data
 description = 'This file contains the soil moisture index ' +\
@@ -1171,11 +1356,11 @@ WriteNC(SMI, SM['lat'], SM['lon'], SM['date'], filename = 'smi.NARR.CONUS.pentad
 
 
 #%%
-# cell 18
+# cell 20
 # Create a plot of SMI to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 7, 25)
+ExamineDate = datetime(2012, 7, 30)
 
 ind = np.where(P['ymd'] == ExamineDate)[0][0]
 
@@ -1241,7 +1426,7 @@ ax.set_extent([-130, -65, 25, 50], crs = fig_proj)
 plt.show(block = False)
 
 #%%
-# cell 19
+# cell 21
 
 ######################
 ### Calculate FDII ###
@@ -1337,6 +1522,12 @@ DRO_SEV = DRO_SEV2d.reshape(I, J, T, order = 'F')
 # Finally, FDII is the product of the components
 FDII = FD_INT * DRO_SEV
 
+# Remove any sea data points
+FD_INT[maskSub[:,:,0] == 0] = np.nan
+DRO_SEV[maskSub[:,:,0] == 0] = np.nan
+FDII[maskSub[:,:,0] == 0] = np.nan
+
+
 # Since FDII has its own rapid intensification and drought components pre-defined, it is worth saving these as well.
 
 # Save the FD_INT variable
@@ -1416,7 +1607,7 @@ WriteNC(FDII, SM['lat'], SM['lon'], SM['date'], filename = 'fdii.NARR.CONUS.pent
 
 
 #%%
-# cell 20
+# cell 22
 # Create a plot of FDII to check the calculations
 
 # Determine the date to be examined
@@ -1489,7 +1680,7 @@ plt.show(block = False)
 
 
 #%%
-# cell 21
+# cell 23
 
 ######################
 ### Calculate SODI ###
@@ -1544,7 +1735,10 @@ SMD = SMD * SoilDepth * rho_l
 
 # Next, calculate the moisture deficit given in equation 1 of Sohrabi et al. 2015.
 D = np.ones((I, J, T)) * np.nan
-D[:,:,6:] = (P['precip'][:,:,6:] + L[:,:,6:] + RO['ro'][:,:,:-6]) - (PET['pevap'][:,:,6:] + SMD[:,:,:-6]) # Note D[:,:,:-1] means each D is at the start of the respective delta t, consistent with other indices calculated thus far.
+# D[:,:,6:] = (P['precip'][:,:,6:] + L[:,:,6:] + RO['ro'][:,:,:-6]) - (PET['pevap'][:,:,6:] + SMD[:,:,:-6]) # Note D[:,:,:-1] means each D is at the start of the respective delta t, consistent with other indices calculated thus far.
+
+for t in range(12, T): # Use a monthly average for variables in the previous month
+    D[:,:,t] = (P['precip'][:,:,t] + L[:,:,t] + np.nanmean(RO['ro'][:,:,t-12:t-6], axis = -1)) - (PET['pevap'][:,:,t] + np.nanmean(SMD[:,:,t-12:t-6], axis = -1))
 
 # Next, perform the Box-Car transformation and standardize the data to create SODI, according to equations 5 and 6 in Sohrabi et al. 2015
 SODI = np.ones((I, J, T)) * np.nan
@@ -1576,6 +1770,9 @@ for ij in range(I*J):
 # Transform the data back into a 3D array
 SODI = SODI2d.reshape(I, J, T, order = 'F')
 
+# Remove any sea data points
+SODI[maskSub[:,:,0] == 0] = np.nan
+
 # Write the data
 description = 'This file contains the soil moisture drought index (SODI; unitless), ' +\
                   'calculated from volumetric soil moisture averaged from ' +\
@@ -1602,11 +1799,11 @@ WriteNC(FDII, SM['lat'], SM['lon'], SM['date'], filename = 'fdii.NARR.CONUS.pent
 
 
 #%%
-# cell 22
+# cell 24
 # Create a plot of SODI to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 7, 25)
+ExamineDate = datetime(2012, 7, 30)
 
 ind = np.where(P['ymd'] == ExamineDate)[0][0]
 
