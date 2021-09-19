@@ -26,6 +26,7 @@ Full citations for the referenced papers can be found at:
 - Li et al. 2020a (for SEDI): https://doi.org/10.1016/j.catena.2020.104763
 - Li et al. 2020b (for SAPEI): https://doi.org/10.1175/JHM-D-19-0298.1
 - Hunt et al. 2009 (for SMI): https://doi.org/10.1002/joc.1749
+- Sohrabi et al. 2015 (for SODI): https://doi.org/10.1061/(ASCE)HE.1943-5584.0001213
 - Otkin et al. 2021 (for FDII): https://doi.org/10.3390/atmos12060741
 - Vicente-Serrano et al. 2010 (for SPEI): https://doi.org/10.1175/2009JCLI2909.1
 - Anderson et al. 2013 (for ESI): https://doi.org/10.1175/2010JCLI3812.1
@@ -194,7 +195,10 @@ def CalculateClimatology(var, pentad = True):
     '''
     
     # Obtain the dimensions of the variable
-    I, J, T = var.shape
+    if len(var.shape) < 3:
+        T = var.size
+    else:
+        I, J, T = var.shape
     
     # Count the number of years
     if pentad is True:
@@ -218,15 +222,24 @@ def CalculateClimatology(var, pentad = True):
         n = n + yearLen
     
     # Initialize the climatological mean and standard deviation variables
-    ClimMean = np.ones((I, J, yearLen)) * np.nan
-    ClimStd  = np.ones((I, J, yearLen)) * np.nan
+    if len(var.shape) < 3:
+        ClimMean = np.ones((yearLen)) * np.nan
+        ClimStd  = np.ones((yearLen)) * np.nan
+    else:
+        ClimMean = np.ones((I, J, yearLen)) * np.nan
+        ClimStd  = np.ones((I, J, yearLen)) * np.nan
     
     # Calculate the mean and standard deviation for each day and at each grid
     #   point
     for i in range(1, yearLen+1):
         ind = np.where(i == day)[0]
-        ClimMean[:,:,i-1] = np.nanmean(var[:,:,ind], axis = -1)
-        ClimStd[:,:,i-1]  = np.nanstd(var[:,:,ind], axis = -1)
+        
+        if len(var.shape) < 3:
+            ClimMean[i-1] = np.nanmean(var[ind], axis = -1)
+            ClimStd[i-1]  = np.nanstd(var[ind], axis = -1)
+        else:
+            ClimMean[:,:,i-1] = np.nanmean(var[:,:,ind], axis = -1)
+            ClimStd[:,:,i-1]  = np.nanstd(var[:,:,ind], axis = -1)
     
     return ClimMean, ClimStd
 
@@ -259,6 +272,7 @@ T    = LoadNC('temp', 'temperature_2m.NARR.CONUS.pentad.nc', sm = False, path = 
 ET   = LoadNC('evap', 'evaporation.NARR.CONUS.pentad.nc', sm = False, path = path)
 PET  = LoadNC('pevap', 'potential_evaporation.NARR.CONUS.pentad.nc', sm = False, path = path)
 P    = LoadNC('precip', 'accumulated_precipitation.NARR.CONUS.pentad.nc', sm = False, path = path)
+RO   = LoadNC('ro', 'baseflow_runoff.NARR.CONUS.pentad.nc', sm = False, path = path)
 SM   = LoadNC('soilm', 'soil_moisture.NARR.CONUS.pentad.nc', sm = True, path = path)
 SM00 = LoadNC('soilm', 'soil_moisture.00cm.NARR.CONUS.pentad.nc', sm = True, path = path)
 SM10 = LoadNC('soilm', 'soil_moisture.10cm.NARR.CONUS.pentad.nc', sm = True, path = path)
@@ -288,6 +302,10 @@ OutPath = './Data/Indices/'
 
 # Obtain the evaporative stress ratio (ESR); the ratio of ET to PET
 ESR = ET['evap']/PET['pevap']
+
+# Remove values exceed a certain limit as they are likely an error
+ESR[ESR < 0] = np.nan
+ESR[ESR > 3] = np.nan
 
 # Determine the climatological mean and standard deviations of ESR
 ESRMean, ESRstd = CalculateClimatology(ESR, pentad = True)
@@ -726,7 +744,7 @@ for t, date in enumerate(OneYear[::5]):
     ind = np.where( (P['month'] == date.month) & (P['day'] == date.day) )[0]
     
     # Get the frequency estimator
-    frequencies[:,:,ind] = (stats.mstats.rankdata(D[:,:,ind]) - 0.35)/N
+    frequencies[:,:,ind] = (stats.mstats.rankdata(D[:,:,ind], axis = -1) - 0.35)/N
     
     # Get the moments
     PWM0[:,:,t] = np.nansum(((1 - frequencies[:,:,ind])**0)*D[:,:,ind], axis = -1)/N
@@ -745,7 +763,14 @@ alpha = (PWM0 - 2*PWM1)*beta/(gamma(1 + 1/beta)*gamma(1-1/beta))
 gamm  = PWM0 - (PWM0 - 2*PWM1)*beta
 
 # Obtain the cumulative distribution of the deficit.
-F = (1 + (alpha/(D - gamm))**beta)**-1
+F = np.ones((I, J, T)) * np.nan
+
+for n, date in enumerate(OneYear[::5]):
+    ind = np.where( (date.month == P['month']) & (date.day == P['day']) )[0]
+    
+    for t in ind:
+        F[:,:,t] = (1 + (alpha[:,:,n]/(D[:,:,t] - gamm[:,:,n]))**beta[:,:,n])**-1
+
 
 
 # Finally, use this to obtain the probabilities and convert the data to a standardized normal distribution
@@ -815,7 +840,7 @@ WriteNC(SAPEI, P['lat'], P['lon'], P['date'], filename = 'sapei.NARR.CONUS.penta
 # Create a plot of SAPEI to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 8, 1)
+ExamineDate = datetime(2012, 7, 25)
 
 ind = np.where(P['ymd'] == ExamineDate)[0][0]
 
@@ -839,7 +864,7 @@ fig_proj  = ccrs.PlateCarree()
 cmin = -3; cmax = 3; cint = 0.5
 clevs = np.arange(cmin, cmax+cint, cint)
 nlevs = len(clevs) - 1
-cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+cmap  = plt.get_cmap(name = 'RdBu', lut = nlevs)
 
 data_proj = ccrs.PlateCarree()
 fig_proj  = ccrs.PlateCarree()
@@ -906,7 +931,7 @@ for t, date in enumerate(OneYear[::5]):
     ind = np.where( (P['month'] == date.month) & (P['day'] == date.day) )[0]
     
     # Get the frequency estimator
-    frequencies[:,:,ind] = (stats.mstats.rankdata(D[:,:,ind]) - 0.35)/N
+    frequencies[:,:,ind] = (stats.mstats.rankdata(D[:,:,ind], axis = -1) - 0.35)/N
     
     # Get the moments
     PWM0[:,:,t] = np.nansum(((1 - frequencies[:,:,ind])**0)*D[:,:,ind], axis = -1)/N
@@ -925,7 +950,13 @@ alpha = (PWM0 - 2*PWM1)*beta/(gamma(1 + 1/beta)*gamma(1-1/beta))
 gamm  = PWM0 - (PWM0 - 2*PWM1)*beta
 
 # Obtain the cumulative distribution of the deficit.
-F = (1 + (alpha/(D - gamm))**beta)**-1
+F = np.ones((I, J, T)) * np.nan
+
+for n, date in enumerate(OneYear[::5]):
+    ind = np.where( (date.month == ET['month']) & (date.day == ET['day']) )[0]
+    
+    for t in ind:
+        F[:,:,t] = (1 + (alpha[:,:,n]/(D[:,:,t] - gamm[:,:,n]))**beta[:,:,n])**-1
 
 
 # Finally, use this to obtain the probabilities and convert the data to a standardized normal distribution
@@ -997,7 +1028,7 @@ WriteNC(SPEI, P['lat'], P['lon'], P['date'], filename = 'spei.NARR.CONUS.pentad.
 # Create a plot of SPEI to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 7, 30)
+ExamineDate = datetime(2012, 7, 25)
 
 ind = np.where(P['ymd'] == ExamineDate)[0][0]
 
@@ -1021,7 +1052,7 @@ fig_proj  = ccrs.PlateCarree()
 cmin = -3; cmax = 3; cint = 0.5
 clevs = np.arange(cmin, cmax+cint, cint)
 nlevs = len(clevs) - 1
-cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+cmap  = plt.get_cmap(name = 'RdBu', lut = nlevs)
 
 data_proj = ccrs.PlateCarree()
 fig_proj  = ccrs.PlateCarree()
@@ -1093,13 +1124,13 @@ SMI2d = SMI.reshape(I*J, T, order = 'F')
 
 for ij in range(I*J):
     # First determine the wilting point and field capacity. This is done by examining 5th and 95th percentiles.
-    VSM_WP_00 = stats.percentileofscore(VSM_00_2d[ij,GrowInd], WPPercentile)
-    VSM_WP_10 = stats.percentileofscore(VSM_10_2d[ij,GrowInd], WPPercentile)
-    VSM_WP_40 = stats.percentileofscore(VSM_40_2d[ij,GrowInd], WPPercentile)
+    VSM_WP_00 = stats.scoreatpercentile(VSM_00_2d[ij,GrowInd], WPPercentile)
+    VSM_WP_10 = stats.scoreatpercentile(VSM_10_2d[ij,GrowInd], WPPercentile)
+    VSM_WP_40 = stats.scoreatpercentile(VSM_40_2d[ij,GrowInd], WPPercentile)
     
-    VSM_FC_00 = stats.percentileofscore(VSM_00_2d[ij,GrowInd], FCPercentile)
-    VSM_FC_10 = stats.percentileofscore(VSM_10_2d[ij,GrowInd], FCPercentile)
-    VSM_FC_40 = stats.percentileofscore(VSM_40_2d[ij,GrowInd], FCPercentile)
+    VSM_FC_00 = stats.scoreatpercentile(VSM_00_2d[ij,GrowInd], FCPercentile)
+    VSM_FC_10 = stats.scoreatpercentile(VSM_10_2d[ij,GrowInd], FCPercentile)
+    VSM_FC_40 = stats.scoreatpercentile(VSM_40_2d[ij,GrowInd], FCPercentile)
     
     # Determine the SMI at each level based on equation in section 1 of Hunt et al. 2009
     SMI00 = -5 + 10*(VSM_00_2d[ij,:] - VSM_WP_00)/(VSM_FC_00 - VSM_WP_00)
@@ -1107,7 +1138,7 @@ for ij in range(I*J):
     SMI40 = -5 + 10*(VSM_40_2d[ij,:] - VSM_WP_40)/(VSM_FC_40 - VSM_WP_40)
     
     # Average these values together to get the full SMI
-    SMI2d[ij,:] = np.nanmean(np.concatenate((SMI00, SMI10, SMI40), axis = 1), axis = 1)
+    SMI2d[ij,:] = np.nanmean(np.stack((SMI00, SMI10, SMI40), axis = 1), axis = 1)
     
     
 # Reshape data back to a 3D array.
@@ -1144,7 +1175,7 @@ WriteNC(SMI, SM['lat'], SM['lon'], SM['date'], filename = 'smi.NARR.CONUS.pentad
 # Create a plot of SMI to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 7, 30)
+ExamineDate = datetime(2012, 7, 25)
 
 ind = np.where(P['ymd'] == ExamineDate)[0][0]
 
@@ -1165,10 +1196,10 @@ data_proj = ccrs.PlateCarree()
 fig_proj  = ccrs.PlateCarree()
 
 # Colorbar information
-cmin = -3; cmax = 3; cint = 0.5
+cmin = -5; cmax = 5; cint = 0.5
 clevs = np.arange(cmin, cmax+cint, cint)
 nlevs = len(clevs) - 1
-cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+cmap  = plt.get_cmap(name = 'RdBu', lut = nlevs)
 
 data_proj = ccrs.PlateCarree()
 fig_proj  = ccrs.PlateCarree()
@@ -1244,13 +1275,13 @@ FD_INT2d = FD_INT.reshape(I*J, T, order = 'F')
 for ij in range(I*J):
     for t in range(T-2): # Note the last two day is excluded as there is no change to examine
     
-        obs = np.ones((9)) * np.nan # Note, the method detail in Otkin et al. 2021 involves looking ahead 2 to 10 pentads (9 entries total)
+        obs = np.ones((9)) * np.nan # Note, the method detailed in Otkin et al. 2021 involves looking ahead 2 to 10 pentads (9 entries total)
         for npend in np.arange(2, 10+1, 1):
             npend = int(npend)
-            if (t+npend) > T: # If t + npend is in the future (beyond the dataset), break the loop and use NaNs for obs instead
-                break         # This should not effect results as this will only occur in November to December, outside of the growing season.
+            if (t+npend) >= T: # If t + npend is in the future (beyond the dataset), break the loop and use NaNs for obs instead
+                break          # This should not effect results as this will only occur in November to December, outside of the growing season.
             else:
-                obs[npend-2] = (SMPer2d[ij,t+npend] - SMPer2d[ij,t])/npend # Note m is the number of pentads the system is corrently looking ahead to.
+                obs[npend-2] = (SMPer2d[ij,t+npend] - SMPer2d[ij,t])/npend # Note npend is the number of pentads the system is corrently looking ahead to.
         
         # If the maximum change in percentiles is less than the base change requirement (15 percentiles in 4 pentads), set FD_INT to 0.
         #  Otherwise, determine FD_INT according to eq. 1 in Otkin et al. 2021
@@ -1268,26 +1299,31 @@ DRO_SEV2d[:,0] = 0 # Initialize the first entry to 0, since there is no rapid in
 
 for ij in range(I*J):
     for t in range(1, T-1):
-        if (FD_INT2d[ij,t] > 0) & (FD_INT2d[ij, t+1] == 0):
-            obs = np.ones((18)) * np.nan # In Otkin et al. 2021, the DRO_SEV can look up to 18 pentads (90 days) in the future for its calculation
+        if (FD_INT2d[ij,t] > 0):
             
             Dro_Sum = 0
-            for npent in np.arange(0, 18, 1):
+            for npent in np.arange(0, 18+1, 1): # In Otkin et al. 2021, the DRO_SEV can look up to 18 pentads (90 days) in the future for its calculation
                 
-                if (t+npend) > T:       # For simplicity, set DRO_SEV to 0 when near the end of the dataset (this should not impact anything as it is not in
+                if (t+npent) >= T:      # For simplicity, set DRO_SEV to 0 when near the end of the dataset (this should not impact anything as it is not in
                     DRO_SEV2d[ij,t] = 0 # the growing season)
                     break
                 else:
+                    Dro_Sum = Dro_Sum + (DRO_BASE - SMPer2d[ij,t+npent])
+                    
                     if SMPer2d[ij,t+npent] > DRO_BASE: # Terminate the summation and calculate DRO_SEV if SM is no longer below the base percentile for drought
                         if npent < 4:
                             # DRO_SEV is set to 0 if drought was not consistent for at least 4 pentads after rapid intensificaiton (i.e., little to no impact)
                             DRO_SEV2d[ij,t] = 0
                             break
                         else:
-                            DRO_SEV2d[ij,t] = Dro_Sum/npent
+                            DRO_SEV2d[ij,t] = Dro_Sum/npent # Terminate the loop and determine the drought severity if the drought condition is broken
                             break
-                            
-                    Dro_Sum = Dro_Sum + (DRO_BASE - SMPer2d[ij,t+npent])
+                        
+                    elif (npent >= 18): # Calculate the drought severity of the loop goes out 90 days, but the drought does not end
+                        DRO_SEV2d[ij,t] = Dro_Sum/npent
+                        break
+                    else:
+                        pass
         
         # In continuing consistency with Otkin et al. 2021, if the pentad does not immediately follow rapid intensification, drought is set 0
         else:
@@ -1384,9 +1420,10 @@ WriteNC(FDII, SM['lat'], SM['lon'], SM['date'], filename = 'fdii.NARR.CONUS.pent
 # Create a plot of FDII to check the calculations
 
 # Determine the date to be examined
-ExamineDate = datetime(2012, 7, 30)
+StartExamineDate = datetime(2012, 5, 1)
+EndExamineDate   = datetime(2012, 8, 1)
 
-ind = np.where(P['ymd'] == ExamineDate)[0][0]
+ind = np.where( (SM['year'] == StartExamineDate.year) & (SM['month'] >= StartExamineDate.month) & (SM['month'] <= EndExamineDate.month) )[0]
 
 
 
@@ -1405,10 +1442,10 @@ data_proj = ccrs.PlateCarree()
 fig_proj  = ccrs.PlateCarree()
 
 # Colorbar information
-cmin = -3; cmax = 3; cint = 0.5
+cmin = 0; cmax = 60; cint = 1.0
 clevs = np.arange(cmin, cmax+cint, cint)
 nlevs = len(clevs) - 1
-cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+cmap  = plt.get_cmap(name = 'gist_rainbow_r', lut = nlevs)
 
 data_proj = ccrs.PlateCarree()
 fig_proj  = ccrs.PlateCarree()
@@ -1437,7 +1474,7 @@ ax.xaxis.tick_bottom()
 ax.yaxis.tick_left()
 
 # Plot the data
-cs = ax.contourf(SM['lon'], SM['lat'], FDII[:,:,ind], levels = clevs, cmap = cmap,
+cs = ax.contourf(SM['lon'], SM['lat'], np.nanmax(FDII[:,:,ind], axis = -1), levels = clevs, cmap = cmap,
                   transform = data_proj, extend = 'both', zorder = 1)
 
 # Create and set the colorbar
@@ -1451,3 +1488,185 @@ plt.show(block = False)
 
 
 
+#%%
+# cell 21
+
+######################
+### Calculate SODI ###
+######################
+
+# Details for SODI can be found in the Sohrabi et al. 2015 paper.
+
+# In order to get SODI, moisture loss from the soil column is needed. This is assumed to be the ET - P
+L = ET['evap'] - P['precip']
+
+# If P > ET, there is no moisture loss.
+L[P['precip'] > ET['evap']] = 0
+
+# Next, determine the available water content in the soil using the FC and WP estimates from Hunt et al. 2009.
+I, J, T = SM['soilm'].shape
+GrowInd = np.where( (SM['month'] >= 4) & (SM['month'] <= 10) )[0] # Percentiles are determined from growing season values.
+
+WPPercentile = 5
+FCPercentile = 95
+
+AWC = np.ones((I, J)) * np.nan
+
+# Reshape data into a 2D size.
+VSM2d = SM['soilm'].reshape(I*J, T, order = 'F') 
+
+AWC2d = AWC.reshape(I*J, order = 'F')
+
+for ij in range(I*J):
+    # First determine the wilting point and field capacity. This is done by examining 5th and 95th percentiles.
+    VSM_WP = stats.scoreatpercentile(VSM2d[ij,GrowInd], WPPercentile)
+    
+    VSM_FC = stats.scoreatpercentile(VSM2d[ij,GrowInd], FCPercentile)
+    
+    # The available water content is simply the difference between field capacity and wilting point
+    AWC2d[ij] = VSM_FC - VSM_WP
+    
+# Convert AWC back to 2D data
+AWC = AWC2d.reshape(I, J, order = 'F')
+
+# The soil moisture deficiency then becomes the difference between AWC and soil moisutre
+SMD = np.ones((I, J, T)) * np.nan
+for t in range(T):
+    SMD[:,:,t] = AWC[:,:] - SM['soilm'][:,:,t]
+    
+# Note to get the volumetric water content in fractional form, it is the mass of water lost divided by rho_l (to convert to volume), divided by sample volume.
+# To invert this, multiply this by rho_l to get the mass of water in a volume of soil, then multiply by soil depth to get the mass of water in an area of soil.
+### Note: This is primarily done to bring the soil moisture variable (SMD) to the same units as the other variables (kg m^-2). I.e., it is done for unit consistency.
+SoilDepth = 0.4  # m
+rho_l     = 1000 # kg m^-3
+
+SMD = SMD * SoilDepth * rho_l
+
+# Next, calculate the moisture deficit given in equation 1 of Sohrabi et al. 2015.
+D = np.ones((I, J, T)) * np.nan
+D[:,:,6:] = (P['precip'][:,:,6:] + L[:,:,6:] + RO['ro'][:,:,:-6]) - (PET['pevap'][:,:,6:] + SMD[:,:,:-6]) # Note D[:,:,:-1] means each D is at the start of the respective delta t, consistent with other indices calculated thus far.
+
+# Next, perform the Box-Car transformation and standardize the data to create SODI, according to equations 5 and 6 in Sohrabi et al. 2015
+SODI = np.ones((I, J, T)) * np.nan
+
+SODI2d = SODI.reshape(I*J, T, order = 'F')
+D2d    = D.reshape(I*J, T, order = 'F')
+
+for ij in range(I*J):
+    
+    # From looking around at various features, it seems as if lambda2 in the Box-Car transformation is the minimum value of the data, so that all values are > 0.
+    if np.nanmin(D2d[ij,:]) < 0: # Ensure the shift is positive
+        lambda2 = -1 * np.nanmin(D2d[ij,:])
+    else:
+        lambda2 = np.nanmin(D2d[ij,:])
+    
+    # Perform the Box-Car transformation. Note boxcar only accepts a vector, so this has to be done for 1 grid point at a time
+    y, lambda1 = stats.boxcox(D2d[ij,:] + lambda2 + 0.001) # 0.001 should have a small impact on values, but ensure D + lambda2 is not 0 at any point
+    
+    # Determine the climatology of the transformed data
+    yMean, yStd = CalculateClimatology(y, pentad = True)
+    
+    # Standardize the transformed data to calculate SODI for the grid point
+    for n, date in enumerate(OneYear[::5]):
+        ind = np.where( (date.month == SM['month']) & (date.day == SM['day']) )[0]
+        
+        for i in ind:
+            SODI2d[ij,i] = (y[i] - yMean[n])/yStd[n]
+
+# Transform the data back into a 3D array
+SODI = SODI2d.reshape(I, J, T, order = 'F')
+
+# Write the data
+description = 'This file contains the soil moisture drought index (SODI; unitless), ' +\
+                  'calculated from volumetric soil moisture averaged from ' +\
+                  'depths of 0 to 40 cm, precipitation, ET, PET, and precipitation from the North American Regional Reanalysis ' +\
+                  'dataset. Details on SODI, its components, and their calculations can be found ' +\
+                  'in Sohrabi et al. 2015 (https://doi.org/10.1061/(ASCE)HE.1943-5584.0001213). ' +\
+                  'The data is subsetted to focus on the contential ' +\
+                  'U.S., and it is on the weekly timescale. Data ranges form ' +\
+                  'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
+                  'sodi: Pentad SODI (unitless) data. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
+
+
+WriteNC(FDII, SM['lat'], SM['lon'], SM['date'], filename = 'fdii.NARR.CONUS.pentad.nc', 
+        VarSName = 'fdii', description = description, path = OutPath)
+
+
+#%%
+# cell 22
+# Create a plot of SODI to check the calculations
+
+# Determine the date to be examined
+ExamineDate = datetime(2012, 7, 25)
+
+ind = np.where(P['ymd'] == ExamineDate)[0][0]
+
+
+
+# Lonitude and latitude tick information
+lat_int = 10
+lon_int = 10
+
+lat_label = np.arange(-90, 90, lat_int)
+lon_label = np.arange(-180, 180, lon_int)
+
+LonFormatter = cticker.LongitudeFormatter()
+LatFormatter = cticker.LatitudeFormatter()
+
+# Projection information
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Colorbar information
+cmin = -2; cmax = 2; cint = 0.5
+clevs = np.arange(cmin, cmax+cint, cint)
+nlevs = len(clevs) - 1
+cmap  = plt.get_cmap(name = 'RdBu', lut = nlevs)
+
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+# Create the figure
+fig = plt.figure(figsize = [12, 16])
+ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+# Set title
+ax.set_title('SODI for ' + ExamineDate.strftime('%Y-%m-%d'), fontsize = 16)
+
+# Set borders
+ax.coastlines()
+ax.add_feature(cfeature.STATES, edgecolor = 'black')
+
+# Set tick information
+ax.set_xticks(lon_label, crs = ccrs.PlateCarree())
+ax.set_yticks(lat_label, crs = ccrs.PlateCarree())
+ax.set_xticklabels(lon_label, fontsize = 16)
+ax.set_yticklabels(lat_label, fontsize = 16)
+
+ax.xaxis.set_major_formatter(LonFormatter)
+ax.yaxis.set_major_formatter(LatFormatter)
+
+ax.xaxis.tick_bottom()
+ax.yaxis.tick_left()
+
+# Plot the data
+cs = ax.contourf(SM['lon'], SM['lat'], SODI[:,:,ind], levels = clevs, cmap = cmap,
+                  transform = data_proj, extend = 'both', zorder = 1)
+
+# Create and set the colorbar
+cbax = fig.add_axes([0.92, 0.375, 0.02, 0.25])
+cbar = fig.colorbar(cs, cax = cbax)
+
+# Set the extent
+ax.set_extent([-130, -65, 25, 50], crs = fig_proj)
+
+plt.show(block = False)
