@@ -37,6 +37,8 @@ import cartopy.feature as cfeature
 import cartopy.mpl.ticker as cticker
 import cartopy.io.shapereader as shpreader
 from scipy import stats
+from scipy import interpolate
+from scipy import signal
 from scipy.special import gamma
 from netCDF4 import Dataset, num2date
 from datetime import datetime, timedelta
@@ -232,6 +234,127 @@ def CalculateClimatology(var, pentad = True):
 
 #%%
 # cell 5
+# Function to subset any dataset.
+def SubsetData(X, Lat, Lon, LatMin, LatMax, LonMin, LonMax):
+    '''
+    This function is designed to subset data for any gridded dataset, including
+    the non-simple grid used in the NARR dataset, where the size of the subsetted
+    data is unknown. Note this function only makes square subsets with a maximum 
+    and minimum latitude/longitude.
+    
+    Inputs:
+    - X: The variable to be subsetted.
+    - Lat: The gridded latitude data corresponding to X.
+    - Lon: The gridded Longitude data corresponding to X.
+    - LatMax: The maximum latitude of the subsetted data.
+    - LatMin: The minimum latitude of the subsetted data.
+    - LonMax: The maximum longitude of the subsetted data.
+    - LonMin: The minimum longitude of the subsetted data.
+    
+    Outputs:
+    - XSub: The subsetted data.
+    - LatSub: Gridded, subsetted latitudes.
+    - LonSub: Gridded, subsetted longitudes.
+    '''
+    
+    # Collect the original sizes of the data/lat/lon
+    I, J, T = X.shape
+    
+    # Reshape the data into a 2D array and lat/lon to a 1D array for easier referencing.
+    X2D   = X.reshape(I*J, T, order = 'F')
+    Lat1D = Lat.reshape(I*J, order = 'F')
+    Lon1D = Lon.reshape(I*J, order = 'F')
+    
+    # Find the indices in which to make the subset.
+    LatInd = np.where( (Lat1D >= LatMin) & (Lat1D <= LatMax) )[0]
+    LonInd = np.where( (Lon1D >= LonMin) & (Lon1D <= LonMax) )[0]
+    
+    # Find the points where the lat and lon subset overlap. This comprises the subsetted grid.
+    SubInd = np.intersect1d(LatInd, LonInd)
+    
+    # Next find, the I and J dimensions of subsetted grid.
+    Start = 0 # The starting point of the column counting.
+    Count = 1 # Row count starts at 1
+    Isub  = 0 # Start by assuming subsetted column size is 0.
+    
+    for n in range(len(SubInd[:-1])): # Exclude the last value to prevent indexing errors.
+        IndDiff = SubInd[n+1] - SubInd[n] # Obtain difference between this index and the next.
+        if (n+2) == len(SubInd): # At the last value, everything needs to be increased by 2 to account for the missing indice at the end.
+            Isub = np.nanmax([Isub, n+2 - Start]) # Note since this is the last indice, and this row is counted, there is no Count += 1.
+        elif ( (IndDiff > 1) |              # If the difference is greater than 1, or if
+             (np.mod(SubInd[n]+1,I) == 0) ):# SubInd is divisible by I, then a new row 
+                                            # is started in the gridded array.
+            Isub = np.nanmax([Isub, n+1 - Start]) # Determine the highest column count (may not be the same from row to row)
+            Start = n+1 # Start the counting anew.
+            Count = Count + 1 # Increment the row count by 1 as the next row is entered.
+        else:
+            pass
+        
+    # At the end, Count has the total number of rows in the subset.
+    Jsub = Count
+    
+    # Next, the column size may not be the same from row to row. The rows with
+    # with columns less than Isub need to be filled in. 
+    # Start by finding how many placeholders are needed.
+    PH = Isub * Jsub - len(SubInd) # Total number of needed points - number in the subset
+    
+    # Initialize the variable that will hold the needed indices.
+    PlaceHolder = np.ones((PH)) * np.nan
+    
+    # Fill the placeholder values with the indices needed to complete a Isub x Jsub matrix
+    Start = 0
+    m = 0
+    
+    for n in range(len(SubInd[:-1])):
+        # Identify when row changes occur.
+        IndDiff = SubInd[n+1] - SubInd[n]
+        if (n+2) == len(SubInd): # For the end of last row, an n+2 is needed to account for the missing index (SubInd[:-1] was used)
+            ColNum = n+2-Start
+            PlaceHolder[m:m+Isub-ColNum] = SubInd[n+1] + np.arange(1, 1+Isub-ColNum)
+            # Note this is the last value, so nothing else needs to be incremented up.
+        elif ( (IndDiff > 1) | (np.mod(SubInd[n]+1,I) == 0) ):
+            # Determine how many columns this row has.
+            ColNum = n+1-Start
+            
+            # Fill the placeholder with the next index(ices) when the row has less than
+            # the maximum number of columns (Isub)
+            PlaceHolder[m:m+Isub-ColNum] = SubInd[n] + np.arange(1, 1+Isub-ColNum)
+            
+            # Increment the placeholder index by the number of entries filled.
+            m = m + Isub - ColNum
+            Start = n+1
+            
+        
+        else:
+            pass
+    
+    # Next, convert the placeholders to integer indices.
+    PlaceHolderInt = PlaceHolder.astype(int)
+    
+    # Add and sort the placeholders to the indices.
+    SubIndTotal = np.sort(np.concatenate((SubInd, PlaceHolderInt), axis = 0))
+    
+    # The placeholder indices are technically outside of the desired subset. So
+    # turn those values to NaN so they do not effect calculations.
+    # (In theory, X2D is not the same variable as X, so the original dataset 
+    #  should remain untouched.)
+    X2D[PlaceHolderInt,:] = np.nan
+    
+    # Collect the subset of the data, lat, and lon
+    XSub = X2D[SubIndTotal,:]
+    LatSub = Lat1D[SubIndTotal]
+    LonSub = Lon1D[SubIndTotal]
+    
+    # Reorder the data back into a 3D array, and lat and lon into gridded 2D arrays
+    XSub = XSub.reshape(Isub, Jsub, T, order = 'F')
+    LatSub = LatSub.reshape(Isub, Jsub, order = 'F')
+    LonSub = LonSub.reshape(Isub, Jsub, order = 'F')
+    
+    # Return the the subsetted data
+    return XSub, LatSub, LonSub
+
+#%%
+# cell 6
 # Create a function to generate a range of datetimes
 def DateRange(StartDate, EndDate):
     '''
@@ -249,13 +372,14 @@ def DateRange(StartDate, EndDate):
         yield StartDate + timedelta(n) 
 
 #%%
-# cell 6
+# cell 7
 # Load the indices 
     
 path = './Data/Indices/'
 
 sesr = LoadNC('sesr', 'sesr.NARR.CONUS.pentad.nc', path = path)
 spei = LoadNC('spei', 'spei.NARR.CONUS.pentad.nc', path = path)
+eddi = LoadNC('eddi', 'eddi.NARR.CONUS.pentad.nc', path = path)
 fdii = LoadNC('fdii', 'fdii.NARR.CONUS.pentad.nc', path = path)
 
 
@@ -269,9 +393,59 @@ OneYearDay   = np.asarray([date.day for date in OneYear])
 # Determine the path indices will be written to
 OutPath = './Data/FD_Data/'
 
+#%%
+# cell 8
+# Load and subset the land-sea mask data
+
+# Create a function to load 2D data
+def load2Dnc(filename, SName, path = './Data/'):
+    '''
+    This function loads 2 dimensional .nc files (e.g., the lat or lon files/
+    only spatial files). Function is simple as these files only contain the raw data.
+    
+    Inputs:
+    - filename: The filename of the .nc file to be loaded.
+    - SName: The short name of the variable in the .nc file (i.e., the name to
+             call when loading the data)
+    - Path: The path from the present direction to the directory the file is in.
+    
+    Outputs:
+    - var: The main variable in the .nc file.
+    '''
+    
+    with Dataset(path + filename, 'r') as nc:
+        var = nc.variables[SName][:,:]
+        
+    return var
+
+
+# Load the mask data
+mask = load2Dnc('land.nc', 'land')
+lat = load2Dnc('lat_narr.nc', 'lat') # Dataset is lat x lon
+lon = load2Dnc('lon_narr.nc', 'lon') # Dataset is lat x lon
+
+# Turn positive lon values into negative
+for i in range(len(lon[:,0])):
+    ind = np.where( lon[i,:] > 0 )[0]
+    lon[i,ind] = -1*lon[i,ind]
+
+# Turn mask from time x lat x lon into lat x lon x time
+T, I, J = mask.shape
+
+maskNew = np.ones((I, J, T)) * np.nan
+maskNew[:,:,0] = mask[0,:,:] # No loop is needed since the time dimension has length 1
+
+# Subset the data to the same subset as the criteria data
+LatMin = 25
+LatMax = 50
+LonMin = -130
+LonMax = -65
+maskSub, LatSub, LonSub = SubsetData(maskNew, lat, lon, LatMin = LatMin, LatMax = LatMax,
+                                     LonMin = LonMin, LonMax = LonMax) 
+
 
 #%%
-# cell 7
+# cell 9
 ###############################
 ### Christian et al. Method ###
 ###############################
@@ -279,13 +453,134 @@ OutPath = './Data/FD_Data/'
 # Calcualte flash droughts using an improved version of the FD identification method from Christian et al. 2019
 # This method uses SESR to identify FD
 
+# Initialize some variables
 I, J, T = sesr['sesr'].shape
+sesr_inter = np.ones((I, J, T)) * np.nan
+sesr_filt  = np.ones((I, J, T)) * np.nan
 
+sesr2d = sesr['sesr'].reshape(I*J, T, order = 'F')
+sesr_inter2d = sesr_inter.reshape(I*J, T, order = 'F')
+sesr_filt2d  = sesr_filt.reshape(I*J, T, order = 'F')
+
+mask2d = maskSub.reshape(I*J, 1, order = 'F')
+
+x = np.arange(-6.5, 6.5, (13/T)) # a variable covering the range of SESR with 1 entry for each time step
+
+# Parameters for the filter
+WinLength = 21 # Window length of 21 pentads
+PolyOrder = 4
+
+# Perform a basic linear interpolation for NaN values and apply a SG filter
+print('Applying interpolation and Savitzky-Golay filter to SESR')
+for ij in range(I*J):
+    if mask2d[ij,0] == 0:
+        continue
+    else:
+        pass
+    
+    # Perform a linear interpolation to remove NaNs
+    ind = np.isfinite(sesr2d[ij,:])
+    if np.nansum(ind) == 0:
+        continue
+    else:
+        pass
+    
+    ind = np.where(ind == True)[0]
+    interp_func = interpolate.interp1d(x[ind], sesr2d[ij,ind], kind = 'linear', fill_value = 'extrapolate')
+    
+    sesr_inter2d[ij,:] = interp_func(x)
+    
+    # Apply the Savitzky-Golay filter to the interpolated SESR data
+    sesr_filt2d[ij,:] = signal.savgol_filter(sesr_inter2d[ij,:], WinLength, PolyOrder)
+        
+# Reorder SESR back to 3D data
+sesr_filt = sesr_filt2d.reshape(I, J, T, order = 'F')
+
+# Determine the change in SESR
+print('Calculating the change in SESR')
+DeltaSESR  = np.ones((I, J, T)) * np.nan
+DeltaSESRz = np.ones((I, J, T)) * np.nan
+
+DeltaSESR[:,:,:-1] = sesr_filt[:,:,:-1] - sesr_filt[:,:,1:]
+
+# Standardize the change in SESR
+DeltaSESRMean, DeltaSESRstd = CalculateClimatology(DeltaSESR, pentad = True)
+
+for n, date in enumerate(OneYear[::5]):
+    ind = np.where( (date.month == sesr['month']) & (date.day == sesr['day']) )[0]
+    
+    for t in ind:
+        DeltaSESRz[:,:,t] = (DeltaSESR[:,:,t] - DeltaSESRMean[:,:,n])/DeltaSESRstd[:,:,n]
+
+# Begin the flash drought calculations
+print('Identifying flash drought')
 ChFD = np.ones((I, J, T)) * np.nan
 
+ChFD2d  = ChFD.reshape(I*J, T, order = 'F')
+dSESR2d = DeltaSESRz.reshape(I*J, T, order = 'F')
+
+dsesrPercentile = 25
+sesrPercentile  = 20
+
+MinChange = timedelta(days = 30)
+StartDate = sesr['ymd'][-1]
+
+for ij in range(I*J):
+    if mask2d[ij,0] == 0:
+        continue
+    else:
+        pass
+    
+    StartDate = sesr['ymd'][-1]
+    for t in range(T):
+        ind = np.where( (sesr['ymd'][t].month == sesr['month']) & (sesr['ymd'][t].day == sesr['day']) )[0]
+        
+        ri_crit = np.nanpercentile(dSESR2d[ij,ind], dsesrPercentile)
+        dc_crit = np.nanpercentile(sesr_filt2d[ij,ind], sesrPercentile)
+        
+        if ( (sesr['ymd'][t] - StartDate) >= MinChange ) & (sesr_filt2d[ij,t] <= dc_crit):
+            ChFD2d[ij,t] = 1
+        else:
+            ChFD2d[ij,t] = 0
+        
+        if (dSESR2d[ij,t] <= ri_crit) & (StartDate == sesr['ymd'][-1]):
+            StartDate = sesr['ymd'][t]
+        elif (dSESR2d[ij,t] <= ri_crit) & (StartDate != sesr['ymd'][-1]):
+            pass
+        else:
+            StartDate = sesr['ymd'][-1]
+        
+# Write the data
+print('Writing the data')
+
+description = 'This file contains the flash drought identified for all pentads and CONUS grid points ' +\
+                  'in the NARR dataset using the flash drought identification method in Christian et al. 2019. ' +\
+                  'This method uses SESR as the variable for flash drought identification. ' +\
+                  'Details on SESR method to identify flash drought can be found ' +\
+                  'in Christian et al. 2019 (https://doi.org/10.1175/JHM-D-18-0198.1). ' +\
+                  'The data is subsetted to focus on the contential ' +\
+                  'U.S., and it is on the weekly timescale. Data ranges form ' +\
+                  'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
+                  'chfd: Flash drought identified using the method in Christian et al. 2019. ' +\
+                  'Data is either 0 (no flash drought) or 1 (flash drought identified). Data is on the pentad timescale. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
+
+
+WriteNC(ChFD, sesr['lat'], sesr['lon'], sesr['date'], filename = 'ChristianFD.NARR.CONUS.pentad.nc', 
+        VarSName = 'chfd', description = description, path = OutPath)
+
+
 #%%
-# cell 8
-# Calculate and plot the climatology the flash drought to ensure the identification is correct
+# cell 10
+# Calculate and plot the climatology the Christian et al. flash drought to ensure the identification is correct
 
 
 #### Calcualte the climatology ###
@@ -307,8 +602,6 @@ for y in range(years.size):
     AnnFD[:,:,y] = np.where(( (AnnFD[:,:,y] == 0) | (np.isnan(AnnFD[:,:,y])) ), 
                             AnnFD[:,:,y], 1) # This changes nonzero  and nan (sea) values to 1.
     
-    #### This part needs to be commented out if this code is run without additional help, as the land-sea mask was read in seperately from this
-    #AnnC4[:,:,y] = np.where(np.isnan(maskSub[:,:,0]), AnnC4[:,:,y], np.nan)
 
 # Calculate the percentage number of years with rapid intensifications and flash droughts
 PerAnnFD = np.nansum(AnnFD[:,:,:], axis = -1)/years.size
@@ -370,10 +663,10 @@ fig = plt.figure(figsize = [12, 10])
 
 
 # Flash Drought plot
-ax = fig.add_subplot(2, 1, 1, projection = fig_proj)
+ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set the flash drought title
-ax.set_title('Percent of Years from 1979 - 2019 with Flash Drought', size = 18)
+ax.set_title('Percent of Years from 1979 - 2019 with Christian et al. Flash Drought', size = 18)
 
 # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
 ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
@@ -418,7 +711,422 @@ plt.show(block = False)
 
 
 #%%
-# cell 9
+# cell 11
+#############################
+### Noguera et al. Method ###
+#############################
+
+# Calcualte flash droughts using a FD identification method from Noguera et al. 2020
+# This method uses SPEI to identify FD
+
+# Determine the change in SPEI across a 1 month (30 day = 6 pentad) period
+print('Calculating the change in SPEI')
+
+I, J, T = spei['spei'].shape
+DeltaSPEI = np.ones((I, J, T)) * np.nan
+
+DeltaSPEI[:,:,:-6] = spei['spei'][:,:,:-6] - spei['spei'][:,:,6:] # Set the indices so that each entry in DeltaSPEI corrsponds to the end date of the difference
+
+# Reorder data into 2D arrays for fewer embedded loops
+spei2d = spei['spei'].reshape(I*J, T, order = 'F')
+DeltaSPEI2d = DeltaSPEI.reshape(I*J, T, order = 'F')
+
+# Calculate the occurrence of flash drought
+print('Identifying flash drought')
+NogFD = np.ones((I, J, T)) * np.nan
+
+NogFD2d = NogFD.reshape(I*J, T, order = 'F')
+
+ChangeCriterion = -2
+DroughtCriterion = -1.28
+
+for ij in range(I*J):
+    if mask2d[ij,0] == 0:
+        continue
+    else:
+        pass
+    
+    for t in range(T):
+        if (DeltaSPEI2d[ij,t] <= ChangeCriterion) & (spei2d[ij,t] <= DroughtCriterion): # Note, since the changes are calculated over a 1 month period, the first criterion in Noguera et al. is automatically satisified
+            NogFD2d[ij,t] = 1
+        else:
+            NogFD2d[ij,t] = 0
+
+# Write the data
+print('Writing the data')
+
+description = 'This file contains the flash drought identified for all pentads and CONUS grid points ' +\
+                  'in the NARR dataset using the flash drought identification method in Noguera et al. 2020. ' +\
+                  'This method uses SPEI as the variable for flash drought identification. ' +\
+                  'Details on SPEI method to identify flash drought can be found ' +\
+                  'in Noguera et al. 2020 (https://doi.org/10.1111/nyas.14365). ' +\
+                  'The data is subsetted to focus on the contential ' +\
+                  'U.S., and it is on the weekly timescale. Data ranges form ' +\
+                  'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
+                  'nogfd: Flash drought identified using the method in Noguera et al. 2020. ' +\
+                  'Data is either 0 (no flash drought) or 1 (flash drought identified). Data is on the pentad timescale. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
+
+
+WriteNC(NogFD, spei['lat'], spei['lon'], spei['date'], filename = 'NogueraFD.NARR.CONUS.pentad.nc', 
+        VarSName = 'nogfd', description = description, path = OutPath)
+
+
+
+#%%
+# cell 12
+# Calculate and plot the climatology the Noguera et al. flash drought to ensure the identification is correct
+
+
+#### Calcualte the climatology ###
+
+# Initialize variables
+I, J, T = NogFD.shape
+years  = np.unique(spei['year'])
+
+AnnFD = np.ones((I, J, years.size)) * np.nan
+
+# Calculate the average number of rapid intensifications and flash droughts in a year
+for y in range(years.size):
+    yInd = np.where( (years[y] == spei['year']) & ((spei['month'] >= 4) & (spei['month'] <=10)) )[0] # Second set of conditions ensures only growing season values
+    
+    # Calculate the mean number of rapid intensification and flash drought for each year    
+    AnnFD[:,:,y] = np.nanmean(NogFD[:,:,yInd], axis = -1)
+    
+    # Turn nonzero values to nan (each year gets 1 count to the total)    
+    AnnFD[:,:,y] = np.where(( (AnnFD[:,:,y] == 0) | (np.isnan(AnnFD[:,:,y])) ), 
+                            AnnFD[:,:,y], 1) # This changes nonzero  and nan (sea) values to 1.
+    
+
+# Calculate the percentage number of years with rapid intensifications and flash droughts
+PerAnnFD = np.nansum(AnnFD[:,:,:], axis = -1)/years.size
+
+# Turn 0 values into nan
+PerAnnFD = np.where(PerAnnFD != 0, PerAnnFD, np.nan)
+
+#### Create the Plot ####
+
+# Set colorbar information
+cmin = -20; cmax = 80; cint = 1
+clevs = np.arange(-20, cmax + cint, cint)
+nlevs = len(clevs)
+cmap  = plt.get_cmap(name = 'hot_r', lut = nlevs)
+
+
+# Get the normalized color values
+norm = mcolors.Normalize(vmin = 0, vmax = cmax)
+
+# Generate the colors from the orginal color map in range from [0, cmax]
+colors = cmap(np.linspace(1 - (cmax - 0)/(cmax - cmin), 1, cmap.N))  ### Note, in the event cmin and cmax share the same sign, 1 - (cmax - cmin)/cmax should be used
+colors[:4,:] = np.array([1., 1., 1., 1.]) # Change the value of 0 to white
+
+# Create a new colorbar cut from the colors in range [0, cmax.]
+ColorMap = mcolors.LinearSegmentedColormap.from_list('cut_hot_r', colors)
+
+colorsNew = cmap(np.linspace(0, 1, cmap.N))
+colorsNew[abs(cmin)-1:abs(cmin)+1, :] = np.array([1., 1., 1., 1.]) # Change the value of 0 in the plotted colormap to white
+cmap = mcolors.LinearSegmentedColormap.from_list('hot_r', colorsNew)
+
+# Shapefile information
+# ShapeName = 'Admin_1_states_provinces_lakes_shp'
+ShapeName = 'admin_0_countries'
+CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+
+CountriesReader = shpreader.Reader(CountriesSHP)
+
+USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+
+# Lonitude and latitude tick information
+lat_int = 10
+lon_int = 20
+
+LatLabel = np.arange(-90, 90, lat_int)
+LonLabel = np.arange(-180, 180, lon_int)
+
+LonFormatter = cticker.LongitudeFormatter()
+LatFormatter = cticker.LatitudeFormatter()
+
+# Projection information
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+
+
+# Create the plots
+fig = plt.figure(figsize = [12, 10])
+
+
+# Flash Drought plot
+ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+# Set the flash drought title
+ax.set_title('Percent of Years from 1979 - 2019 with Noguera et al. Flash Drought', size = 18)
+
+# Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
+ax.add_feature(cfeature.STATES)
+ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+
+# Adjust the ticks
+ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
+ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
+
+ax.set_yticklabels(LatLabel, fontsize = 18)
+ax.set_xticklabels(LonLabel, fontsize = 18)
+
+ax.xaxis.set_major_formatter(LonFormatter)
+ax.yaxis.set_major_formatter(LatFormatter)
+
+# Plot the flash drought data
+cs = ax.pcolormesh(spei['lon'], spei['lat'], PerAnnFD*100, vmin = cmin, vmax = cmax,
+                  cmap = cmap, transform = data_proj, zorder = 1)
+
+# Set the map extent to the U.S.
+ax.set_extent([-130, -65, 23.5, 48.5])
+
+
+# Set the colorbar size and location
+cbax = fig.add_axes([0.85, 0.13, 0.025, 0.75])
+
+# Create the colorbar
+cbar = mcolorbar.ColorbarBase(cbax, cmap = ColorMap, norm = norm, orientation = 'vertical')
+
+# Set the colorbar label
+cbar.ax.set_ylabel('% of years with Flash Drought', fontsize = 18)
+
+# Set the colorbar ticks
+cbar.set_ticks(np.arange(0, 90, 10))
+cbar.ax.set_yticklabels(np.arange(0, 90, 10), fontsize = 16)
+
+# Save the figure
+plt.show(block = False)
+
+
+#%%
+# cell 13
+#################################
+### Pendergrass et al. Method ###
+#################################
+
+# Calcualte flash droughts using a FD identification method from Pendergrass et al. 2020
+# This method uses EDDI to identify FD
+
+# Initialize some variables
+I, J, T = eddi['eddi'].shape
+
+PeFD = np.ones((I, J, T)) * np.nan
+
+eddi2d = eddi['eddi'].reshape(I*J, T, order = 'F')
+PeFD2d = PeFD.reshape(I*J, T, order = 'F')
+
+print('Identifying flash drought')
+for ij in range(I*J):
+    
+    for t in range(3, T-3): # The criteria are EDDI must be 50% greater than EDDI 2 weeks (3 pentads) ago, and remain that intense for another 2 weeks.
+        if (eddi2d[ij,t] > (1.5*eddi2d[ij,t-3])) & (eddi2d[ij,t+1] >= eddi2d[ij,t]) & (eddi2d[ij,t+2] >= eddi2d[ij,t]) & (eddi2d[ij,t+3] >= eddi2d[ij,t]): # Note this checks for all pentads in the + 2 week period, so there cannot be moderation
+            PeFD2d[ij,t] = 1
+        else:
+            PeFD2d[ij,t] = 0
+            
+PeFD = PeFD2d.reshape(I, J, T, order = 'F')
+
+# Write the data
+print('Writing the data')
+
+description = 'This file contains the flash drought identified for all pentads and CONUS grid points ' +\
+                  'in the NARR dataset using the flash drought identification method in Pendergrass et al. 2020. ' +\
+                  'This method uses EDDI as the variable for flash drought identification. ' +\
+                  'Details on EDDI method to identify flash drought can be found ' +\
+                  'in Pendergrass et al. 2020 (https://doi.org/10.1038/s41558-020-0709-0). ' +\
+                  'The data is subsetted to focus on the contential ' +\
+                  'U.S., and it is on the weekly timescale. Data ranges form ' +\
+                  'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
+                  'pegfd: Flash drought identified using the method in Pendergrass et al. 2020. ' +\
+                  'Data is either 0 (no flash drought) or 1 (flash drought identified). Data is on the pentad timescale. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
+
+
+WriteNC(PeFD, eddi['lat'], eddi['lon'], eddi['date'], filename = 'PendergrassFD.NARR.CONUS.pentad.nc', 
+        VarSName = 'pegfd', description = description, path = OutPath)
+        
+
+#%%
+# cell 14
+# Calculate and plot the climatology the Pendergrass et al. flash drought to ensure the identification is correct
+
+
+#### Calcualte the climatology ###
+
+# Initialize variables
+I, J, T = PeFD.shape
+years  = np.unique(eddi['year'])
+
+AnnFD = np.ones((I, J, years.size)) * np.nan
+
+# Calculate the average number of rapid intensifications and flash droughts in a year
+for y in range(years.size):
+    yInd = np.where( (years[y] == eddi['year']) & ((eddi['month'] >= 4) & (eddi['month'] <=10)) )[0] # Second set of conditions ensures only growing season values
+    
+    # Calculate the mean number of rapid intensification and flash drought for each year    
+    AnnFD[:,:,y] = np.nanmean(PeFD[:,:,yInd], axis = -1)
+    
+    # Turn nonzero values to nan (each year gets 1 count to the total)    
+    AnnFD[:,:,y] = np.where(( (AnnFD[:,:,y] == 0) | (np.isnan(AnnFD[:,:,y])) ), 
+                            AnnFD[:,:,y], 1) # This changes nonzero  and nan (sea) values to 1.
+    
+
+# Calculate the percentage number of years with rapid intensifications and flash droughts
+PerAnnFD = np.nansum(AnnFD[:,:,:], axis = -1)/years.size
+
+# Turn 0 values into nan
+PerAnnFD = np.where(PerAnnFD != 0, PerAnnFD, np.nan)
+
+#### Create the Plot ####
+
+# Set colorbar information
+cmin = -20; cmax = 80; cint = 1
+clevs = np.arange(-20, cmax + cint, cint)
+nlevs = len(clevs)
+cmap  = plt.get_cmap(name = 'hot_r', lut = nlevs)
+
+
+# Get the normalized color values
+norm = mcolors.Normalize(vmin = 0, vmax = cmax)
+
+# Generate the colors from the orginal color map in range from [0, cmax]
+colors = cmap(np.linspace(1 - (cmax - 0)/(cmax - cmin), 1, cmap.N))  ### Note, in the event cmin and cmax share the same sign, 1 - (cmax - cmin)/cmax should be used
+colors[:4,:] = np.array([1., 1., 1., 1.]) # Change the value of 0 to white
+
+# Create a new colorbar cut from the colors in range [0, cmax.]
+ColorMap = mcolors.LinearSegmentedColormap.from_list('cut_hot_r', colors)
+
+colorsNew = cmap(np.linspace(0, 1, cmap.N))
+colorsNew[abs(cmin)-1:abs(cmin)+1, :] = np.array([1., 1., 1., 1.]) # Change the value of 0 in the plotted colormap to white
+cmap = mcolors.LinearSegmentedColormap.from_list('hot_r', colorsNew)
+
+# Shapefile information
+# ShapeName = 'Admin_1_states_provinces_lakes_shp'
+ShapeName = 'admin_0_countries'
+CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+
+CountriesReader = shpreader.Reader(CountriesSHP)
+
+USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+
+# Lonitude and latitude tick information
+lat_int = 10
+lon_int = 20
+
+LatLabel = np.arange(-90, 90, lat_int)
+LonLabel = np.arange(-180, 180, lon_int)
+
+LonFormatter = cticker.LongitudeFormatter()
+LatFormatter = cticker.LatitudeFormatter()
+
+# Projection information
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
+
+
+
+# Create the plots
+fig = plt.figure(figsize = [12, 10])
+
+
+# Flash Drought plot
+ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+# Set the flash drought title
+ax.set_title('Percent of Years from 1979 - 2019 with Pendergrass et al. Flash Drought', size = 18)
+
+# Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
+ax.add_feature(cfeature.STATES)
+ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+
+# Adjust the ticks
+ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
+ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
+
+ax.set_yticklabels(LatLabel, fontsize = 18)
+ax.set_xticklabels(LonLabel, fontsize = 18)
+
+ax.xaxis.set_major_formatter(LonFormatter)
+ax.yaxis.set_major_formatter(LatFormatter)
+
+# Plot the flash drought data
+cs = ax.pcolormesh(eddi['lon'], eddi['lat'], PerAnnFD*100, vmin = cmin, vmax = cmax,
+                  cmap = cmap, transform = data_proj, zorder = 1)
+
+# Set the map extent to the U.S.
+ax.set_extent([-130, -65, 23.5, 48.5])
+
+
+# Set the colorbar size and location
+cbax = fig.add_axes([0.85, 0.13, 0.025, 0.75])
+
+# Create the colorbar
+cbar = mcolorbar.ColorbarBase(cbax, cmap = ColorMap, norm = norm, orientation = 'vertical')
+
+# Set the colorbar label
+cbar.ax.set_ylabel('% of years with Flash Drought', fontsize = 18)
+
+# Set the colorbar ticks
+cbar.set_ticks(np.arange(0, 90, 10))
+cbar.ax.set_yticklabels(np.arange(0, 90, 10), fontsize = 16)
+
+# Save the figure
+plt.show(block = False)
+#%%
+# cell 15
+########################
+### Li et al. Method ###
+########################
+
+# Uses SEDI
+
+
+
+
+#%%
+# cell 17
+#########################
+### Liu et al. Method ###
+#########################
+
+
+
+
+
+#%%
+# cell 19
+###########################
+### Otkin et al. Method ###
+###########################
+
+
+
+
 
 
 
