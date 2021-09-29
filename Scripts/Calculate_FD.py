@@ -383,11 +383,11 @@ def PolynomialRegress(X, Y, order = 1):
             # For the last column, fill with 1, for the coefficient a_0
             E[:,n] = 1
         else:
-            E[:,n] = x**(n+1)
+            E[:,n] = X**(n+1)
             
     # Perform the polynomial regression
     invEtE = np.linalg.inv(np.dot(E.T, E))
-    xhat = np.dot(np.dot(invEtE, E), Y)
+    xhat = np.dot(np.dot(invEtE, E.T), Y)
     
     # Estimate yhat
     yhat = E.dot(xhat)
@@ -1195,7 +1195,8 @@ plt.show(block = False)
 ### Li et al. Method ###
 ########################
 
-# Uses SEDI
+# Calcualte flash droughts using a FD identification method from Li et al. 2020
+# This method uses SEDI to identify FD
 
 
 
@@ -1251,8 +1252,8 @@ for ij in range(I*J):
             for p in range(1, 11):
                 SMest, R2p = PolynomialRegress(FutPentads, SMPer2d[ij,t:t+FP], order = p)
                 
-                R2[p-1] = R2
-                if (R2 >= 0.95):
+                R2[p-1] = R2p
+                if (R2[p-1] >= 0.95):
                     order = p
                     break
                 elif (p >= 10):
@@ -1271,6 +1272,9 @@ for ij in range(I*J):
                     RIentries[pent-1] = (SMPer2d[ij,t+pent] - SMPer2d[ij,t])/pent # pent here is the difference between the current pentad and how many pentads ahead one is looking
                     
                     if (SMest[pent] - SMest[pent-1]) < 0.1:
+                        RIend = pent
+                        break
+                    elif pent == 12:
                         RIend = pent
                         break
                     else:
