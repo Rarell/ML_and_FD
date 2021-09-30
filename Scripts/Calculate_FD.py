@@ -16,7 +16,12 @@ This script assumes it is being running in the 'ML_and_FD_in_NARR' directory
 
 
 Full citations for the referenced papers can be found at:
-- Christian et al. 2019 (for SESR): https://doi.org/10.1175/JHM-D-18-0198.1
+- Christian et al. 2019 (for SESR method): https://doi.org/10.1175/JHM-D-18-0198.1
+- Noguera et al. 2020 (for SPEI method): https://doi.org/10.1111/nyas.14365
+- Pendergrass et al. 2020 (for EDDI method): https://doi.org/10.1038/s41558-020-0709-0
+- Li et al. 2020 (for SEDI method): https://doi.org/10.1016/j.catena.2020.104763
+- Liu et al. 2020 (for soil moisture method): https://doi.org/10.1175/JHM-D-19-0088.1
+- Otkin et al. 2020 (for FDII method): https://doi.org/10.3390/atmos12060741
 
 """
 
@@ -714,7 +719,7 @@ fig = plt.figure(figsize = [12, 10])
 ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set the flash drought title
-ax.set_title('Percent of Years from 1979 - 2019 with Christian et al. Flash Drought', size = 18)
+ax.set_title('Percent of Years from 1979 - 2020 with Christian et al. Flash Drought', size = 18)
 
 # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
 ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
@@ -951,7 +956,7 @@ fig = plt.figure(figsize = [12, 10])
 ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set the flash drought title
-ax.set_title('Percent of Years from 1979 - 2019 with Noguera et al. Flash Drought', size = 18)
+ax.set_title('Percent of Years from 1979 - 2020 with Noguera et al. Flash Drought', size = 18)
 
 # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
 ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
@@ -1148,7 +1153,7 @@ fig = plt.figure(figsize = [12, 10])
 ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set the flash drought title
-ax.set_title('Percent of Years from 1979 - 2019 with Pendergrass et al. Flash Drought', size = 18)
+ax.set_title('Percent of Years from 1979 - 2020 with Pendergrass et al. Flash Drought', size = 18)
 
 # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
 ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
@@ -1327,7 +1332,7 @@ WriteNC(LiuFD, SM['lat'], SM['lon'], SM['date'], filename = 'LiuFD.NARR.CONUS.pe
 
 #%%
 # cell 19
-# Calculate and plot the climatology the Pendergrass et al. flash drought to ensure the identification is correct
+# Calculate and plot the climatology the Liu et al. flash drought to ensure the identification is correct
 
 
 #### Calcualte the climatology ###
@@ -1413,7 +1418,7 @@ fig = plt.figure(figsize = [12, 10])
 ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
 # Set the flash drought title
-ax.set_title('Percent of Years from 1979 - 2019 with Liu et al. Flash Drought', size = 18)
+ax.set_title('Percent of Years from 1979 - 2020 with Liu et al. Flash Drought', size = 18)
 
 # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
 ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
@@ -1462,16 +1467,174 @@ plt.show(block = False)
 ### Otkin et al. Method ###
 ###########################
 
+# Calcualte flash droughts using a FD identification method from Otkin et al. 2021
+# This method uses FDII to identify FD
+
+# This is straightforward as the method is contained in the calculation of FDII. That is, if FDII = 0, no FD, and FDII > 0, there is FD.
+print('Identifying flash droughts')
+OtFD = fdii['fdii']
+
+# Turn values > 0 to 1
+OtFD[OtFD > 0] = 1
+
+
+# Write the data
+print('Writing the data')
+
+description = 'This file contains the flash drought identified for all pentads and CONUS grid points ' +\
+                  'in the NARR dataset using the flash drought identification method in Otkin et al. 2021. ' +\
+                  'This method uses soil moisture as the variable for flash drought identification. ' +\
+                  'Details on FDII method to identify flash drought can be found ' +\
+                  'in Otkin et al. 2021 (https://doi.org/10.3390/atmos12060741). ' +\
+                  'The data is subsetted to focus on the contential ' +\
+                  'U.S., and it is on the weekly timescale. Data ranges form ' +\
+                  'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
+                  'otfd: Flash drought identified using the method in Otkin et al. 2021. ' +\
+                  'Data is either 0 (no flash drought) or 1 (flash drought identified). Data is on the pentad timescale. ' +\
+                  'Variable format is x by y by time\n' +\
+                  'lat: 2D latitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'lon: 2D longitude corresponding to the grid for apcp. ' +\
+                  'Variable format is x by y.\n' +\
+                  'date: List of strings containing dates corresponding to the ' +\
+                  'start of the week for the corresponding time point in apcp. Dates ' +\
+                  'are in %Y-%m-%d format. Leap days were excluded for ' +\
+                  'simplicity. Variable format is time.'
+
+
+WriteNC(OtFD, fdii['lat'], fdii['lon'], fdii['date'], filename = 'OtFD.NARR.CONUS.pentad.nc', 
+        VarSName = 'otfd', description = description, path = OutPath)
 
 
 
+#%%
+# cell 21
+# Calculate and plot the climatology the Otkin et al. flash drought to ensure the identification is correct
+
+
+#### Calcualte the climatology ###
+
+# Initialize variables
+I, J, T = OtFD.shape
+years  = np.unique(fdii['year'])
+
+AnnFD = np.ones((I, J, years.size)) * np.nan
+
+# Calculate the average number of rapid intensifications and flash droughts in a year
+for y in range(years.size):
+    yInd = np.where( (years[y] == fdii['year']) & ((fdii['month'] >= 4) & (fdii['month'] <=10)) )[0] # Second set of conditions ensures only growing season values
+    
+    # Calculate the mean number of rapid intensification and flash drought for each year    
+    AnnFD[:,:,y] = np.nanmean(OtFD[:,:,yInd], axis = -1)
+    
+    # Turn nonzero values to nan (each year gets 1 count to the total)    
+    AnnFD[:,:,y] = np.where(( (AnnFD[:,:,y] == 0) | (np.isnan(AnnFD[:,:,y])) ), 
+                            AnnFD[:,:,y], 1) # This changes nonzero  and nan (sea) values to 1.
+    
+
+# Calculate the percentage number of years with rapid intensifications and flash droughts
+PerAnnFD = np.nansum(AnnFD[:,:,:], axis = -1)/years.size
+
+# Turn 0 values into nan
+PerAnnFD = np.where(PerAnnFD != 0, PerAnnFD, np.nan)
+
+#### Create the Plot ####
+
+# Set colorbar information
+cmin = -20; cmax = 80; cint = 1
+clevs = np.arange(-20, cmax + cint, cint)
+nlevs = len(clevs)
+cmap  = plt.get_cmap(name = 'hot_r', lut = nlevs)
+
+
+# Get the normalized color values
+norm = mcolors.Normalize(vmin = 0, vmax = cmax)
+
+# Generate the colors from the orginal color map in range from [0, cmax]
+colors = cmap(np.linspace(1 - (cmax - 0)/(cmax - cmin), 1, cmap.N))  ### Note, in the event cmin and cmax share the same sign, 1 - (cmax - cmin)/cmax should be used
+colors[:4,:] = np.array([1., 1., 1., 1.]) # Change the value of 0 to white
+
+# Create a new colorbar cut from the colors in range [0, cmax.]
+ColorMap = mcolors.LinearSegmentedColormap.from_list('cut_hot_r', colors)
+
+colorsNew = cmap(np.linspace(0, 1, cmap.N))
+colorsNew[abs(cmin)-1:abs(cmin)+1, :] = np.array([1., 1., 1., 1.]) # Change the value of 0 in the plotted colormap to white
+cmap = mcolors.LinearSegmentedColormap.from_list('hot_r', colorsNew)
+
+# Shapefile information
+# ShapeName = 'Admin_1_states_provinces_lakes_shp'
+ShapeName = 'admin_0_countries'
+CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+
+CountriesReader = shpreader.Reader(CountriesSHP)
+
+USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+
+# Lonitude and latitude tick information
+lat_int = 10
+lon_int = 20
+
+LatLabel = np.arange(-90, 90, lat_int)
+LonLabel = np.arange(-180, 180, lon_int)
+
+LonFormatter = cticker.LongitudeFormatter()
+LatFormatter = cticker.LatitudeFormatter()
+
+# Projection information
+data_proj = ccrs.PlateCarree()
+fig_proj  = ccrs.PlateCarree()
 
 
 
+# Create the plots
+fig = plt.figure(figsize = [12, 10])
 
 
+# Flash Drought plot
+ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+# Set the flash drought title
+ax.set_title('Percent of Years from 1979 - 2020 with Otkin et al. Flash Drought', size = 18)
+
+# Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
+ax.add_feature(cfeature.STATES)
+ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+
+# Adjust the ticks
+ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
+ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
+
+ax.set_yticklabels(LatLabel, fontsize = 18)
+ax.set_xticklabels(LonLabel, fontsize = 18)
+
+ax.xaxis.set_major_formatter(LonFormatter)
+ax.yaxis.set_major_formatter(LatFormatter)
+
+# Plot the flash drought data
+cs = ax.pcolormesh(fdii['lon'], fdii['lat'], PerAnnFD*100, vmin = cmin, vmax = cmax,
+                  cmap = cmap, transform = data_proj, zorder = 1)
+
+# Set the map extent to the U.S.
+ax.set_extent([-130, -65, 23.5, 48.5])
 
 
+# Set the colorbar size and location
+cbax = fig.add_axes([0.915, 0.29, 0.025, 0.425])
 
+# Create the colorbar
+cbar = mcolorbar.ColorbarBase(cbax, cmap = ColorMap, norm = norm, orientation = 'vertical')
+
+# Set the colorbar label
+cbar.ax.set_ylabel('% of years with Flash Drought', fontsize = 18)
+
+# Set the colorbar ticks
+cbar.set_ticks(np.arange(0, 90, 10))
+cbar.ax.set_yticklabels(np.arange(0, 90, 10), fontsize = 16)
+
+# Save the figure
+plt.show(block = False)
 
 
