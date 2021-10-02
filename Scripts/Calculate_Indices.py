@@ -1794,8 +1794,8 @@ description = 'This file contains the soil moisture drought index (SODI; unitles
                   'simplicity. Variable format is time.'
 
 
-WriteNC(FDII, SM['lat'], SM['lon'], SM['date'], filename = 'fdii.NARR.CONUS.pentad.nc', 
-        VarSName = 'fdii', description = description, path = OutPath)
+WriteNC(SODI, SM['lat'], SM['lon'], SM['date'], filename = 'sodi.NARR.CONUS.pentad.nc', 
+        VarSName = 'sodi', description = description, path = OutPath)
 
 
 #%%

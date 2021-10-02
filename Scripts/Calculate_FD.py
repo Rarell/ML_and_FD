@@ -1502,7 +1502,7 @@ description = 'This file contains the flash drought identified for all pentads a
                   'simplicity. Variable format is time.'
 
 
-WriteNC(OtFD, fdii['lat'], fdii['lon'], fdii['date'], filename = 'OtFD.NARR.CONUS.pentad.nc', 
+WriteNC(OtFD, fdii['lat'], fdii['lon'], fdii['date'], filename = 'OtkinFD.NARR.CONUS.pentad.nc', 
         VarSName = 'otfd', description = description, path = OutPath)
 
 
