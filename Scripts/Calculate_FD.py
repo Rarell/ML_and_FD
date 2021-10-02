@@ -810,20 +810,20 @@ for ij in range(I*J):
     #print(np.where(DeltaSPEI2d[ij,:] < -2)[0])
     StartDate = spei['ymd'][-1]
     for t in range(T-1):
-        ind = np.where( (spei['ymd'][t].month == spei['month']) & (spei['ymd'][t].day == spei['day']) )[0]
+        # ind = np.where( (spei['ymd'][t].month == spei['month']) & (spei['ymd'][t].day == spei['day']) )[0]
         
-        ChangePercent = stats.percentileofscore(DeltaSPEI2d[ij,ind], DeltaSPEI2d[ij,t])
-        DroughtPercent = stats.percentileofscore(spei2d[ij,ind], spei2d[ij,t])
+        # ChangePercent = stats.percentileofscore(DeltaSPEI2d[ij,ind], DeltaSPEI2d[ij,t])
+        # DroughtPercent = stats.percentileofscore(spei2d[ij,ind], spei2d[ij,t])
         
-        if (ChangePercent < 2) & (DroughtPercent < 10):
-            NogFD2d[ij,t] = 1
-        else:
-            NogFD2d[ij,t] = 0
-        
-        # if (DeltaSPEI2d[ij,t] <= ChangeCriterion) & (spei2d[ij,t] <= DroughtCriterion): # Note, since the changes are calculated over a 1 month period, the first criterion in Noguera et al. is automatically satisified
+        # if (ChangePercent < 2) & (DroughtPercent < 10):
         #     NogFD2d[ij,t] = 1
         # else:
         #     NogFD2d[ij,t] = 0
+        
+        if (DeltaSPEI2d[ij,t] <= ChangeCriterion) & (spei2d[ij,t] <= DroughtCriterion): # Note, since the changes are calculated over a 1 month period, the first criterion in Noguera et al. is automatically satisified
+            NogFD2d[ij,t] = 1
+        else:
+            NogFD2d[ij,t] = 0
             
         # if ( (spei['ymd'][t] - StartDate) >= MinChange ) & (spei2d[ij,t] <= DroughtCriterion): # Note, since the changes are calculated over a 1 month period, the first criterion in Noguera et al. is automatically satisified
         #     NogFD2d[ij,t] = 1
