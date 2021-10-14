@@ -1048,7 +1048,7 @@ description = 'This file contains the flash drought identified for all pentads a
                   'The data is subsetted to focus on the contential ' +\
                   'U.S., and it is on the weekly timescale. Data ranges form ' +\
                   'Jan. 1 1979 to Dec. 31 2020. Variables are:\n' +\
-                  'pegfd: Flash drought identified using the method in Pendergrass et al. 2020. ' +\
+                  'pefd: Flash drought identified using the method in Pendergrass et al. 2020. ' +\
                   'Data is either 0 (no flash drought) or 1 (flash drought identified). Data is on the pentad timescale. ' +\
                   'Variable format is x by y by time\n' +\
                   'lat: 2D latitude corresponding to the grid for apcp. ' +\
@@ -1062,7 +1062,7 @@ description = 'This file contains the flash drought identified for all pentads a
 
 
 WriteNC(PeFD, eddi['lat'], eddi['lon'], eddi['date'], filename = 'PendergrassFD.NARR.CONUS.pentad.nc', 
-        VarSName = 'pegfd', description = description, path = OutPath)
+        VarSName = 'pefd', description = description, path = OutPath)
         
 
 #%%
