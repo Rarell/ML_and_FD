@@ -47,6 +47,7 @@ from datetime import datetime, timedelta
 from sklearn import tree
 from sklearn import neural_network
 from sklearn import ensemble
+from sklearn import svm
 from sklearn import metrics
 
 #%%
@@ -671,7 +672,7 @@ def FDAnnualMaps(FD, lat, lon, CaseYear, months, years, title = 'tmp', savename 
 # cell
 # Create functions that will create, train, and make probabilistic predictions of SL models and output the weights of of each index
 
-### Function for random forest models
+### Function for SL models
 # Define a function to create and evaluate a decision tree model.
 def RFModel(xTrain, yTrain, xVal, N_trees = 50, crit = 'gini', max_depth = 5, max_features = 10, NJobs = -1):
     '''
@@ -692,6 +693,24 @@ def RFModel(xTrain, yTrain, xVal, N_trees = 50, crit = 'gini', max_depth = 5, ma
     TrainingWeights = RF.feature_importances_
 
     return Prob, TrainingWeights
+
+
+def SVMModel(xTrain, yTrain, xVal, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1):
+    '''
+    
+    '''
+    
+    # Make the SVM. # Note this is default set to run parallel processing across all CPUs
+    SVM = svm.SVR(C = RegParam, kernel = Kernel, gamma = Gamma, n_jobs = NJobs)
+    
+    # Train the SVM
+    SVM.fit(xTrain, yTrain)
+    
+    # Make probabilistic predictions
+    Prob = SVM.predict_proba(xVal)
+    
+    return Prob
+
 
 
 
@@ -805,6 +824,20 @@ def DetermineParameters(Train, Label, Model, NJobs = -1):
             TextM3 = '200 tree random forest'
             TextM4 = '1000 tree random forest'
            
+        elif (Model == 'SVM') | (Model == 'Support Vector Machine'):
+            # Other studies are fairly consistent in using the radial basis function kernel, but do not detail other parameters. Modified parameter for this run will be kernal functions.
+            # May come back to this and toy with other parameters
+            
+            ProbM1 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'linear', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+            ProbM2 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'poly', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+            ProbM3 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+            ProbM4 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'sigmoid', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+            
+            TextM1 = 'Linear SVM'
+            TextM2 = 'Polynomial SVM'
+            TextM3 = 'Radial basis SVM'
+            TextM4 = 'Sigmoid SVM'
+            
         else: ##### Add more models here
             pass
        
@@ -1080,6 +1113,39 @@ def CreateSLModel(Train, Label, Model):
                 OtProb, OtWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
                 
                 OtThresh = 0.03
+                
+        elif (Model == 'SVM') | (Model == 'Support Vector Machine'):
+            # Create SVM based on the best parameters
+            # The Probability threshholds are based on the maximum Youden and minimum distance probabilities
+            if method == 'Christian':
+                ChProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+                
+                ChThresh = 0.02
+                
+            elif method == 'Noguera':
+                NogProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+                
+                NogThresh = 0.06
+                
+            elif method == 'Li':
+                LiProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+                
+                LiThresh = 0.05
+                
+            elif method == 'Liu':
+                LiuProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+                
+                LiuThresh = 0.05
+                
+            elif method == 'Pendergrass':
+                PeProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+                
+                PeThresh = 0.01
+                
+            else:
+                OtProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+                
+                OtThresh = 0.03
 
         else: ##### Add more models here
             pass
@@ -1215,12 +1281,15 @@ def CreateSLModel(Train, Label, Model):
     print('\n')
     
     # Feature Importance
-    print('The feature importance for the Christian et al. Method is:', ChWeights)
-    print('The feature importance for the Noguera et al. Method is:', NogWeights)
-    print('The feature importance for the Liu et al. Method is:', LiuWeights)
-    print('The feature importance for the Pendergrass et al. Method is:', PeWeights)
-    print('The feature importance for the Otkin et al. Method is:', OtWeights)
-    print('\n')
+    if (Model == 'RF') | (Model == 'Random Forest'):
+        print('The feature importance for the Christian et al. Method is:', ChWeights)
+        print('The feature importance for the Noguera et al. Method is:', NogWeights)
+        print('The feature importance for the Liu et al. Method is:', LiuWeights)
+        print('The feature importance for the Pendergrass et al. Method is:', PeWeights)
+        print('The feature importance for the Otkin et al. Method is:', OtWeights)
+        print('\n')
+    else:
+        pass
     
     
     # Finally, create and save a ROC curve
@@ -1319,6 +1388,12 @@ def ModelPredictions(Train, Label, Model, lat, lon, Mask, months, years):
             # Train the model with all the data now that it has been tested and predict FD for all datapoints
             Prob, _ = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = -1)
             FullModel = '100 Tree Random Forest'
+            
+        elif (Model == 'SVM') | (Model == 'Support Vector Machine'):
+            # Create SVM based on the best parameters
+            # Train the model with all the data now that it has been tested and predict FD for all datapoints
+            Prob = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+            FullModel = 'Radial Basis SVM'
         else:
             pass # Add more models
         
@@ -1935,7 +2010,7 @@ ModelPredictions(x, y, 'RF', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], se
 # Model testing for SVMs
 
 ### SVMs
-
+DetermineParameters(x, y, Model = 'SVM', NJobs = -1)
 
 # Other studies are fairly consistent in using the radial basis function kernel, but do not detail other parameters. Modified parameter for this run will be kernal functions.
 #   May come back to this and toy with other parameters
@@ -1959,10 +2034,10 @@ ModelPredictions(x, y, 'RF', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], se
 ### NOTE, This is designed to run all the cores on the computer for the quickest performance. Then the computer CANNOT be used while this is running.
 
 
-CreateSLModel(x, y, 'Random Forest')
+CreateSLModel(x, y, 'SVM')
 
 # Create some climatologies and case studies using the RF predictions to further examine performance
-ModelPredictions(x, y, 'RF', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], sesr['year'])
+ModelPredictions(x, y, 'SVM', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], sesr['year'])
 
 
 #%%
