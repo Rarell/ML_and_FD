@@ -27,7 +27,9 @@ This script assumes it is being running in the 'ML_and_FD_in_NARR' directory
 
 import os, sys, warnings
 import numpy as np
+import multiprocessing as mp
 import pathos.multiprocessing as pmp
+from joblib import parallel_backend
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib import colorbar as mcolorbar
@@ -304,7 +306,7 @@ def Preprocessing(training_data, target_data, cols):
 #%%
 # cell 6
 # Create a function to evaluate the ML models
-def EvaluateModel(Probs, y, N = 15):
+def EvaluateModel(Probs, y, N = 15, ProbThreshold = 0.5):
     '''
     
     '''
@@ -347,7 +349,7 @@ def EvaluateModel(Probs, y, N = 15):
         
     
     #   The predicted values are the determined matrix for CritThresh = 0.5
-    ind  = np.where(CritThresh == 0.5)[0]
+    ind  = np.where(CritThresh == ProbThreshold)[0]
     PredCM = CM[:,:,ind[0]]
     
     yPred = P[:,ind[0]]
@@ -432,6 +434,921 @@ def EvaluateModel(Probs, y, N = 15):
     
     # Return all the performance metrics
     return TPR, FPR, Ent, AdjustedR2, RMSE, Cp, AIC, BIC, Accuracy, Precision, Recall, F1Score, Specificity, Risk, AUC, YoudenMax, YoudThresh, dMin, dThresh
+
+#%%
+# cell
+# Create some functions to generate maps of results
+
+# Create a function to create climatology maps using SL predictions
+def FDClimatologyMap(FD, lat, lon, AllYears, months, years, title = 'tmp', savename = 'tmp.png', OutPath = './Figures/'):
+    '''
+    
+    '''
+    I, J, T = FD.shape
+    AnnFD = np.ones((I, J, AllYears.size)) * np.nan
+    
+    # Determine the average number of flash droughts in a year
+    for y in range(AllYears.size):
+        yInd = np.where( (AllYears[y] == years) & ((months >= 4) & (months <= 10)) )[0] # Second set of conditions ensures only growing season values
+        
+        # Calculate the mean number of flash drought for each year    
+        AnnFD[:,:,y] = np.nanmean(FD[:,:,yInd], axis = -1)
+        
+        # Turn nonzero values to 1 (each year gets 1 count to the total)    
+        AnnFD[:,:,y] = np.where(( (AnnFD[:,:,y] == 0) | (np.isnan(AnnFD[:,:,y])) ), 
+                                AnnFD[:,:,y], 1) # This changes nonzero  and nan (sea) values to 1.
+            
+        
+    # Calculate the percentage number of years with rapid intensifications and flash droughts
+    PerAnnFD = np.nansum(AnnFD[:,:,:], axis = -1)/AllYears.size
+    
+    # Turn 0 values into nan
+    PerAnnFD = np.where(PerAnnFD != 0, PerAnnFD, np.nan)
+    
+    #### Create the Plot ####
+
+    # Set colorbar information
+    cmin = -20; cmax = 80; cint = 1
+    clevs = np.arange(-20, cmax + cint, cint)
+    nlevs = len(clevs)
+    cmap  = plt.get_cmap(name = 'hot_r', lut = nlevs)
+    
+    
+    # Get the normalized color values
+    norm = mcolors.Normalize(vmin = 0, vmax = cmax)
+    
+    # Generate the colors from the orginal color map in range from [0, cmax]
+    colors = cmap(np.linspace(1 - (cmax - 0)/(cmax - cmin), 1, cmap.N))  ### Note, in the event cmin and cmax share the same sign, 1 - (cmax - cmin)/cmax should be used
+    colors[:4,:] = np.array([1., 1., 1., 1.]) # Change the value of 0 to white
+    
+    # Create a new colorbar cut from the colors in range [0, cmax.]
+    ColorMap = mcolors.LinearSegmentedColormap.from_list('cut_hot_r', colors)
+    
+    colorsNew = cmap(np.linspace(0, 1, cmap.N))
+    colorsNew[abs(cmin)-1:abs(cmin)+1, :] = np.array([1., 1., 1., 1.]) # Change the value of 0 in the plotted colormap to white
+    cmap = mcolors.LinearSegmentedColormap.from_list('hot_r', colorsNew)
+    
+    # Shapefile information
+    # ShapeName = 'Admin_1_states_provinces_lakes_shp'
+    ShapeName = 'admin_0_countries'
+    CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+    
+    CountriesReader = shpreader.Reader(CountriesSHP)
+    
+    USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+    NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+    
+    # Lonitude and latitude tick information
+    lat_int = 10
+    lon_int = 20
+    
+    LatLabel = np.arange(-90, 90, lat_int)
+    LonLabel = np.arange(-180, 180, lon_int)
+    
+    LonFormatter = cticker.LongitudeFormatter()
+    LatFormatter = cticker.LatitudeFormatter()
+    
+    # Projection information
+    data_proj = ccrs.PlateCarree()
+    fig_proj  = ccrs.PlateCarree()
+    
+    
+    
+    # Create the plots
+    fig = plt.figure(figsize = [12, 10])
+    
+    
+    # Flash Drought plot
+    ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+    
+    # Set the flash drought title
+    ax.set_title(title, size = 18)
+    
+    # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+    ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    ax.add_feature(cfeature.STATES)
+    ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+    ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    
+    # Adjust the ticks
+    ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
+    ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
+    
+    ax.set_yticklabels(LatLabel, fontsize = 18)
+    ax.set_xticklabels(LonLabel, fontsize = 18)
+    
+    ax.xaxis.set_major_formatter(LonFormatter)
+    ax.yaxis.set_major_formatter(LatFormatter)
+    
+    # Plot the flash drought data
+    cs = ax.pcolormesh(lon, lat, PerAnnFD*100, vmin = cmin, vmax = cmax,
+                      cmap = cmap, transform = data_proj, zorder = 1)
+    
+    # Set the map extent to the U.S.
+    ax.set_extent([-130, -65, 23.5, 48.5])
+    
+    
+    # Set the colorbar size and location
+    cbax = fig.add_axes([0.915, 0.29, 0.025, 0.425])
+    
+    # Create the colorbar
+    cbar = mcolorbar.ColorbarBase(cbax, cmap = ColorMap, norm = norm, orientation = 'vertical')
+    
+    # Set the colorbar label
+    cbar.ax.set_ylabel('% of years with Flash Drought', fontsize = 18)
+    
+    # Set the colorbar ticks
+    cbar.set_ticks(np.arange(0, 90, 10))
+    cbar.ax.set_yticklabels(np.arange(0, 90, 10), fontsize = 16)
+    
+    # Save the figure
+    plt.savefig(OutPath + savename, bbox_inches = 'tight')
+    plt.show(block = False)
+    
+    
+# Create a function to create a case study map
+def FDAnnualMaps(FD, lat, lon, CaseYear, months, years, title = 'tmp', savename = 'tmp.png', OutPath = './Figures/'):
+    '''
+    
+    '''
+    FDYear = np.zeros((I, J))
+    
+    NMonths = 12
+    
+    for m in range(NMonths):
+        ind = np.where( (years == CaseYear) & (months == m) )[0]
+        FDYear = np.where(((np.nansum(FD[:,:,ind], axis = -1) != 0 ) & (FDYear == 0)), m, FDYear) # Points where the prediction for the month is nonzero (FD is predicted) and 
+                                                                                                  # FDYear does not have a value already, are given a value of m. FDYear is left alone otherwise.
+        
+    # Create a figure to plot this.
+
+    # Set colorbar information
+    # cmin = 0; cmax = 12; cint = 1
+    cmin = 3; cmax = 10; cint = 1
+    clevs = np.arange(cmin, cmax + cint, cint)
+    nlevs = len(clevs)
+    cmap  = plt.get_cmap(name = 'hot_r', lut = nlevs)
+    
+    # Shapefile information
+    # ShapeName = 'Admin_1_states_provinces_lakes_shp'
+    ShapeName = 'admin_0_countries'
+    CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+    
+    CountriesReader = shpreader.Reader(CountriesSHP)
+    
+    USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+    NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+    
+    # Lonitude and latitude tick information
+    lat_int = 10
+    lon_int = 20
+    
+    LatLabel = np.arange(-90, 90, lat_int)
+    LonLabel = np.arange(-180, 180, lon_int)
+    
+    LonFormatter = cticker.LongitudeFormatter()
+    LatFormatter = cticker.LatitudeFormatter()
+    
+    # Projection information
+    data_proj = ccrs.PlateCarree()
+    fig_proj  = ccrs.PlateCarree()
+    
+    
+    
+    # Create the plots
+    fig = plt.figure(figsize = [12, 10])
+    
+    
+    # Flash Drought plot
+    ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+    
+    # Set the flash drought title
+    ax.set_title(title, size = 18)
+    
+    # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+    ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    ax.add_feature(cfeature.STATES)
+    ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+    ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    
+    # Adjust the ticks
+    ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
+    ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
+    
+    ax.set_yticklabels(LatLabel, fontsize = 18)
+    ax.set_xticklabels(LonLabel, fontsize = 18)
+    
+    ax.xaxis.set_major_formatter(LonFormatter)
+    ax.yaxis.set_major_formatter(LatFormatter)
+    
+    # Plot the flash drought data
+    cs = ax.pcolormesh(lon, lat, FDYear, vmin = cmin, vmax = cmax,
+                      cmap = cmap, transform = data_proj, zorder = 1)
+    
+    # Set the map extent to the U.S.
+    ax.set_extent([-130, -65, 23.5, 48.5])
+    
+    
+    # Set the colorbar size and location
+    cbax = fig.add_axes([0.915, 0.29, 0.025, 0.425])
+    
+    # Create the colorbar
+    cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
+    
+    
+    # Set the colorbar ticks
+    #cbar.set_ticks(np.arange(5, 100+1, 10))
+    cbar.set_ticks(np.arange(0.05, 1, 0.128))
+    cbar.ax.set_yticklabels(['No FD', 'Apr', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct'], fontsize = 16)
+    
+    # Save the figure
+    plt.savefig(OutPath + savename, bbox_inches = 'tight')
+    plt.show(block = False)
+    
+    
+    
+#%%
+# cell
+# Create functions that will create, train, and make probabilistic predictions of SL models and output the weights of of each index
+
+### Function for random forest models
+# Define a function to create and evaluate a decision tree model.
+def RFModel(xTrain, yTrain, xVal, N_trees = 50, crit = 'gini', max_depth = 5, max_features = 10, NJobs = -1):
+    '''
+
+
+    '''
+    
+    # Make the random forest. # Note this is default set to run parallel across all CPUs
+    RF = ensemble.RandomForestClassifier(n_estimators = N_trees, criterion = crit, max_depth = max_depth, max_features = max_features, bootstrap = True, oob_score = True, n_jobs = NJobs)
+    
+    # Train the tree
+    RF.fit(xTrain, yTrain)
+    
+    # Make probabilistic predictions
+    Prob = RF.predict_proba(xVal)
+    
+    # Get the parameters of the forest
+    TrainingWeights = RF.feature_importances_
+
+    return Prob, TrainingWeights
+
+
+
+#%%
+# cell 
+# Create a function to create SL models and output performance metrics to test parameters
+def DetermineParameters(Train, Label, Model, NJobs = -1):
+    '''
+    
+    '''
+    
+    # First split the data based on year
+    TrainInd = np.where( ( (sesr['year'] == 1979) | (sesr['year'] == 1980) | (sesr['year'] == 1981) | 
+                          (sesr['year'] == 1982) | (sesr['year'] == 1990) | (sesr['year'] == 1991) | 
+                          (sesr['year'] == 1992) | (sesr['year'] == 1995) | (sesr['year'] == 1996) |
+                          (sesr['year'] == 1997) | (sesr['year'] == 1999) | (sesr['year'] == 2000) |
+                          (sesr['year'] == 2002) | (sesr['year'] == 2004) | (sesr['year'] == 2008) |
+                          (sesr['year'] == 2009) | (sesr['year'] == 2010) | (sesr['year'] == 2012) |
+                          (sesr['year'] == 2013) | (sesr['year'] == 2014) | (sesr['year'] == 2015) |
+                          (sesr['year'] == 2016) | (sesr['year'] == 2017) | (sesr['year'] == 2018) |
+                          (sesr['year'] == 2020) ) & ((sesr['month'] >= 4) & (sesr['month'] <= 10)) )[0]
+    
+    ValInd   = np.where( ( (sesr['year'] == 1983) | (sesr['year'] == 1985) | (sesr['year'] == 1986) |
+                          (sesr['year'] == 1994) | (sesr['year'] == 1998) | (sesr['year'] == 2005) |
+                          (sesr['year'] == 2007) | (sesr['year'] == 2011) ) & ((sesr['month'] >= 4) & (sesr['month'] <= 10)) )[0]
+    TestInd  = np.where( ( (sesr['year'] == 1984) | (sesr['year'] == 1987) | (sesr['year'] == 1988) |
+                          (sesr['year'] == 1989) | (sesr['year'] == 1993) | (sesr['year'] == 2001) |
+                          (sesr['year'] == 2003) | (sesr['year'] == 2006) | (sesr['year'] == 2019) ) &
+                        ((sesr['month'] >= 4) & (sesr['month'] <= 10)) )[0]
+    
+    xTrain = Train[:,TrainInd,:]; yTrain = Label[:,TrainInd,:]
+    xVal = Train[:,ValInd,:]; yVal = Label[:,ValInd,:]
+    
+    IJTrain, Ttrain, NVar = xTrain.shape
+    IJVal, Tval, NVar   = xVal.shape
+    IJVal, Tval, NMethods = yVal.shape
+    
+    # Reorder data into 2D matrices
+    xTrain = xTrain.reshape(IJTrain*Ttrain, NVar, order = 'F')
+    xVal   = xVal.reshape(IJVal*Tval, NVar, order = 'F')
+    yTrain = yTrain.reshape(IJTrain*Ttrain, NMethods, order = 'F')
+    yVal   = yVal.reshape(IJVal*Tval, NMethods, order = 'F')
+    
+    
+    
+    # Next, Start performing SL models for each method.
+    ##### Remember to add Li
+    Methods = ['Christian', 'Noguera', 'Liu', 'Pendergrass', 'Otkin']
+    
+    for method in Methods:
+        if method == 'Christian': # Christian et al. method uses SESR
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([0, 1]))
+            ValData   = ColumnRemoval(xVal, cols = np.asarray([0, 1]))
+            TrainLabel = yTrain[:,0]
+            ValLabel   = yVal[:,0]
+            
+            NVarRemoved = 2
+            
+        elif method == 'Noguera': # Noguera et al method uses SPEI
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([4, 5]))
+            ValData   = ColumnRemoval(xVal, cols = np.asarray([4, 5]))
+            TrainLabel = yTrain[:,1]
+            ValLabel   = yVal[:,1]
+            
+            NVarRemoved = 2
+        
+        elif method == 'Li': # Li et al. method uses SEDI
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([2, 3]))
+            ValData   = ColumnRemoval(xVal, cols = np.asarray([2, 3]))
+            TrainLabel = yTrain[:,2]
+            ValLabel   = yVal[:,2]
+            
+            NVarRemoved = 2
+            
+        elif method == 'Liu': # Liu et al. method uses soil moisture
+            TrainData = xTrain
+            ValData   = xVal
+            TrainLabel = yTrain[:,3]
+            ValLabel   = yVal[:,3]
+            
+            NVarRemoved = 0
+            
+        elif method == 'Pendergrass': # Penndergrass et al. method uses EDDI
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([9, 10]))
+            ValData   = ColumnRemoval(xVal, cols = np.asarray([9, 10]))
+            TrainLabel = yTrain[:,4]
+            ValLabel   = yVal[:,4]
+            
+            NVarRemoved = 2
+            
+        else: # Otkin et al. Method uses FDII
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([14]))
+            ValData   = ColumnRemoval(xVal, cols = np.asarray([14]))
+            TrainLabel = yTrain[:,5]
+            ValLabel   = yVal[:,5]
+            
+            NVarRemoved = 1
+        
+        print('Creating the ' + Model + 's for the ' + method + ' et al. method.')
+        # Note on nomenclature: M# refers toa value(s) for Model #. So ProbM1 is probability values for Model 1, RMSEM2 is the RMSE for Model 2, etc. Names are generic to move across multiple SL models.
+        if (Model == 'RF') | (Model == 'Random Forest'):
+            # Past studies on predicting droughts with RFs have maintained default settings, while letting the number of trees vary from 10 to 50 to 100 to 200 to 1000.
+            # For simplicity and consistency, follow this procedure for now.
+            ProbM1, _ = RFModel(TrainData, TrainLabel, ValData, N_trees = 50, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = NJobs)
+            ProbM2, _ = RFModel(TrainData, TrainLabel, ValData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = NJobs)
+            ProbM3, _ = RFModel(TrainData, TrainLabel, ValData, N_trees = 200, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = NJobs)
+            ProbM4, _ = RFModel(TrainData, TrainLabel, ValData, N_trees = 1000, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = NJobs) # Note this last one can take a long time to run. It will only be excepted if it really outperforms the others.
+            
+            TextM1 = '50 tree random forest'
+            TextM2 = '100 tree random forest'
+            TextM3 = '200 tree random forest'
+            TextM4 = '1000 tree random forest'
+           
+        else: ##### Add more models here
+            pass
+       
+        print('Evaluating the ' + Model + 's for the ' + method + ' et al. method.')
+        TPRM1, FPRM1, EntM1, R2M1, RMSEM1, CpM1, AICM1, BICM1, AccM1, PrecM1, RecallM1, F1M1, SpecM1, RiskM1, AUCM1, YoudM1, YoudThreshM1, dM1, dThreshM1 = EvaluateModel(ProbM1[:,1], ValLabel, N = (NVar - NVarRemoved))
+        TPRM2, FPRM2, EntM2, R2M2, RMSEM2, CpM2, AICM2, BICM2, AccM2, PrecM2, RecallM2, F1M2, SpecM2, RiskM2, AUCM2, YoudM2, YoudThreshM2, dM2, dThreshM2 = EvaluateModel(ProbM2[:,1], ValLabel, N = (NVar - NVarRemoved))
+        TPRM3, FPRM3, EntM3, R2M3, RMSEM3, CpM3, AICM3, BICM3, AccM3, PrecM3, RecallM3, F1M3, SpecM3, RiskM3, AUCM3, YoudM3, YoudThreshM3, dM3, dThreshM3 = EvaluateModel(ProbM3[:,1], ValLabel, N = (NVar - NVarRemoved))
+        TPRM4, FPRM4, EntM4, R2M4, RMSEM4, CpM4, AICM4, BICM4, AccM4, PrecM4, RecallM4, F1M4, SpecM4, RiskM4, AUCM4, YoudM4, YoudThreshM4, dM4, dThreshM4 = EvaluateModel(ProbM4[:,1], ValLabel, N = (NVar - NVarRemoved))
+        
+        # Output the performance statistics
+
+        #   Cross-Entropy
+        print('The ' + method + ' et al. ' + TextM1 + ' has a cross-entropy of: %4.2f' %EntM1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has a cross-entropy of: %4.2f' %EntM2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has a cross-entropy of: %4.2f' %EntM3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has a cross-entropy of: %4.2f' %EntM4)
+        print('\n')
+        
+        #   Adjusted-R^2
+        print('The ' + method + ' et al. ' + TextM1 + ' has an Adjusted-R^2 of: %4.2f' %R2M1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has an Adjusted-R^2 of: %4.2f' %R2M2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has an Adjusted-R^2 of: %4.2f' %R2M3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has an Adjusted-R^2 of: %4.2f' %R2M4)
+        print('\n')
+        
+        #   RMSE
+        print('The ' + method + ' et al. ' + TextM1 + ' has a RMSE of: %4.2f' %RMSEM1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has a RMSE of: %4.2f' %RMSEM2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has a RMSE of: %4.2f' %RMSEM3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has a RMSE of: %4.2f' %RMSEM4)
+        print('\n')
+        
+        #   Cp
+        print('The ' + method + ' et al. ' + TextM1 + ' has a Cp of: %4.2f' %CpM1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has a Cp of: %4.2f' %CpM2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has a Cp of: %4.2f' %CpM3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has a Cp of: %4.2f' %CpM4)
+        print('\n')
+        
+        #   AIC
+        print('The ' + method + ' et al. ' + TextM1 + ' has a AIC of: %4.2f' %AICM1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has a AIC of: %4.2f' %AICM2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has a AIC of: %4.2f' %AICM3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has a AIC of: %4.2f' %AICM4)
+        print('\n')
+        
+        #   BIC
+        print('The ' + method + ' et al. ' + TextM1 + ' has a BIC of: %4.2f' %BICM1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has a BIC of: %4.2f' %BICM2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has a BIC of: %4.2f' %BICM3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has a BIC of: %4.2f' %BICM4)
+        print('\n')
+        
+        #   Accuracy
+        print('The ' + method + ' et al. ' + TextM1 + ' has a Accuracy of: %4.2f' %AccM1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has a Accuracy of: %4.2f' %AccM2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has a Accuracy of: %4.2f' %AccM3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has a Accuracy of: %4.2f' %AccM4)
+        print('\n')
+        
+        #   Precision
+        print('The ' + method + ' et al. ' + TextM1 + ' has a Precision of: %4.2f' %PrecM1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has a Precision of: %4.2f' %PrecM2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has a Precision of: %4.2f' %PrecM3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has a Precision of: %4.2f' %PrecM4)
+        print('\n')
+        
+        #   Recall
+        print('The ' + method + ' et al. ' + TextM1 + ' has a Recall of: %4.2f' %RecallM1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has a Recall of: %4.2f' %RecallM2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has a Recall of: %4.2f' %RecallM3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has a Recall of: %4.2f' %RecallM4)
+        print('\n')
+        
+        #   F1-Score
+        print('The ' + method + ' et al. ' + TextM1 + ' has a F1-Score of: %4.2f' %F1M1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has a F1-Score of: %4.2f' %F1M2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has a F1-Score of: %4.2f' %F1M3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has a F1-Score of: %4.2f' %F1M4)
+        print('\n')
+        
+        #   Specificity
+        print('The ' + method + ' et al. ' + TextM1 + ' has a Specificity of: %4.2f' %SpecM1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has a Specificity of: %4.2f' %SpecM2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has a Specificity of: %4.2f' %SpecM3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has a Specificity of: %4.2f' %SpecM4)
+        print('\n')
+        
+        #   Risk
+        print('The ' + method + ' et al. ' + TextM1 + ' has a Risk of: %4.2f' %RiskM1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has a Risk of: %4.2f' %RiskM2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has a Risk of: %4.2f' %RiskM3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has a Risk of: %4.2f' %RiskM4)
+        print('\n')
+        
+        #   AUC
+        print('The ' + method + ' et al. ' + TextM1 + ' has an AUC of: %4.2f' %AUCM1)
+        print('The ' + method + ' et al. ' + TextM2 + ' has an AUC of: %4.2f' %AUCM2)
+        print('The ' + method + ' et al. ' + TextM3 + ' has an AUC of: %4.2f' %AUCM3)
+        print('The ' + method + ' et al. ' + TextM4 + ' has an AUC of: %4.2f' %AUCM4)
+        print('\n')
+        
+        #   Youden Index
+        print('The ' + method + ' et al. ' + TextM1 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM1, YoudThreshM1))
+        print('The ' + method + ' et al. ' + TextM2 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM2, YoudThreshM2))
+        print('The ' + method + ' et al. ' + TextM3 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM3, YoudThreshM3))
+        print('The ' + method + ' et al. ' + TextM4 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM4, YoudThreshM4))
+        print('\n')
+        
+        #   Distance from leftmost corner of ROC curve
+        print('The ' + method + ' et al. ' + TextM1 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM1, dThreshM1))
+        print('The ' + method + ' et al. ' + TextM2 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM2, dThreshM2))
+        print('The ' + method + ' et al. ' + TextM3 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM3, dThreshM3))
+        print('The ' + method + ' et al. ' + TextM4 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM4, dThreshM4))
+        print('\n')
+        
+        
+        # Finally output a ROC curve to finish evaluating the models
+        fig = plt.figure(figsize = [14,14])
+        ax = fig.add_subplot(1,1,1)
+        
+        #   Set the title
+        ax.set_title('Receiver Operating Characteristic Curve for ' + Model + 's using the ' + method + ' et al. Method', fontsize = 24)
+        
+        #   Create the plots
+        ax.plot(FPRM1, TPRM1, 'r-', linewidth = 2.0, label = TextM1)
+        ax.plot(FPRM2, TPRM2, 'b-', linewidth = 2.0, label = TextM2)
+        ax.plot(FPRM3, TPRM3, 'k-', linewidth = 2.0, label = TextM3)
+        ax.plot(FPRM4, TPRM4, 'g-', linewidth = 2.0, label = TextM4)
+        
+        #   Set the legend
+        ax.legend(loc = 'best', fontsize = 33)
+        
+        #   Set the figure limits and labels
+        ax.set_xlim([0, 1.02])
+        ax.set_ylim([0, 1.02])
+        
+        ax.set_xlabel('False Positive Rate', fontsize = 22)
+        ax.set_ylabel('True Positive Rate', fontsize = 22)
+        
+        #   Set the tick sizes
+        for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+            i.set_size(22)
+            
+        plt.show(block = False)
+        
+        
+#%%
+# cell
+# Create a function to create the final SL models, based on the best performing parameters, and output their performance
+def CreateSLModel(Train, Label, Model):
+    '''
+    
+    '''
+    
+    # First split the data based on year
+    TrainInd = np.where( ( (sesr['year'] == 1979) | (sesr['year'] == 1980) | (sesr['year'] == 1981) | 
+                          (sesr['year'] == 1982) | (sesr['year'] == 1983) | (sesr['year'] == 1985) | 
+                          (sesr['year'] == 1986) | (sesr['year'] == 1990) | (sesr['year'] == 1991) | 
+                          (sesr['year'] == 1992) | (sesr['year'] == 1994) | (sesr['year'] == 1995) | 
+                          (sesr['year'] == 1996) | (sesr['year'] == 1997) | (sesr['year'] == 1998) | 
+                          (sesr['year'] == 1999) | (sesr['year'] == 2000) | (sesr['year'] == 2002) | 
+                          (sesr['year'] == 2004) | (sesr['year'] == 2005) | (sesr['year'] == 2007) | 
+                          (sesr['year'] == 2008) | (sesr['year'] == 2009) | (sesr['year'] == 2010) | 
+                          (sesr['year'] == 2011) | (sesr['year'] == 2012) | (sesr['year'] == 2013) | 
+                          (sesr['year'] == 2014) | (sesr['year'] == 2015) | (sesr['year'] == 2016) | 
+                          (sesr['year'] == 2017) | (sesr['year'] == 2018) | (sesr['year'] == 2020) ) & 
+                        ((sesr['month'] >= 4) & (sesr['month'] <= 10)) )[0]
+    
+    TestInd  = np.where( ( (sesr['year'] == 1984) | (sesr['year'] == 1987) | (sesr['year'] == 1988) |
+                          (sesr['year'] == 1989) | (sesr['year'] == 1993) | (sesr['year'] == 2001) |
+                          (sesr['year'] == 2003) | (sesr['year'] == 2006) | (sesr['year'] == 2019) ) &
+                        ((sesr['month'] >= 4) & (sesr['month'] <= 10)) )[0]
+    
+    xTrain = Train[:,TrainInd,:]; yTrain = Label[:,TrainInd,:]
+    xTest = Train[:,TestInd,:]; yTest = Label[:,TestInd,:]
+    
+    IJTrain, Ttrain, NVar = xTrain.shape
+    IJTest, Ttest, NVar   = xTest.shape
+    IJTest, Ttest, NMethods = yTest.shape
+    
+    # Reorder data into 2D matrices
+    xTrain = xTrain.reshape(IJTrain*Ttrain, NVar, order = 'F')
+    xTest  = xTest.reshape(IJTest*Ttest, NVar, order = 'F')
+    yTrain = yTrain.reshape(IJTrain*Ttrain, NMethods, order = 'F')
+    yTest  = yTest.reshape(IJTest*Ttest, NMethods, order = 'F')
+    
+    
+    
+    # Next, Start performing SL models for each method.
+    ##### Remember to add Li
+    Methods = ['Christian', 'Noguera', 'Liu', 'Pendergrass', 'Otkin']
+    
+    for method in Methods:
+        if method == 'Christian': # Christian et al. method uses SESR
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([0, 1]))
+            TestData  = ColumnRemoval(xTest, cols = np.asarray([0, 1]))
+            TrainLabel = yTrain[:,0]
+            TestLabel  = yTest[:,0]
+            
+            NVarRemoved = 2
+            
+        elif method == 'Noguera': # Noguera et al method uses SPEI
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([4, 5]))
+            TestData  = ColumnRemoval(xTest, cols = np.asarray([4, 5]))
+            TrainLabel = yTrain[:,1]
+            TestLabel  = yTest[:,1]
+            
+            NVarRemoved = 2
+        
+        elif method == 'Li': # Li et al. method uses SEDI
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([2, 3]))
+            TestData  = ColumnRemoval(xTest, cols = np.asarray([2, 3]))
+            TrainLabel = yTrain[:,2]
+            TestLabel  = yTest[:,2]
+            
+            NVarRemoved = 2
+            
+        elif method == 'Liu': # Liu et al. method uses soil moisture
+            TrainData = xTrain
+            TestData  = xTest
+            TrainLabel = yTrain[:,3]
+            TestLabel  = yTest[:,3]
+            
+            NVarRemoved = 0
+            
+        elif method == 'Pendergrass': # Penndergrass et al. method uses EDDI
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([9, 10]))
+            TestData  = ColumnRemoval(xTest, cols = np.asarray([9, 10]))
+            TrainLabel = yTrain[:,4]
+            TestLabel  = yTest[:,4]
+            
+            NVarRemoved = 2
+            
+        else: # Otkin et al. Method uses FDII
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([14]))
+            TestData  = ColumnRemoval(xTest, cols = np.asarray([14]))
+            TrainLabel = yTrain[:,5]
+            TestLabel  = yTest[:,5]
+            
+            NVarRemoved = 1
+        
+        print('Creating the ' + Model + 's for the ' + method + ' et al. method.')
+        if (Model == 'RF') | (Model == 'Random Forest'):
+            # Create random forest based on the best parameters
+            # The Probability threshholds are based on the maximum Youden and minimum distance probabilities 
+            if method == 'Christian':
+                ChProb, ChWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+                
+                ChThresh = 0.02
+                
+            elif method == 'Noguera':
+                NogProb, NogWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+                
+                NogThresh = 0.06
+                
+            elif method == 'Li':
+                LiProb, LiWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+                
+                LiThresh = 0.05
+                
+            elif method == 'Liu':
+                LiuProb, LiuWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+                
+                LiuThresh = 0.05
+                
+            elif method == 'Pendergrass':
+                PeProb, PeWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+                
+                PeThresh = 0.01
+                
+            else:
+                OtProb, OtWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+                
+                OtThresh = 0.03
+
+        else: ##### Add more models here
+            pass
+        
+    print('Evaluating the models.')
+    TPRCh, FPRCh, EntCh, R2Ch, RMSECh, CpCh, AICCh, BICCh, AccCh, PrecCh, RecallCh, F1Ch, SpecCh, RiskCh, AUCCh, YoudCh, YoudThreshCh, dCh, dThreshCh = EvaluateModel(ChProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = ChThresh)
+    TPRNog, FPRNog, EntNog, R2Nog, RMSENog, CpNog, AICNog, BICNog, AccNog, PrecNog, RecallNog, F1Nog, SpecNog, RiskNog, AUCNog, YoudNog, YoudThreshNog, dNog, dThreshNog = EvaluateModel(NogProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = NogThresh)
+    TPRLiu, FPRLiu, EntLiu, R2Liu, RMSELiu, CpLiu, AICLiu, BICLiu, AccLiu, PrecLiu, RecallLiu, F1Liu, SpecLiu, RiskLiu, AUCLiu, YoudLiu, YoudThreshLiu, dLiu, dThreshLiu = EvaluateModel(LiuProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = LiuThresh)
+    TPRPe, FPRPe, EntPe, R2Pe, RMSEPe, CpPe, AICPe, BICPe, AccPe, PrecPe, RecallPe, F1Pe, SpecPe, RiskPe, AUCPe, YoudPe, YoudThreshPe, dPe, dThreshPe = EvaluateModel(PeProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = PeThresh)
+    TPROt, FPROt, EntOt, R2Ot, RMSEOt, CpOt, AICOt, BICOt, AccOt, PrecOt, RecallOt, F1Ot, SpecOt, RiskOt, AUCOt, YoudOt, YoudThreshOt, dOt, dThreshOt = EvaluateModel(OtProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = OtThresh)
+    
+    
+    # Output the model performance
+    
+    #   Cross-Entropy
+    print('The Christian et al. Method has a cross-entropy of: %4.2f' %EntCh)
+    print('The Nogeura et al. Method has a cross-entropy of: %4.2f' %EntNog)
+    print('The Liu et al. Method has a cross-entropy of: %4.2f' %EntLiu)
+    print('The Pendergrass et al. Method has a cross-entropy of: %4.2f' %EntPe)
+    print('The Otkin et al. Method has a cross-entropy of: %4.2f' %EntOt)
+    print('\n')
+    
+    #   Adjusted-R^2
+    print('The Christian et al. Method has an Adjusted-R^2 of: %4.2f' %R2Ch)
+    print('The Nogeura et al. Method has an Adjusted-R^2 of: %4.2f' %R2Nog)
+    print('The Liu et al. Method has an Adjusted-R^2 of: %4.2f' %R2Liu)
+    print('The Pendergrass et al. Method has an Adjusted-R^2 of: %4.2f' %R2Pe)
+    print('The Otkin et al. Method has an Adjusted-R^2 of: %4.2f' %R2Ot)
+    print('\n')
+    
+    #   RMSE
+    print('The Christian et al. Method has a RMSE of: %4.2f' %RMSECh)
+    print('The Nogeura et al. Method has a RMSE of: %4.2f' %RMSENog)
+    print('The Liu et al. Method has a RMSE of: %4.2f' %RMSELiu)
+    print('The Pendergrass et al. Method has a RMSE of: %4.2f' %RMSEPe)
+    print('The Otkin et al. Method has a RMSE of: %4.2f' %RMSEOt)
+    print('\n')
+    
+    #   Cp
+    print('The Christian et al. Method has a Cp of: %4.2f' %CpCh)
+    print('The Nogeura et al. Method has a Cp of: %4.2f' %CpNog)
+    print('The Liu et al. Method has a Cp of: %4.2f' %CpLiu)
+    print('The Pendergrass et al. Method has a Cp of: %4.2f' %CpPe)
+    print('The Otkin et al. Method has a Cp of: %4.2f' %CpOt)
+    print('\n')
+    
+    #   AIC
+    print('The Christian et al. Method has a AIC of: %4.2f' %AICCh)
+    print('The Nogeura et al. Method has a AIC of: %4.2f' %AICNog)
+    print('The Liu et al. Method has a AIC of: %4.2f' %AICLiu)
+    print('The Pendergrass et al. Method has a AIC of: %4.2f' %AICPe)
+    print('The Otkin et al. Method has a AIC of: %4.2f' %AICOt)
+    print('\n')
+    
+    #   BIC
+    print('The Christian et al. Method has a BIC of: %4.2f' %BICCh)
+    print('The Nogeura et al. Method has a BIC of: %4.2f' %BICNog)
+    print('The Liu et al. Method has a BIC of: %4.2f' %BICLiu)
+    print('The Pendergrass et al. Method has a BIC of: %4.2f' %BICPe)
+    print('The Otkin et al. Method has a BIC of: %4.2f' %BICOt)
+    print('\n')
+    
+    #   Accuracy
+    print('The Christian et al. Method has a Accuracy of: %4.2f' %AccCh)
+    print('The Nogeura et al. Method has a Accuracy of: %4.2f' %AccNog)
+    print('The Liu et al. Method has a Accuracy of: %4.2f' %AccLiu)
+    print('The Pendergrass et al. Method has a Accuracy of: %4.2f' %AccPe)
+    print('The Otkin et al. Method has a Accuracy of: %4.2f' %AccOt)
+    print('\n')
+    
+    #   Precision
+    print('The Christian et al. Method has a Precision of: %4.2f' %PrecCh)
+    print('The Nogeura et al. Method has a Precision of: %4.2f' %PrecNog)
+    print('The Liu et al. Method has a Precision of: %4.2f' %PrecLiu)
+    print('The Pendergrass et al. Method has a Precision of: %4.2f' %PrecPe)
+    print('The Otkin et al. Method has a Precision of: %4.2f' %PrecOt)
+    print('\n')
+    
+    #   Recall
+    print('The Christian et al. Method has a Recall of: %4.2f' %RecallCh)
+    print('The Nogeura et al. Method has a Recall of: %4.2f' %RecallNog)
+    print('The Liu et al. Method has a Recall of: %4.2f' %RecallLiu)
+    print('The Pendergrass et al. Method has a Recall of: %4.2f' %RecallPe)
+    print('The Otkin et al. Method has a Recall of: %4.2f' %RecallOt)
+    print('\n')
+    
+    #   F1-Score
+    print('The Christian et al. Method has a F1-Score of: %4.2f' %F1Ch)
+    print('The Nogeura et al. Method has a F1-Score of: %4.2f' %F1Nog)
+    print('The Liu et al. Method has a F1-Score of: %4.2f' %F1Liu)
+    print('The Pendergrass et al. Method has a F1-Score of: %4.2f' %F1Pe)
+    print('The Otkin et al. Method has a F1-Score of: %4.2f' %F1Ot)
+    print('\n')
+    
+    #   Specificity
+    print('The Christian et al. Method has a Specificity of: %4.2f' %SpecCh)
+    print('The Nogeura et al. Method has a Specificity of: %4.2f' %SpecNog)
+    print('The Liu et al. Method has a Specificity of: %4.2f' %SpecLiu)
+    print('The Pendergrass et al. Method has a Specificity of: %4.2f' %SpecPe)
+    print('The Otkin et al. Method has a Specificity of: %4.2f' %SpecOt)
+    print('\n')
+    
+    #   Risk
+    print('The Christian et al. Method has a Risk of: %4.2f' %RiskCh)
+    print('The Nogeura et al. Method has a Risk of: %4.2f' %RiskNog)
+    print('The Liu et al. Method has a Risk of: %4.2f' %RiskLiu)
+    print('The Pendergrass et al. Method has a Risk of: %4.2f' %RiskPe)
+    print('The Otkin et al. Method has a Risk of: %4.2f' %RiskOt)
+    print('\n')
+    
+    #   AUC
+    print('The Christian et al. Method has an AUC of: %4.2f' %AUCCh)
+    print('The Nogeura et al. Method has an AUC of: %4.2f' %AUCNog)
+    print('The Liu et al. Method has an AUC of: %4.2f' %AUCLiu)
+    print('The Pendergrass et al. Method has an AUC of: %4.2f' %AUCPe)
+    print('The Otkin et al. Method has an AUC of: %4.2f' %AUCOt)
+    print('\n')
+    
+    #   Youden Index
+    print('The Christian et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudCh, YoudThreshCh))
+    print('The Nogeura et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudNog, YoudThreshNog))
+    print('The Liu et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudLiu, YoudThreshLiu))
+    print('The Pendergrass et al. Method has amaximum Youden index of %4.2f at the threshold of %4.3f' %(YoudPe, YoudThreshPe))
+    print('The Otkin et al. Method has amaximum Youden index of %4.2f at the threshold of %4.3f' %(YoudOt, YoudThreshOt))
+    print('\n')
+    
+    #   Distance from leftmost corner of ROC curve
+    print('The Christian et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dCh, dThreshCh))
+    print('The Nogeura et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dNog, dThreshNog))
+    print('The Liu et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dLiu, dThreshLiu))
+    print('The Pendergrass et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dPe, dThreshPe))
+    print('The Otkin et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dOt, dThreshOt))
+    print('\n')
+    
+    # Feature Importance
+    print('The feature importance for the Christian et al. Method is:', ChWeights)
+    print('The feature importance for the Noguera et al. Method is:', NogWeights)
+    print('The feature importance for the Liu et al. Method is:', LiuWeights)
+    print('The feature importance for the Pendergrass et al. Method is:', PeWeights)
+    print('The feature importance for the Otkin et al. Method is:', OtWeights)
+    print('\n')
+    
+    
+    # Finally, create and save a ROC curve
+    fig = plt.figure(figsize = [14,14])
+    ax = fig.add_subplot(1,1,1)
+    
+    #   Set the title
+    ax.set_title('Receiver Operating Characteristic Curve for ' + Model + 's', fontsize = 24)
+    
+    #   Create the plots
+    ax.plot(FPRCh, TPRCh, 'r-', linewidth = 2.0, label = 'Christian et al. 2019 Method')
+    ax.plot(FPRNog, TPRNog, 'b-', linewidth = 2.0, label = 'Noguera et al. 2020 Method')
+    ax.plot(FPRLiu, TPRLiu, 'k-', linewidth = 2.0, label = 'Liu et al. 2020 Method')
+    ax.plot(FPRPe, TPRPe, 'g-', linewidth = 2.0, label = 'Pendergrass et al. 2020 Method')
+    ax.plot(FPROt, TPROt, 'c-', linewidth = 2.0, label = 'Otkin et al. 2021 Method')
+    
+    #   Set the legend
+    ax.legend(loc = 'best', fontsize = 33)
+    
+    #   Set the figure limits and labels
+    ax.set_xlim([0, 1.02])
+    ax.set_ylim([0, 1.02])
+    
+    ax.set_xlabel('False Positive Rate', fontsize = 22)
+    ax.set_ylabel('True Positive Rate', fontsize = 22)
+    
+    #   Set the tick sizes
+    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+        i.set_size(22)
+    
+    plt.savefig('./Figures/' + Model + '_ROC.png', bbox_inches = 'tight')
+    plt.show(block = False)
+    
+
+#%%
+# cell
+    
+# Define a function to create climatology and case study maps for the Christian and Otkin methods (since they have good performance and they have good climatologies to compare)
+def ModelPredictions(Train, Label, Model, lat, lon, Mask, months, years):
+    '''
+    
+    '''
+    ind = np.where( (months >= 4) & (months <= 10) )[0]
+    
+    
+    xTrain = Train[:,ind,:]; yTrain = Label[:,ind,:]
+    xTest  = Train[:,:,:]
+    
+    IJTrain, Ttrain, NVar = xTrain.shape
+    IJTrain, Ttrain, NMethods = yTrain.shape
+    
+    IJTest, T, NVar = xTest.shape
+    
+    # Reorder data into 2D matrices
+    xTrain = xTrain.reshape(IJTrain*Ttrain, NVar, order = 'F')
+    yTrain = yTrain.reshape(IJTrain*Ttrain, NMethods, order = 'F')
+    
+    xTest = xTest.reshape(IJTest*T, NVar, order = 'F')
+    
+    I, J = lon.shape
+    
+    # Next, Start performing SL models for each method.
+    ##### Remember to add Li
+    Methods = ['Christian', 'Otkin']
+    
+    CaseYears = [1988, 2000, 2003, 2011, 2012, 2017, 2019]
+    
+    AllYears = np.unique(years)
+    
+    for method in Methods:
+        if method == 'Christian': # Christian et al. method uses SESR
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([0, 1]))
+            TestData  = ColumnRemoval(xTest, cols = np.asarray([0, 1]))
+            TrainLabel = yTrain[:,0]
+            
+            NVarRemoved = 2
+            FullMethod = 'Christian et al. 2019'
+            
+            # The Probability threshholds are based on the maximum Youden and minimum distance probabilities 
+            Thresh = 0.02
+            
+        else: # Otkin et al. Method uses FDII
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([14]))
+            TestData  = ColumnRemoval(xTest, cols = np.asarray([14]))
+            TrainLabel = yTrain[:,5]
+            
+            NVarRemoved = 1
+            FullMethod = 'Otkin et al. 2021'
+            
+            # The Probability threshholds are based on the maximum Youden and minimum distance probabilities
+            Thresh = 0.03
+            
+        # Create the model
+        if (Model == 'RF') | (Model == 'Random Forest'):
+            # Create random forest based on the best parameters
+            # Train the model with all the data now that it has been tested and predict FD for all datapoints
+            Prob, _ = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = -1)
+            FullModel = '100 Tree Random Forest'
+        else:
+            pass # Add more models
+        
+        # Create the predictions based on the thressholds
+        Predictions = np.where(Prob[:,1] >= Thresh, 1, 0)
+        
+        # Next reshape the data back into a 2D array
+        Predictions = Predictions.reshape(IJTrain, T, order = 'F')
+        
+        # Readd sea datapoints to recreate the full map.
+        FullPred = np.ones((I*J, T)) * np.nan
+        ij_land = 0
+        for ij in range(I*J):
+            if Mask[ij] == 0:
+                FullPred[ij,:] = np.nan
+            else:
+                FullPred[ij,:] = Predictions[ij_land,:]
+                
+                ij_land = ij_land + 1
+                
+        # Reshape the data into a full 3D map
+        FullPred = FullPred.reshape(I, J, T, order = 'F')
+        
+        
+        # Create the climatology map 'Percent of Years from 1979 - 2020 with Otkin et al. 2021 Flash Drought' + '\n' + 'as Predicted by a 100 Tree Random Forest'
+        FDClimatologyMap(FullPred, lat, lon, AllYears, months, years, title = 'Percent of Years from 1979 - 2020 with ' + method + ' Flash Drought' + '\n' + 'as Predicted by a ' + FullModel, savename = method + '_' + Model + '_Predicted_Climatology.png')
+        
+        # Create the case study maps
+        for cy in CaseYears:
+            FDAnnualMaps(FullPred, lat, lon, cy, months, years, title = 'Flash Drought for ' + str(cy) + ' Predicted by a ' + FullModel + ' for the ' + FullMethod + ' Method', savename = method + '_' + Model + '_CaseStudy' + str(cy) + '.png')
 
 
 #%%
@@ -835,35 +1752,63 @@ IJ, T = sesr2D.shape
 NIndices = 15 # Number of indices. Each index (except FDII [see cell 9]) has 2 values. The index is the drought part, the mean change is the intensification part
 NMethods = 6 # Number of flash drought identification methods being investigated
 
-x = np.ones((IJ*T, NIndices)) * np.nan
-y = np.ones((IJ*T, NMethods)) * np.nan
+x = np.ones((IJ, T, NIndices)) * np.nan
+y = np.ones((IJ, T, NMethods)) * np.nan
+
+x[:,:,0] = sesr2D # The first column of x contains SESR
+x[:,:,1] = MDsesr2D # The second column of x contains the mean change in SESR
+x[:,:,2] = sedi2D # The third column of x contains SEDI
+x[:,:,3] = MDsedi2D # The fourth column of x contains the mean change in SEDI
+x[:,:,4] = spei2D # The fifth column of x contains SPEI
+x[:,:,5] = MDspei2D # The sixth column of x contains the mean change in SPEI
+x[:,:,6] = sapei2D # The seventh column of x contains SAPEI
+x[:,:,7] = MDsapei2D # The eighth column of x contains the mean change in SAPEI
+x[:,:,8] = eddi2D # The nineth column of x contains EDDI
+x[:,:,9] = MDeddi2D # The tenth column of x contains the mean change in EDDI
+x[:,:,10] = smi2D # The eleventh column of x contains SMI
+x[:,:,11] = MDsmi2D # The twelveth column of x contains the mean change in SMI
+x[:,:,12] = sodi2D # The thirteenth column of x contains SODI
+x[:,:,13] = MDsodi2D # The forteenth column of x contains the mean change in SODI
+x[:,:,14] = fdii2D # The fifteenth column of x contains FDII
 
 
-# Place the data in their respective arrays. For posterity, comments will record which columns contains what variable
-x[:,0]  = sesr2D.reshape(IJ*T, order = 'F') # The first column of x contains SESR
-x[:,1]  = MDsesr2D.reshape(IJ*T, order = 'F') # The second column of x contains the mean change in SESR
-x[:,2]  = sedi2D.reshape(IJ*T, order = 'F') # The third column of x contains SEDI
-x[:,3]  = MDsedi2D.reshape(IJ*T, order = 'F') # The fourth column of x contains the mean change in SEDI
-x[:,4]  = spei2D.reshape(IJ*T, order = 'F') # The fifth column of x contains SPEI
-x[:,5]  = MDspei2D.reshape(IJ*T, order = 'F') # The sixth column of x contains the mean change in SPEI
-x[:,6]  = sapei2D.reshape(IJ*T, order = 'F') # The seventh column of x contains SAPEI
-x[:,7]  = MDsapei2D.reshape(IJ*T, order = 'F') # The eighth column of x contains the mean change in SAPEI
-x[:,8]  = eddi2D.reshape(IJ*T, order = 'F') # The nineth column of x contains EDDI
-x[:,9]  = MDeddi2D.reshape(IJ*T, order = 'F') # The tenth column of x contains the mean change in EDDI
-x[:,10] = smi2D.reshape(IJ*T, order = 'F') # The eleventh column of x contains SMI
-x[:,11] = MDsmi2D.reshape(IJ*T, order = 'F') # The twelveth column of x contains the mean change in SMI
-x[:,12] = sodi2D.reshape(IJ*T, order = 'F') # The thirteenth column of x contains SODI
-x[:,13] = MDsodi2D.reshape(IJ*T, order = 'F') # The forteenth column of x contains the mean change in SODI
-x[:,14] = fdii2D.reshape(IJ*T, order = 'F') # The fifteenth column of x contains FDII
+y[:,:,0] = ChFD2D # The first column in y contains FD identified using the Christian et al. method
+y[:,:,1] = NogFD2D # The second column in y contains FD identified using the Noguera et al. method
+# y[:,:,2] = LiFD2D # The third column in y contains FD identified using the Li et al. method
+y[:,:,3] = LiuFD2D # The fourth column in y contains FD identified using the Liu et al. method
+y[:,:,4] = PeFD2D # The fifth column in y contains FD identified using the Pendergrass et al. method
+y[:,:,5] = OtFD2D # The sixth column in y contains FD identified using the Otkin et al. method
+
+
+# x = np.ones((IJ*T, NIndices)) * np.nan
+# y = np.ones((IJ*T, NMethods)) * np.nan
+
+
+# # Place the data in their respective arrays. For posterity, comments will record which columns contains what variable
+# x[:,0]  = sesr2D.reshape(IJ*T, order = 'F') # The first column of x contains SESR
+# x[:,1]  = MDsesr2D.reshape(IJ*T, order = 'F') # The second column of x contains the mean change in SESR
+# x[:,2]  = sedi2D.reshape(IJ*T, order = 'F') # The third column of x contains SEDI
+# x[:,3]  = MDsedi2D.reshape(IJ*T, order = 'F') # The fourth column of x contains the mean change in SEDI
+# x[:,4]  = spei2D.reshape(IJ*T, order = 'F') # The fifth column of x contains SPEI
+# x[:,5]  = MDspei2D.reshape(IJ*T, order = 'F') # The sixth column of x contains the mean change in SPEI
+# x[:,6]  = sapei2D.reshape(IJ*T, order = 'F') # The seventh column of x contains SAPEI
+# x[:,7]  = MDsapei2D.reshape(IJ*T, order = 'F') # The eighth column of x contains the mean change in SAPEI
+# x[:,8]  = eddi2D.reshape(IJ*T, order = 'F') # The nineth column of x contains EDDI
+# x[:,9]  = MDeddi2D.reshape(IJ*T, order = 'F') # The tenth column of x contains the mean change in EDDI
+# x[:,10] = smi2D.reshape(IJ*T, order = 'F') # The eleventh column of x contains SMI
+# x[:,11] = MDsmi2D.reshape(IJ*T, order = 'F') # The twelveth column of x contains the mean change in SMI
+# x[:,12] = sodi2D.reshape(IJ*T, order = 'F') # The thirteenth column of x contains SODI
+# x[:,13] = MDsodi2D.reshape(IJ*T, order = 'F') # The forteenth column of x contains the mean change in SODI
+# x[:,14] = fdii2D.reshape(IJ*T, order = 'F') # The fifteenth column of x contains FDII
 
 
 
-y[:,0] = ChFD2D.reshape(IJ*T, order = 'F')  # The first column in y contains FD identified using the Christian et al. method
-y[:,1] = NogFD2D.reshape(IJ*T, order = 'F') # The second column in y contains FD identified using the Noguera et al. method
-# y[:,2] = LiFD2D.reshape(IJ*T, order = 'F')  # The third column in y contains FD identified using the Li et al. method
-y[:,3] = LiuFD2D.reshape(IJ*T, order = 'F') # The fourth column in y contains FD identified using the Liu et al. method
-y[:,4] = PeFD2D.reshape(IJ*T, order = 'F') # The fifth column in y contains FD identified using the Pendergrass et al. method
-y[:,5] = OtFD2D.reshape(IJ*T, order = 'F')  # The sixth column in y contains FD identified using the Otkin et al. method
+# y[:,0] = ChFD2D.reshape(IJ*T, order = 'F')  # The first column in y contains FD identified using the Christian et al. method
+# y[:,1] = NogFD2D.reshape(IJ*T, order = 'F') # The second column in y contains FD identified using the Noguera et al. method
+# # y[:,2] = LiFD2D.reshape(IJ*T, order = 'F')  # The third column in y contains FD identified using the Li et al. method
+# y[:,3] = LiuFD2D.reshape(IJ*T, order = 'F') # The fourth column in y contains FD identified using the Liu et al. method
+# y[:,4] = PeFD2D.reshape(IJ*T, order = 'F') # The fifth column in y contains FD identified using the Pendergrass et al. method
+# y[:,5] = OtFD2D.reshape(IJ*T, order = 'F')  # The sixth column in y contains FD identified using the Otkin et al. method
 
 # Delete the redundant 2D data to conserve space
 del sesr2D
@@ -890,235 +1835,424 @@ del PeFD2D
 del OtFD2D
 
 
-#%%
-# cell 13
-# Seperate the data into training, validation, and test sets [For now, this separation is random. May separate based on years later.]
+# #%%
+# # cell 13
+# # Seperate the data into training, validation, and test sets [For now, this separation is random. May separate based on years later.]
 
-# Note separation is based on which method is being investigated
-Method = 'Christian'
-# Method = 'Noguera'
-# Method = 'Li'
-# Method = 'Liu'
-# Method = 'Pendergrass'
+# # Note separation is based on which method is being investigated
+# # Method = 'Christian'
+# # Method = 'Noguera'
+# # Method = 'Li'
+# # Method = 'Liu'
+# # Method = 'Pendergrass'
 # Method = 'Otkin'
 
-if Method == 'Christian': # Christian et al. method uses SESR
-    DelCols = np.asarray([0, 1])
-    FDInd = 0
-elif Method == 'Noguera': # Noguera et al method uses SPEI
-    DelCols = np.asarray([4, 5])
-    FDInd = 1
-elif Method == 'Li': # Li et al. method uses SEDI
-    DelCols = np.asarray([2, 3])
-    FDInd = 2
-elif Method == 'Liu': # Liu et al. method uses soil moisture
-    DelCols = np.asarray([ ])
-    FDInd = 3
-elif Method == 'Pendergrass': # Penndergrass et al. method uses EDDI
-    DelCols = np.asarray([9, 10])
-    FDInd = 4
-else: # Otkin et al. Method uses FDII
-    DelCols = np.asarray([15])
-    FDInd = 5
+# if Method == 'Christian': # Christian et al. method uses SESR
+#     DelCols = np.asarray([0, 1])
+#     FDInd = 0
+# elif Method == 'Noguera': # Noguera et al method uses SPEI
+#     DelCols = np.asarray([4, 5])
+#     FDInd = 1
+# elif Method == 'Li': # Li et al. method uses SEDI
+#     DelCols = np.asarray([2, 3])
+#     FDInd = 2
+# elif Method == 'Liu': # Liu et al. method uses soil moisture
+#     DelCols = np.asarray([ ])
+#     FDInd = 3
+# elif Method == 'Pendergrass': # Penndergrass et al. method uses EDDI
+#     DelCols = np.asarray([9, 10])
+#     FDInd = 4
+# else: # Otkin et al. Method uses FDII
+#     DelCols = np.asarray([14])
+#     FDInd = 5
 
-# Separate the data, removing the index used in the FD identification method (this removes potential bias of that index outweighing the others)
-xTrain, xVal, xTest, xSel, yTrain, yVal, yTest, ySel = Preprocessing(x, y[:,FDInd], DelCols)
+# # Separate the data, removing the index used in the FD identification method (this removes potential bias of that index outweighing the others)
+# xTrain, xVal, xTest, xSel, yTrain, yVal, yTest, ySel = Preprocessing(x, y[:,FDInd], DelCols)
 
-# Determine the sizes of the test data
-ITrain = yTrain.shape[0]
-IVal   = yVal.shape[0]
-ITest  = yTest.shape[0]
+# # Determine the sizes of the test data
+# ITrain = yTrain.shape[0]
+# IVal   = yVal.shape[0]
+# ITest  = yTest.shape[0]
 
-NVar = xTrain.shape[-1] # Number of variables
-
+# NVar = xTrain.shape[-1] # Number of variables
 
 #%%
-# cell 14
-# Begin ML methods. Start with basic decision trees to start iron out the process of refining the model, displaying results, etc.
+# cell
+# Split the data
 
-# Decision Trees
+# Model testing for random forests
 
-### Note this is more of a test cell to create a means for deciding and comparing models
+### Random Forests
 
-# Both 10 branch models performed equally well. Go with default (GINI)
+# Run the models using parallel processing. 
+### NOTE, This is designed to run all the cores on the computer for the quickest performance. Then the computer CANNOT be used while this is running.
 
-# Define a function to create and evaluate a decision tree model.
-def TreeModel(xTrain, yTrain, xVal, crit, max_depth):
-    '''
+DetermineParameters(x, y, Model = 'Random Forest', NJobs = -1)
 
 
-    '''
+# # Remove unnecessary variables to conserve space
+# del xTrain, xVal
+# del yTrain, yVal
+
+# The best performing model for the Christian et al. method was the 100 tree RF (200 trees was better, but the improvement was minor). Largest Youden index was around 0.02
+# The best performing model for the Noguera et al. method was the 100 tree RF (200 only had minor improvement). Largest Youden index was around 0.06
+# The best performing model for the Li et al. method was the # tree RF.
+# The best performing model for the Liu et al. method was the 100 tree RF (200 only had minor improvement). Largest Youden index was around 0.05
+# The best performing model for the Pendergrass et al. method was the 100 tree RF. Largest Youden index was around 0.01
+# The best performing model for the Otkin et al. method was the 100 tree RF (200 only had minor improvement). Largest Youden index was around 0.03
+
+#%%
+# cell
+# With the model parameters tested, make and compare models for each FD method. Start with RFs
     
-    # Make the decision tree
-    Tree = tree.DecisionTreeClassifier(criterion = crit, max_depth = max_depth)
-    
-    # Train the tree
-    Tree.fit(xTrain, yTrain)
-    
-    # Make probabilistic predictions
-    Prob = Tree.predict_proba(xVal)
-    
-    return Prob
-    
-# Create a couple of decision tree models to test
-print('Creating models')
-ProbGini5 = TreeModel(xTrain, yTrain, xVal, crit = 'gini', max_depth = 5)
-ProbGini10 = TreeModel(xTrain, yTrain, xVal, crit = 'gini', max_depth = 10)
-ProbEnt5 = TreeModel(xTrain, yTrain, xVal, crit = 'gini', max_depth = 5)
-ProbEnt10 = TreeModel(xTrain, yTrain, xVal, crit = 'gini', max_depth = 10)
+### Main results with RFs
+
+# Run the models using parallel processing. 
+### NOTE, This is designed to run all the cores on the computer for the quickest performance. Then the computer CANNOT be used while this is running.
 
 
+CreateSLModel(x, y, 'Random Forest')
 
-# Evaluate the models
-# Note the probabilities have 2 columns. Column 1 is the probability of that row being 0, and column 1 is the probability of that row being 1. The latter is used for most of these calculations
-print('Evaluating models')
-TPRGini5, FPRGini5, EntGini5, R2Gini5, RMSEGini5, CpGini5, AICGini5, BICGini5, AccGini5, PrecGini5, RecallGini5, F1Gini5, SpecGini5, RiskGini5, AUCGini5, YoudGini5, YoudThreshGini5, dGini5, dThreshGini5 = EvaluateModel(ProbGini5[:,1], yVal, N = NVar)
-TPRGini10, FPRGini10, EntGini10, R2Gini10, RMSEGini10, CpGini10, AICGini10, BICGini10, AccGini10, PrecGini10, RecallGini10, F1Gini10, SpecGini10, RiskGini10, AUCGini10, YoudGini10, YoudThreshGini10, dGini10, dThreshGini10 = EvaluateModel(ProbGini10[:,1], yVal, N = NVar)
-TPREnt5, FPREnt5, EntEnt5, R2Ent5, RMSEEnt5, CpEnt5, AICEnt5, BICEnt5, AccEnt5, PrecEnt5, RecallEnt5, F1Ent5, SpecEnt5, RiskEnt5, AUCEnt5, YoudEnt5, YoudThreshEnt5, dEnt5, dThreshEnt5 = EvaluateModel(ProbEnt5[:,1], yVal, N = NVar)
-TPREnt10, FPREnt10, EntEnt10, R2Ent10, RMSEEnt10, CpEnt10, AICEnt10, BICEnt10, AccEnt10, PrecEnt10, RecallEnt10, F1Ent10, SpecEnt10, RiskEnt10, AUCEnt10, YoudEnt10, YoudThreshEnt10, dEnt10, dThreshEnt10 = EvaluateModel(ProbEnt10[:,1], yVal, N = NVar)
-
-
-
-# Output the performance statistics
-
-#   Cross-Entropy
-print('The GINI 5 branch tree has a cross-entropy of: %4.2f' %EntGini5)
-print('The GINI 10 branch tree has a cross-entropy of: %4.2f' %EntGini10)
-print('The Entropy 5 branch tree has a cross-entropy of: %4.2f' %EntEnt5)
-print('The Entropy 10 branch tree has a cross-entropy of: %4.2f' %EntEnt10)
-print('\n')
-
-#   Adjusted-R^2
-print('The GINI 5 branch tree has an Adjusted-R^2 of: %4.2f' %R2Gini5)
-print('The GINI 10 branch tree has an Adjusted-R^2 of: %4.2f' %R2Gini10)
-print('The Entropy 5 branch tree has an Adjusted-R^2 of: %4.2f' %R2Ent5)
-print('The Entropy 10 branch tree has an Adjusted-R^2 of: %4.2f' %R2Ent10)
-print('\n')
-
-#   RMSE
-print('The GINI 5 branch tree has a RMSE of: %4.2f' %RMSEGini5)
-print('The GINI 10 branch tree has a RMSE of: %4.2f' %RMSEGini10)
-print('The Entropy 5 branch tree has a RMSE of: %4.2f' %RMSEEnt5)
-print('The Entropy 10 branch tree has a RMSE of: %4.2f' %RMSEEnt10)
-print('\n')
-
-#   Cp
-print('The GINI 5 branch tree has a Cp of: %4.2f' %CpGini5)
-print('The GINI 10 branch tree has a Cp of: %4.2f' %CpGini10)
-print('The Entropy 5 branch tree has a Cp of: %4.2f' %CpEnt5)
-print('The Entropy 10 branch tree has a Cp of: %4.2f' %CpEnt10)
-print('\n')
-
-#   AIC
-print('The GINI 5 branch tree has a AIC of: %4.2f' %AICGini5)
-print('The GINI 10 branch tree has a AIC of: %4.2f' %AICGini10)
-print('The Entropy 5 branch tree has a AIC of: %4.2f' %AICEnt5)
-print('The Entropy 10 branch tree has a AIC of: %4.2f' %AICEnt10)
-print('\n')
-
-#   BIC
-print('The GINI 5 branch tree has a BIC of: %4.2f' %BICGini5)
-print('The GINI 10 branch tree has a BIC of: %4.2f' %BICGini10)
-print('The Entropy 5 branch tree has a BIC of: %4.2f' %BICEnt5)
-print('The Entropy 10 branch tree has a BIC of: %4.2f' %BICEnt10)
-print('\n')
-
-#   Accuracy
-print('The GINI 5 branch tree has a Accuracy of: %4.2f' %AccGini5)
-print('The GINI 10 branch tree has a Accuracy of: %4.2f' %AccGini10)
-print('The Entropy 5 branch tree has a Accuracy of: %4.2f' %AccEnt5)
-print('The Entropy 10 branch tree has a Accuracy of: %4.2f' %AccEnt10)
-print('\n')
-
-#   Precision
-print('The GINI 5 branch tree has a Precision of: %4.2f' %PrecGini5)
-print('The GINI 10 branch tree has a Precision of: %4.2f' %PrecGini10)
-print('The Entropy 5 branch tree has a Precision of: %4.2f' %PrecEnt5)
-print('The Entropy 10 branch tree has a Precision of: %4.2f' %PrecEnt10)
-print('\n')
-
-#   Recall
-print('The GINI 5 branch tree has a Recall of: %4.2f' %RecallGini5)
-print('The GINI 10 branch tree has a Recall of: %4.2f' %RecallGini10)
-print('The Entropy 5 branch tree has a Recall of: %4.2f' %RecallEnt5)
-print('The Entropy 10 branch tree has a Recall of: %4.2f' %RecallEnt10)
-print('\n')
-
-#   F1-Score
-print('The GINI 5 branch tree has a F1-Score of: %4.2f' %F1Gini5)
-print('The GINI 10 branch tree has a F1-Score of: %4.2f' %F1Gini10)
-print('The Entropy 5 branch tree has a F1-Score of: %4.2f' %F1Ent5)
-print('The Entropy 10 branch tree has a F1-Score of: %4.2f' %F1Ent10)
-print('\n')
-
-#   Specificity
-print('The GINI 5 branch tree has a Specificity of: %4.2f' %SpecGini5)
-print('The GINI 10 branch tree has a Specificity of: %4.2f' %SpecGini10)
-print('The Entropy 5 branch tree has a Specificity of: %4.2f' %SpecEnt5)
-print('The Entropy 10 branch tree has a Specificity of: %4.2f' %SpecEnt10)
-print('\n')
-
-#   Risk
-print('The GINI 5 branch tree has a Risk of: %4.2f' %RiskGini5)
-print('The GINI 10 branch tree has a Risk of: %4.2f' %RiskGini10)
-print('The Entropy 5 branch tree has a Risk of: %4.2f' %RiskEnt5)
-print('The Entropy 10 branch tree has a Risk of: %4.2f' %RiskEnt10)
-print('\n')
-
-#   AUC
-print('The GINI 5 branch tree has an AUC of: %4.2f' %AUCGini5)
-print('The GINI 10 branch tree has an AUC of: %4.2f' %AUCGini10)
-print('The Entropy 5 branch tree has an AUC of: %4.2f' %AUCEnt5)
-print('The Entropy 10 branch tree has an AUC of: %4.2f' %AUCEnt10)
-print('\n')
-
-#   Youden Index
-print('The GINI 5 branch tree has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudGini5, YoudThreshGini5))
-print('The GINI 10 branch tree has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudGini10, YoudThreshGini10))
-print('The Entropy 5 branch tree has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudEnt5, YoudThreshEnt5))
-print('The Entropy 10 branch tree has amaximum Youden index of %4.2f at the threshold of %4.3f' %(YoudEnt10, YoudThreshEnt10))
-print('\n')
-
-#   Distance from leftmost corner of ROC curve
-print('The GINI 5 branch tree has a minimum distance of %4.2f at the threshold of %4.3f' %(dGini5, dThreshGini5))
-print('The GINI 10 branch tree has a minimum distance of %4.2f at the threshold of %4.3f' %(dGini10, dThreshGini10))
-print('The Entropy 5 branch tree has a minimum distance of %4.2f at the threshold of %4.3f' %(dEnt5, dThreshEnt5))
-print('The Entropy 10 branch tree has a minimum distance of %4.2f at the threshold of %4.3f' %(dEnt10, dThreshEnt10))
-print('\n')
-
-
-# Plot the ROC curve for the models
-fig = plt.figure(figsize = [14,14])
-ax = fig.add_subplot(1,1,1)
-
-#   Set the title
-ax.set_title('Receiver Operating Characteristic Curve for the Four Decision Trees', fontsize = 24)
-
-#   Create the plots
-ax.plot(FPRGini5, TPRGini5, 'r-', linewidth = 2.0, label = 'GINI 5 Branch Model')
-ax.plot(FPRGini10, TPRGini10, 'b-', linewidth = 2.0, label = 'GINI 10 Branch Model')
-ax.plot(FPREnt5, TPREnt5, 'k-', linewidth = 2.0, label = 'Entropy 5 Branch Model')
-ax.plot(FPREnt10, TPREnt10, 'g-', linewidth = 2.0, label = 'Entropy 5 Branch Model')
-
-#   Set the legend
-ax.legend(loc = 'best', fontsize = 33)
-
-#   Set the figure limits and labels
-ax.set_xlim([0, 1.02])
-ax.set_ylim([0, 1.02])
-
-ax.set_xlabel('False Positive Rate', fontsize = 22)
-ax.set_ylabel('True Positive Rate', fontsize = 22)
-
-#   Set the tick sizes
-for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-    i.set_size(22)
-    
-plt.show(block = False)
+# Create some climatologies and case studies using the RF predictions to further examine performance
+ModelPredictions(x, y, 'RF', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], sesr['year'])
 
 
 
 #%%
-# cell 15
+# cell
+
+# Model testing for boosted trees
+    
+### Boosted Trees
+
+
+
+
+
+#%%
+# cell
+
+# Model testing for SVMs
+
+### SVMs
+
+
+# Other studies are fairly consistent in using the radial basis function kernel, but do not detail other parameters. Modified parameter for this run will be kernal functions.
+#   May come back to this and toy with other parameters
+
+
+
+# The best performing model for the Christian et al. method was the SVM with # kernal. Largest Youden index was around 0.02
+# The best performing model for the Noguera et al. method was the SVM with # kernal. Largest Youden index was around 0.06
+# The best performing model for the Li et al. method was the SVM with # kernal.
+# The best performing model for the Liu et al. method was the SVM with # kernal. Largest Youden index was around 0.05
+# The best performing model for the Pendergrass et al. method was the SVM with # kernal. Largest Youden index was around 0.01
+# The best performing model for the Otkin et al. method was the SVM with # kernal. Largest Youden index was around 0.03
+
+#%%
+# cell
+# With the model parameters tested, make and compare models for each FD method. Start with RFs
+    
+### Main results with RFs
+
+# Run the models using parallel processing. 
+### NOTE, This is designed to run all the cores on the computer for the quickest performance. Then the computer CANNOT be used while this is running.
+
+
+CreateSLModel(x, y, 'Random Forest')
+
+# Create some climatologies and case studies using the RF predictions to further examine performance
+ModelPredictions(x, y, 'RF', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], sesr['year'])
+
+
+#%%
+# cell
+
+# Model testing for traditional NNs    
+
+### Nueral Netwros
+    
+
+
+#%%
+# cell
+
+# Model testing for wavelets
+
+### Wavelets
+
+
+
+
+
+#%%
+# cell
+
+# This was used to make a prelimary figure
+# # More Examination of model performance.
+# OtProb, _ = RFModel(xTrain, yTrain, x[:,:-1], N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+
+
+# # Make prediction for the Christian et al. method using the maximum Youden index
+# Pred = np.where(OtProb[:,1] >= 0.05, 1, 0) # For all points where the probability is greater than or equal to 0.02, 1 is assigned, and 0 otherwise.
+
+# # Reshape the data into a 2D array.
+# Pred = Pred.reshape(IJ, T, order = 'F')
+
+# # Replace sea datapoints to get a full array. 
+# FullPred = np.ones((I*J, T)) * np.nan
+
+# ij_land = 0
+# for ij in range(I*J):
+#     if Mask1D[ij] == 0:
+#         FullPred[ij,:] = np.nan
+#     else: # Locations where the mask is 1 (land), predictions are placed. Mask == 0 (sea) are left as NaN
+#         FullPred[ij,:] = Pred[ij_land,:]
+        
+#         ij_land = ij_land+1
+    
+# FullPred = FullPred.reshape(I, J, T, order = 'F')
+    
+
+# # Next, determine a climatology for the predicted data.
+# years  = np.unique(sesr['year'])
+
+# AnnFD = np.ones((I, J, years.size)) * np.nan
+
+# # Calculate the average number of rapid intensifications and flash droughts in a year
+# for y in range(years.size):
+#     yInd = np.where( (years[y] == sesr['year']) & ((sesr['month'] >= 4) & (sesr['month'] <=10)) )[0] # Second set of conditions ensures only growing season values
+    
+#     # Calculate the mean number of flash drought for each year    
+#     AnnFD[:,:,y] = np.nanmean(FullPred[:,:,yInd], axis = -1)
+    
+#     # Turn nonzero values to 1 (each year gets 1 count to the total)    
+#     AnnFD[:,:,y] = np.where(( (AnnFD[:,:,y] == 0) | (np.isnan(AnnFD[:,:,y])) ), 
+#                             AnnFD[:,:,y], 1) # This changes nonzero  and nan (sea) values to 1.
+    
+
+# # Calculate the percentage number of years with rapid intensifications and flash droughts
+# PerAnnFD = np.nansum(AnnFD[:,:,:], axis = -1)/years.size
+
+# # Turn 0 values into nan
+# PerAnnFD = np.where(PerAnnFD != 0, PerAnnFD, np.nan)
+
+# #### Create the Plot ####
+
+# # Set colorbar information
+# cmin = -20; cmax = 80; cint = 1
+# clevs = np.arange(-20, cmax + cint, cint)
+# nlevs = len(clevs)
+# cmap  = plt.get_cmap(name = 'hot_r', lut = nlevs)
+
+
+# # Get the normalized color values
+# norm = mcolors.Normalize(vmin = 0, vmax = cmax)
+
+# # Generate the colors from the orginal color map in range from [0, cmax]
+# colors = cmap(np.linspace(1 - (cmax - 0)/(cmax - cmin), 1, cmap.N))  ### Note, in the event cmin and cmax share the same sign, 1 - (cmax - cmin)/cmax should be used
+# colors[:4,:] = np.array([1., 1., 1., 1.]) # Change the value of 0 to white
+
+# # Create a new colorbar cut from the colors in range [0, cmax.]
+# ColorMap = mcolors.LinearSegmentedColormap.from_list('cut_hot_r', colors)
+
+# colorsNew = cmap(np.linspace(0, 1, cmap.N))
+# colorsNew[abs(cmin)-1:abs(cmin)+1, :] = np.array([1., 1., 1., 1.]) # Change the value of 0 in the plotted colormap to white
+# cmap = mcolors.LinearSegmentedColormap.from_list('hot_r', colorsNew)
+
+# # Shapefile information
+# # ShapeName = 'Admin_1_states_provinces_lakes_shp'
+# ShapeName = 'admin_0_countries'
+# CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+
+# CountriesReader = shpreader.Reader(CountriesSHP)
+
+# USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+# NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+
+# # Lonitude and latitude tick information
+# lat_int = 10
+# lon_int = 20
+
+# LatLabel = np.arange(-90, 90, lat_int)
+# LonLabel = np.arange(-180, 180, lon_int)
+
+# LonFormatter = cticker.LongitudeFormatter()
+# LatFormatter = cticker.LatitudeFormatter()
+
+# # Projection information
+# data_proj = ccrs.PlateCarree()
+# fig_proj  = ccrs.PlateCarree()
+
+
+
+# # Create the plots
+# fig = plt.figure(figsize = [12, 10])
+
+
+# # Flash Drought plot
+# ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+# # Set the flash drought title
+# ax.set_title('Percent of Years from 1979 - 2020 with Otkin et al. 2021 Flash Drought' + '\n' + 'as Predicted by a 100 Tree Random Forest', size = 18)
+
+# # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+# ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
+# ax.add_feature(cfeature.STATES)
+# ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+# ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+
+# # Adjust the ticks
+# ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
+# ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
+
+# ax.set_yticklabels(LatLabel, fontsize = 18)
+# ax.set_xticklabels(LonLabel, fontsize = 18)
+
+# ax.xaxis.set_major_formatter(LonFormatter)
+# ax.yaxis.set_major_formatter(LatFormatter)
+
+# # Plot the flash drought data
+# cs = ax.pcolormesh(sesr['lon'], sesr['lat'], PerAnnFD*100, vmin = cmin, vmax = cmax,
+#                   cmap = cmap, transform = data_proj, zorder = 1)
+
+# # Set the map extent to the U.S.
+# ax.set_extent([-130, -65, 23.5, 48.5])
+
+
+# # Set the colorbar size and location
+# cbax = fig.add_axes([0.915, 0.29, 0.025, 0.425])
+
+# # Create the colorbar
+# cbar = mcolorbar.ColorbarBase(cbax, cmap = ColorMap, norm = norm, orientation = 'vertical')
+
+# # Set the colorbar label
+# cbar.ax.set_ylabel('% of years with Flash Drought', fontsize = 18)
+
+# # Set the colorbar ticks
+# cbar.set_ticks(np.arange(0, 90, 10))
+# cbar.ax.set_yticklabels(np.arange(0, 90, 10), fontsize = 16)
+
+# # Save the figure
+# plt.savefig('./Figures/Preliminary_RF_PredictedClimatology.png', bbox_inches = 'tight')
+# plt.show(block = False)
+
+
+
+
+#%%
+# cell
+
+# This was used to make a prelimary figure
+# Finally, produce a figure for 2017    
+
+# This was used to make a prelimary figure
+# Pred2017 = np.zeros((I, J))
+# NMonths = 12
+
+# for m in range(NMonths):
+#     ind = np.where( (sesr['year'] == 2017) & (sesr['month'] == m) )[0]
+#     Pred2017 = np.where(((np.nansum(FullPred[:,:,ind], axis = -1) != 0 ) & (Pred2017 == 0)), m, Pred2017) # Points where there prediction for the month is nonzero (FD is predicted) and 
+#                                                                                                           # Pred2017 does not have a value already, are given a value of m. Pred2017 is left alone otherwise.
+    
+# # Remove sea values
+# Pred2017[maskSub[:,:,0] == 0] = np.nan
+    
+    
+# # Create a figure to plot this.
+
+# # Set colorbar information
+# # cmin = 0; cmax = 12; cint = 1
+# cmin = 3; cmax = 10; cint = 1
+# clevs = np.arange(cmin, cmax + cint, cint)
+# nlevs = len(clevs)
+# cmap  = plt.get_cmap(name = 'hot_r', lut = nlevs)
+
+# # Shapefile information
+# # ShapeName = 'Admin_1_states_provinces_lakes_shp'
+# ShapeName = 'admin_0_countries'
+# CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+
+# CountriesReader = shpreader.Reader(CountriesSHP)
+
+# USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+# NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+
+# # Lonitude and latitude tick information
+# lat_int = 10
+# lon_int = 20
+
+# LatLabel = np.arange(-90, 90, lat_int)
+# LonLabel = np.arange(-180, 180, lon_int)
+
+# LonFormatter = cticker.LongitudeFormatter()
+# LatFormatter = cticker.LatitudeFormatter()
+
+# # Projection information
+# data_proj = ccrs.PlateCarree()
+# fig_proj  = ccrs.PlateCarree()
+
+
+
+# # Create the plots
+# fig = plt.figure(figsize = [12, 10])
+
+
+# # Flash Drought plot
+# ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+# # Set the flash drought title
+# ax.set_title('Flash Drought for 2017 Predicted by a 100 Tree Random Forest using the Otkin et al. 2021 Method', size = 18)
+
+# # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+# ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
+# ax.add_feature(cfeature.STATES)
+# ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+# ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+
+# # Adjust the ticks
+# ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
+# ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
+
+# ax.set_yticklabels(LatLabel, fontsize = 18)
+# ax.set_xticklabels(LonLabel, fontsize = 18)
+
+# ax.xaxis.set_major_formatter(LonFormatter)
+# ax.yaxis.set_major_formatter(LatFormatter)
+
+# # Plot the flash drought data
+# cs = ax.pcolormesh(sesr['lon'], sesr['lat'], Pred2017, vmin = cmin, vmax = cmax,
+#                   cmap = cmap, transform = data_proj, zorder = 1)
+
+# # Set the map extent to the U.S.
+# ax.set_extent([-130, -65, 23.5, 48.5])
+
+
+# # Set the colorbar size and location
+# cbax = fig.add_axes([0.915, 0.29, 0.025, 0.425])
+
+# # Create the colorbar
+# cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, norm = norm, orientation = 'vertical')
+
+
+# # Set the colorbar ticks
+# # cbar.set_ticks(np.arange(0, 12+1, 1))
+# # cbar.ax.set_yticklabels(['No FD', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'], fontsize = 16)
+# # cbar.set_ticks(np.arange(1, 11+1, 1.48))
+# cbar.set_ticks(np.arange(5, 100+1, 10))
+# cbar.ax.set_yticklabels(['No FD', 'Apr', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct'], fontsize = 16)
+
+# # Save the figure
+# plt.savefig('./Figures/Preliminary_RF_CaseStudy2017.png', bbox_inches = 'tight')
+# plt.show(block = False)
+
+
+
+
+    
+
+
+
+
 
 
