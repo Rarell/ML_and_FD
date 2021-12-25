@@ -3,19 +3,59 @@
 """
 Created on Sat Oct  2 17:52:45 2021
 
-@author: stuartedris
-
-
-This is the main script for the employment of machine learning to identify flash drought study.
-This script takes in indces calculated from the Calculate_Indices script (training data) and the 
-identified flash drought in the Calculate_FD script (label data) and identifies flash drought
-using those indices (minus the index used to calculate flash drought). Several models are employed
-(decision trees to set the process up, boosted trees, random forests, SVMs, and nueral networks).
-Models are run for each flash drought identification method. Output results are given in the final
-models, ROC curves, tables of performance statistics, weights (contribution of each index), etc.
-
-This script assumes it is being running in the 'ML_and_FD_in_NARR' directory
-
+##############################################################
+# File: ML_and_FD.py
+# Version: 1.0.0
+# Author: Stuart Edris (sgedris@ou.edu)
+# Description:
+#     This is the main script for the employment of machine learning to identify flash drought study.
+#     This script takes in indces calculated from the Calculate_Indices script (training data) and the 
+#     identified flash drought in the Calculate_FD script (label data) and identifies flash drought
+#     using those indices (minus the index used to calculate flash drought). Several models are employed
+#     (decision trees to set the process up, boosted trees, random forests, SVMs, and nueral networks).
+#     Models are run for each flash drought identification method. Output results are given in the final
+#     models, ROC curves, tables of performance statistics, weights (contribution of each index), etc.
+#
+# 
+#
+# Version History: 
+#   1.0.0 - 12/24/2021 - Initial reformatting of the script to use a 'version' setting (note the version number is not in the script name, so this is not a full version version control)
+#   1.1.0 - 12/25/2021 - Implemented code to split the dataset into regions in the DetermineParameters and CreateSLModel functions
+#
+# Inputs:
+#   - Data files for FD indices and identified FD (.nc format)
+#
+# Outputs:
+#   - A number of figure showing the results of the SL algorithms
+#   - Several outputs (in the terminal) showing performance metrics for the SL algorithms
+#
+# To Do:
+#   - Fix SVMs
+#   - Divide data into regions
+#       - In DetermineParameters:
+#           - Reorder data into 2D arrays
+#           - Add overarching loop across all regions
+#           - Update the Training, Validation, TPR, and FPR variable names and indices
+#           - Update the print commands to include region
+#           - Add a function call to create the regional map (see SESR_histograms.png for example)
+#           - Create and add the function create the regional map from test.py
+#       - Update the CreateSLModel function to divide data into regions
+#       - Update the ModelPredictions function to divide data into regions
+#   - Identify RI and drought seperately
+#   - Add Li et al. FD method
+#   - Add other datasets for more robustness and obtaining global scale analyses
+#   - Might add other SL algorithms, and other types of NNs
+#   - Might try a more effective approach to parallel processing for increased computation speed
+#
+# Bugs:
+#   - SVMs will freeze the code
+#
+# Notes:
+#   - All Python libraries are the lateset versions of the release date.
+#   - This script assumes it is being running in the 'ML_and_FD_in_NARR' directory
+#   - Several of the comments for this program are based on the Spyder IDL, which can separate the code into different blocks of code, or 'cells'
+#
+###############################################################
 """
 
 
@@ -695,13 +735,13 @@ def RFModel(xTrain, yTrain, xVal, N_trees = 50, crit = 'gini', max_depth = 5, ma
     return Prob, TrainingWeights
 
 
-def SVMModel(xTrain, yTrain, xVal, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1):
+def SVMModel(xTrain, yTrain, xVal, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', max_iter = 200):
     '''
     
     '''
     
-    # Make the SVM. # Note this is default set to run parallel processing across all CPUs
-    SVM = svm.SVR(C = RegParam, kernel = Kernel, gamma = Gamma, n_jobs = NJobs)
+    # Make the SVM.
+    SVM = svm.SVR(C = RegParam, kernel = Kernel, gamma = Gamma)
     
     # Train the SVM
     SVM.fit(xTrain, yTrain)
@@ -712,12 +752,28 @@ def SVMModel(xTrain, yTrain, xVal, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scal
     return Prob
 
 
+def ANNModel(xTrain, yTrain, xVal, layers = (15,), activation = 'relu', solver = 'adam', learn_rate = 'constant'):
+    '''
+    
+    '''
+    
+    # Make the ANN.
+    ANN = neural_network.MLPClassifier(hidden_layer_sizes = layers, activation = activation, solver = solver, learning_rate = learn_rate)
+    
+    # Train the ANN
+    ANN.fit(xTrain, yTrain)
+    
+    # Make probabilistic predictions
+    Prob = ANN.predict_proba(xVal)
+    
+    return Prob
+
 
 
 #%%
 # cell 
 # Create a function to create SL models and output performance metrics to test parameters
-def DetermineParameters(Train, Label, Model, NJobs = -1):
+def DetermineParameters(Train, Label, Model, GriddedRegion = 'USA', NJobs = -1):
     '''
     
     '''
@@ -754,7 +810,70 @@ def DetermineParameters(Train, Label, Model, NJobs = -1):
     yTrain = yTrain.reshape(IJTrain*Ttrain, NMethods, order = 'F')
     yVal   = yVal.reshape(IJVal*Tval, NMethods, order = 'F')
     
-    
+    # Split the data into regions depending on scale of the dataset
+    if GriddedRegion == 'USA':
+        # Define the regions
+        Regions = ['Northwest', 'West North Central', 'East North Central', 'Northeast', 'West', 'Southwest', 'South', 'Southeast']
+        
+        # Define the TPR and FPR to the number of regions
+        TPRM1 = np.ones((100, Regions.size)) * np.nan
+        TPRM2 = np.ones((100, Regions.size)) * np.nan
+        TPRM3 = np.ones((100, Regions.size)) * np.nan
+        TPRM4 = np.ones((100, Regions.size)) * np.nan
+        
+        FPRM1 = np.ones((100, Regions.size)) * np.nan
+        FPRM2 = np.ones((100, Regions.size)) * np.nan
+        FPRM3 = np.ones((100, Regions.size)) * np.nan
+        FPRM4 = np.ones((100, Regions.size)) * np.nan
+        
+        # Initialize the dictonaries for split training and validation data.
+        xTrainRegions = {}
+        xValRegions = {}
+        yTrainRegions = {}
+        yValRegions = {}
+        
+        # Split the training data
+        for t in Ttrain:
+            xTrainRegions[Regions[0]] = xTrain[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
+            xTrainRegions[Regions[1]] = xTrain[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
+            xTrainRegions[Regions[2]] = xTrain[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
+            xTrainRegions[Regions[3]] = xTrain[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
+            xTrainRegions[Regions[4]] = xTrain[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
+            xTrainRegions[Regions[5]] = xTrain[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
+            xTrainRegions[Regions[6]] = xTrain[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
+            xTrainRegions[Regions[7]] = xTrain[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+            
+            yTrainRegions[Regions[0]] = yTrain[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
+            yTrainRegions[Regions[1]] = yTrain[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
+            yTrainRegions[Regions[2]] = yTrain[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
+            yTrainRegions[Regions[3]] = yTrain[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
+            yTrainRegions[Regions[4]] = yTrain[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
+            yTrainRegions[Regions[5]] = yTrain[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
+            yTrainRegions[Regions[6]] = yTrain[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
+            yTrainRegions[Regions[7]] = yTrain[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+            
+        # Split the validation data
+        for t in Tval:
+            xValRegions[Regions[0]] = xVal[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
+            xValRegions[Regions[1]] = xVal[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
+            xValRegions[Regions[2]] = xVal[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
+            xValRegions[Regions[3]] = xVal[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
+            xValRegions[Regions[4]] = xVal[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
+            xValRegions[Regions[5]] = xVal[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
+            xValRegions[Regions[6]] = xVal[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
+            xValRegions[Regions[7]] = xVal[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+            
+            yValRegions[Regions[0]] = yVal[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
+            yValRegions[Regions[1]] = yVal[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
+            yValRegions[Regions[2]] = yVal[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
+            yValRegions[Regions[3]] = yVal[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
+            yValRegions[Regions[4]] = yVal[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
+            yValRegions[Regions[5]] = yVal[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
+            yValRegions[Regions[6]] = yVal[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
+            yValRegions[Regions[7]] = yVal[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+        
+    else:
+        pass
     
     # Next, Start performing SL models for each method.
     ##### Remember to add Li
@@ -828,15 +947,30 @@ def DetermineParameters(Train, Label, Model, NJobs = -1):
             # Other studies are fairly consistent in using the radial basis function kernel, but do not detail other parameters. Modified parameter for this run will be kernal functions.
             # May come back to this and toy with other parameters
             
-            ProbM1 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'linear', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
-            ProbM2 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'poly', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
-            ProbM3 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
-            ProbM4 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'sigmoid', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+            ProbM1 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'linear', RegParam = 1.0, Gamma = 'scale')
+            ProbM2 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'poly', RegParam = 1.0, Gamma = 'scale')
+            ProbM3 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
+            ProbM4 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'sigmoid', RegParam = 1.0, Gamma = 'scale')
             
             TextM1 = 'Linear SVM'
             TextM2 = 'Polynomial SVM'
             TextM3 = 'Radial basis SVM'
             TextM4 = 'Sigmoid SVM'
+            
+        elif (Model == 'ANN') | (Model == 'Nueral Network'):
+            # Only one study gives the parameters used, which were 1 layerr with 14 and 15 neurons. Base parameter variation off of this.
+            # May come back to this and toy with other parameters
+            
+            ProbM1 = ANNModel(TrainData, TrainLabel, ValData, layers = (15,))
+            ProbM2 = ANNModel(TrainData, TrainLabel, ValData, layers = (25,))
+            ProbM3 = ANNModel(TrainData, TrainLabel, ValData, layers = (15, 15))
+            ProbM4 = ANNModel(TrainData, TrainLabel, ValData, layers = (25, 25))
+            
+            TextM1 = '1 layer, 15 node ANN'
+            TextM2 = '1 layer, 25 node ANN'
+            TextM3 = '2 layer, 15 node ANN'
+            TextM4 = '2 layer, 25 node ANN'
+            
             
         else: ##### Add more models here
             pass
@@ -1118,32 +1252,65 @@ def CreateSLModel(Train, Label, Model):
             # Create SVM based on the best parameters
             # The Probability threshholds are based on the maximum Youden and minimum distance probabilities
             if method == 'Christian':
-                ChProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+                ChProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
                 
                 ChThresh = 0.02
                 
             elif method == 'Noguera':
-                NogProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+                NogProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
                 
                 NogThresh = 0.06
                 
             elif method == 'Li':
-                LiProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+                LiProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
                 
                 LiThresh = 0.05
                 
             elif method == 'Liu':
-                LiuProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+                LiuProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
                 
                 LiuThresh = 0.05
                 
             elif method == 'Pendergrass':
-                PeProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+                PeProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
                 
                 PeThresh = 0.01
                 
             else:
-                OtProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+                OtProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
+                
+                OtThresh = 0.03
+                
+        elif (Model == 'ANN') | (Model == 'Nueral Network'):
+            # Create ANN based on the best parameters
+            # The Probability threshholds are based on the maximum Youden and minimum distance probabilities
+            if method == 'Christian':
+                ChProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15,))
+                
+                ChThresh = 0.01
+                
+            elif method == 'Noguera':
+                NogProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15, 15))
+                
+                NogThresh = 0.04
+                
+            elif method == 'Li':
+                LiProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15,))
+                
+                LiThresh = 0.03
+                
+            elif method == 'Liu':
+                LiuProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15,))
+                
+                LiuThresh = 0.03
+                
+            elif method == 'Pendergrass':
+                PeProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15, 15))
+                
+                PeThresh = 0.01
+                
+            else:
+                OtProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15, 15))
                 
                 OtThresh = 0.03
 
@@ -1353,7 +1520,7 @@ def ModelPredictions(Train, Label, Model, lat, lon, Mask, months, years):
     
     # Next, Start performing SL models for each method.
     ##### Remember to add Li
-    Methods = ['Christian', 'Otkin']
+    Methods = ['Christian', 'Liu', 'Otkin']
     
     CaseYears = [1988, 2000, 2003, 2011, 2012, 2017, 2019]
     
@@ -1370,6 +1537,17 @@ def ModelPredictions(Train, Label, Model, lat, lon, Mask, months, years):
             
             # The Probability threshholds are based on the maximum Youden and minimum distance probabilities 
             Thresh = 0.02
+            
+        elif method == 'Liu': # Christian et al. method uses SESR
+            TrainData = ColumnRemoval(xTrain, cols = np.asarray([ ]))
+            TestData  = ColumnRemoval(xTest, cols = np.asarray([ ]))
+            TrainLabel = yTrain[:,3]
+            
+            NVarRemoved = 2
+            FullMethod = 'Christian et al. 2019'
+            
+            # The Probability threshholds are based on the maximum Youden and minimum distance probabilities 
+            Thresh = 0.03
             
         else: # Otkin et al. Method uses FDII
             TrainData = ColumnRemoval(xTrain, cols = np.asarray([14]))
@@ -1392,8 +1570,14 @@ def ModelPredictions(Train, Label, Model, lat, lon, Mask, months, years):
         elif (Model == 'SVM') | (Model == 'Support Vector Machine'):
             # Create SVM based on the best parameters
             # Train the model with all the data now that it has been tested and predict FD for all datapoints
-            Prob = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale', NJobs = -1)
+            Prob = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
             FullModel = 'Radial Basis SVM'
+            
+        elif (Model == 'ANN') | (Model == 'Nueral Network'):
+            # Create ANN based on the best parameters
+            # Train the model with all the data now that it has been tested and predict FD for all datapoints
+            Prob = ANNModel(TrainData, TrainLabel, TestData, layers = (15, 15))
+            FullModel = '2 layer 15 node ANN'
         else:
             pass # Add more models
         
@@ -2010,7 +2194,7 @@ ModelPredictions(x, y, 'RF', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], se
 # Model testing for SVMs
 
 ### SVMs
-DetermineParameters(x, y, Model = 'SVM', NJobs = -1)
+DetermineParameters(x, y, Model = 'SVM')
 
 # Other studies are fairly consistent in using the radial basis function kernel, but do not detail other parameters. Modified parameter for this run will be kernal functions.
 #   May come back to this and toy with other parameters
@@ -2026,9 +2210,9 @@ DetermineParameters(x, y, Model = 'SVM', NJobs = -1)
 
 #%%
 # cell
-# With the model parameters tested, make and compare models for each FD method. Start with RFs
+# With the model parameters tested, make and compare models for each FD method. Start with SVMs
     
-### Main results with RFs
+### Main results with SVMs
 
 # Run the models using parallel processing. 
 ### NOTE, This is designed to run all the cores on the computer for the quickest performance. Then the computer CANNOT be used while this is running.
@@ -2045,9 +2229,36 @@ ModelPredictions(x, y, 'SVM', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], s
 
 # Model testing for traditional NNs    
 
-### Nueral Netwros
-    
+### Nueral Networks
+DetermineParameters(x, y, Model = 'ANN')
 
+# Other studies are fairly consistent in using the radial basis function kernel, but do not detail other parameters. Modified parameter for this run will be kernal functions.
+#   May come back to this and toy with other parameters
+
+
+
+# The best performing model for the Christian et al. method was the ANN with 1 layer and 15 nodes. Largest Youden index was around 0.01 (Note they all performed about the same, but this one is simpler)
+# The best performing model for the Noguera et al. method was the ANN with 2 layers and 15 nodes. Largest Youden index was around 0.04 (Note they all performed about the same, but this one had the best Recall)
+# The best performing model for the Li et al. method was the ANN with # layers and # nodes.
+# The best performing model for the Liu et al. method was the ANN with 1 layers and 15 nodes. Largest Youden index was around 0.03 (Note they all performed about the same, but this one is simpler)
+# The best performing model for the Pendergrass et al. method was the ANN with 2 layers and 15 nodes. Largest Youden index was around 0.01
+# The best performing model for the Otkin et al. method was the ANN with 2 layers and 15 nodes. Largest Youden index was around 0.03
+
+
+#%%
+# cell
+# With the model parameters tested, make and compare models for each FD method. Start with ANNs
+    
+### Main results with ANNs
+
+# Run the models using parallel processing. 
+### NOTE, This is designed to run all the cores on the computer for the quickest performance. Then the computer CANNOT be used while this is running.
+
+
+CreateSLModel(x, y, 'ANN')
+
+# Create some climatologies and case studies using the RF predictions to further examine performance
+ModelPredictions(x, y, 'ANN', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], sesr['year'])
 
 #%%
 # cell
