@@ -32,14 +32,7 @@ Created on Sat Oct  2 17:52:45 2021
 # To Do:
 #   - Fix SVMs
 #   - Divide data into regions
-#       - In DetermineParameters:
-#           - Reorder data into 2D arrays
-#           - Add overarching loop across all regions
-#           - Update the Training, Validation, TPR, and FPR variable names and indices
-#           - Update the print commands to include region
-#           - Add a function call to create the regional map (see SESR_histograms.png for example)
-#           - Create and add the function create the regional map from test.py
-#       - Update the CreateSLModel function to divide data into regions
+#       - Update the CreateSLModel function to divide data into regions (the section creating the models still needs to be updated)
 #       - Update the ModelPredictions function to divide data into regions
 #   - Identify RI and drought seperately
 #   - Add Li et al. FD method
@@ -83,6 +76,9 @@ from scipy import signal
 from scipy.special import gamma
 from netCDF4 import Dataset, num2date
 from datetime import datetime, timedelta
+from matplotlib import patches
+from matplotlib.lines import Line2D
+from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 from sklearn import tree
 from sklearn import neural_network
@@ -708,6 +704,148 @@ def FDAnnualMaps(FD, lat, lon, CaseYear, months, years, title = 'tmp', savename 
     
     
     
+    
+# Function to create inset plots over a map (for the US)
+def USRegionPlots(x, y, Regions, labels, title = 'tmp', savename = 'tmp.png'):
+    '''
+    Note x and y should be [i by 8 by j] arrays. i is the data to be plotted, j is the number datasets/lines per plot. J needs to be less than 6.
+    '''
+    
+    # Define all the different linestyles
+    line_style = {}
+    for ls in range(x.shape[-1]):
+        if ls == 0:
+            line_style[str(ls)] = 'solid'
+        elif ls == 1:
+            line_style[str(ls)] = 'dotted'
+        elif ls == 2:
+            line_style[str(ls)] = 'dashdot'
+        elif ls == 3:
+            line_style[str(ls)] = (0, (5, 5)) # Dashed line
+        elif ls == 4:
+            line_style[str(ls)] = (0, (3, 5, 1, 5, 1, 5)) # Dash dot dot line
+        elif ls == 5:
+            line_style[str(ls)] = (0, (1, 10)) # Loosely dotted line
+        else:
+            pass
+        
+        
+        
+    
+    # Create the plot
+        
+    # Shapefile information
+    ShapeName = 'admin_0_countries'
+    CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+        
+    CountriesReader = shpreader.Reader(CountriesSHP)
+        
+    USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+    NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+        
+    # Lonitude and latitude tick information
+    lat_int = 10
+    lon_int = 20
+    
+    LatLabel = np.arange(-90, 90, lat_int)
+    LonLabel = np.arange(-180, 180, lon_int)
+    
+    LonFormatter = cticker.LongitudeFormatter()
+    LatFormatter = cticker.LatitudeFormatter()
+    
+    # Projection information
+    data_proj = ccrs.PlateCarree()
+    fig_proj  = ccrs.PlateCarree()
+    
+    # Create the figure
+    fig = plt.figure(figsize = [18, 15])
+    ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+    
+    # Set the title
+    ax.set_title(title, size = 20)
+    
+    # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+    ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    ax.add_feature(cfeature.STATES, zorder = 2)
+    ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+    ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    
+    # Adjust the ticks
+    ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
+    ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
+    
+    ax.set_yticklabels(LatLabel, fontsize = 18)
+    ax.set_xticklabels(LonLabel, fontsize = 18)
+
+    ax.xaxis.set_major_formatter(LonFormatter)
+    ax.yaxis.set_major_formatter(LatFormatter)
+    
+    # Plot the polygons that mark each region
+    ax.add_patch(patches.Rectangle(xy = [-130, 42], width = 19, height = 8, color = '#40E0D0', alpha = 1.0, transform = fig_proj, zorder = 1))
+    ax.add_patch(patches.Rectangle(xy = [-111, 42], width = 17, height = 8, color = '#FF7F50', alpha = 1.0, transform = fig_proj, zorder = 1))
+    ax.add_patch(patches.Rectangle(xy = [-94, 38], width = 18.5, height = 12, color = '#9ACD32', alpha = 1.0, transform = fig_proj, zorder = 1))
+    ax.add_patch(patches.Rectangle(xy = [-75.5, 38], width = 10.5, height = 12, color = '#7BC8F6', alpha = 1.0, transform = fig_proj, zorder = 1))
+    
+    ax.add_patch(patches.Rectangle(xy = [-130, 25], width = 16, height = 17, color = '#ADD8E6', alpha = 1.0, transform = fig_proj, zorder = 1))
+    ax.add_patch(patches.Rectangle(xy = [-114, 25], width = 9, height = 17, color = '#DAA520', alpha = 1.0, transform = fig_proj, zorder = 1))
+    ax.add_patch(patches.Rectangle(xy = [-105, 25], width = 11, height = 17, color = '#FBDD7E', alpha = 1.0, transform = fig_proj, zorder = 1))
+    ax.add_patch(patches.Rectangle(xy = [-94, 25], width = 29, height = 13, color = '#FAC205', alpha = 1.0, transform = fig_proj, zorder = 1))
+    
+    # Set the map extent to the U.S.
+    ax.set_extent([-130, -65, 23.5, 48.5])
+    
+    # Set a legend
+    lines = [Line2D([0], [0], label = labels[ls], linestyle = line_style[str(ls)], color = 'k') for ls in range(x.shape[-1])]
+    
+    ax.legend(handles = lines, loc = 'lower left', fontsize = 16)
+    
+    # Create the inset maps
+    axins = {} # Initialize the label for the inset axeses
+    
+    for r, region in enumerate(Regions):
+        if region == Regions[0]: # NW inset
+            axins[region] = inset_axes(ax, width = 1.3, height = 1.3, bbox_to_anchor = (0.25, 0.9), bbox_transform = ax.transAxes)
+            col = '#40E0D0'
+            
+        elif region == Regions[1]: # WNC inset
+            axins[region] = inset_axes(ax, width = 1.3, height = 1.3, bbox_to_anchor = (0.475, 0.9), bbox_transform = ax.transAxes)
+            col = '#FF7F50'
+            
+        elif region == Regions[2]: # ENC inset
+            axins[region] = inset_axes(ax, width = 1.3, height = 1.3, bbox_to_anchor = (0.75, 0.795), bbox_transform = ax.transAxes)
+            col = '#9ACD32'
+            
+        elif region == Regions[3]: # NE inset
+            axins[region] = inset_axes(ax, width = 1.3, height = 1.3, bbox_to_anchor = (0.98, 0.9), bbox_transform = ax.transAxes)
+            col = '#7BC8F6'
+            
+        elif region == Regions[4]: # W inset
+            axins[region] = inset_axes(ax, width = 1.3, height = 1.3, bbox_to_anchor = (0.23, 0.55), bbox_transform = ax.transAxes)
+            col = '#ADD8E6'
+            
+        elif region == Regions[5]: # SW inset
+            axins[region] = inset_axes(ax, width = 1.3, height = 1.3, bbox_to_anchor = (0.38, 0.55), bbox_transform = ax.transAxes)
+            col = '#DAA520'
+            
+        elif region == Regions[6]: # S inset
+            axins[region] = inset_axes(ax, width = 1.3, height = 1.3, bbox_to_anchor = (0.53, 0.53), bbox_transform = ax.transAxes)
+            col = '#FBDD7E'
+            
+        else: # SE inset
+            axins[region] = inset_axes(ax, width = 1.3, height = 1.3, bbox_to_anchor = (0.76, 0.48), bbox_transform = ax.transAxes)
+            col = '#FAC205'
+        
+        # Plot each x and y plot for each inset plot
+        for ls in range(x.shape[-1]):
+            axins[region].plot(x[:,r,ls], y[:,r,ls], color = col, linestyle = line_style[str(ls)])
+            axins[region].set_xticks(np.arange(0, 1.5, 0.5))
+            axins[region].set_yticks(np.arange(0, 1.5, 0.5))
+        
+        # Adjust the tick size
+        for i in axins[region].xaxis.get_ticklabels() + axins[region].yaxis.get_ticklabels():
+            i.set_size(16)
+        
+    
 #%%
 # cell
 # Create functions that will create, train, and make probabilistic predictions of SL models and output the weights of of each index
@@ -773,7 +911,7 @@ def ANNModel(xTrain, yTrain, xVal, layers = (15,), activation = 'relu', solver =
 #%%
 # cell 
 # Create a function to create SL models and output performance metrics to test parameters
-def DetermineParameters(Train, Label, Model, GriddedRegion = 'USA', NJobs = -1):
+def DetermineParameters(Train, Label, Model, lat, lon, GriddedRegion = 'USA', NJobs = -1):
     '''
     
     '''
@@ -804,27 +942,21 @@ def DetermineParameters(Train, Label, Model, GriddedRegion = 'USA', NJobs = -1):
     IJVal, Tval, NVar   = xVal.shape
     IJVal, Tval, NMethods = yVal.shape
     
-    # Reorder data into 2D matrices
-    xTrain = xTrain.reshape(IJTrain*Ttrain, NVar, order = 'F')
-    xVal   = xVal.reshape(IJVal*Tval, NVar, order = 'F')
-    yTrain = yTrain.reshape(IJTrain*Ttrain, NMethods, order = 'F')
-    yVal   = yVal.reshape(IJVal*Tval, NMethods, order = 'F')
-    
     # Split the data into regions depending on scale of the dataset
     if GriddedRegion == 'USA':
         # Define the regions
         Regions = ['Northwest', 'West North Central', 'East North Central', 'Northeast', 'West', 'Southwest', 'South', 'Southeast']
         
         # Define the TPR and FPR to the number of regions
-        TPRM1 = np.ones((100, Regions.size)) * np.nan
-        TPRM2 = np.ones((100, Regions.size)) * np.nan
-        TPRM3 = np.ones((100, Regions.size)) * np.nan
-        TPRM4 = np.ones((100, Regions.size)) * np.nan
+        TPRM1 = np.ones((101, len(Regions))) * np.nan
+        TPRM2 = np.ones((101, len(Regions))) * np.nan
+        TPRM3 = np.ones((101, len(Regions))) * np.nan
+        TPRM4 = np.ones((101, len(Regions))) * np.nan
         
-        FPRM1 = np.ones((100, Regions.size)) * np.nan
-        FPRM2 = np.ones((100, Regions.size)) * np.nan
-        FPRM3 = np.ones((100, Regions.size)) * np.nan
-        FPRM4 = np.ones((100, Regions.size)) * np.nan
+        FPRM1 = np.ones((101, len(Regions))) * np.nan
+        FPRM2 = np.ones((101, len(Regions))) * np.nan
+        FPRM3 = np.ones((101, len(Regions))) * np.nan
+        FPRM4 = np.ones((101, len(Regions))) * np.nan
         
         # Initialize the dictonaries for split training and validation data.
         xTrainRegions = {}
@@ -833,296 +965,341 @@ def DetermineParameters(Train, Label, Model, GriddedRegion = 'USA', NJobs = -1):
         yValRegions = {}
         
         # Split the training data
-        for t in Ttrain:
-            xTrainRegions[Regions[0]] = xTrain[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
-            xTrainRegions[Regions[1]] = xTrain[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
-            xTrainRegions[Regions[2]] = xTrain[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
-            xTrainRegions[Regions[3]] = xTrain[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
-            xTrainRegions[Regions[4]] = xTrain[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
-            xTrainRegions[Regions[5]] = xTrain[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
-            xTrainRegions[Regions[6]] = xTrain[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
-            xTrainRegions[Regions[7]] = xTrain[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
-            
-            yTrainRegions[Regions[0]] = yTrain[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
-            yTrainRegions[Regions[1]] = yTrain[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
-            yTrainRegions[Regions[2]] = yTrain[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
-            yTrainRegions[Regions[3]] = yTrain[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
-            yTrainRegions[Regions[4]] = yTrain[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
-            yTrainRegions[Regions[5]] = yTrain[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
-            yTrainRegions[Regions[6]] = yTrain[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
-            yTrainRegions[Regions[7]] = yTrain[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+        xTrainRegions[Regions[0]] = xTrain[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
+        xTrainRegions[Regions[1]] = xTrain[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
+        xTrainRegions[Regions[2]] = xTrain[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
+        xTrainRegions[Regions[3]] = xTrain[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
+        xTrainRegions[Regions[4]] = xTrain[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
+        xTrainRegions[Regions[5]] = xTrain[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
+        xTrainRegions[Regions[6]] = xTrain[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
+        xTrainRegions[Regions[7]] = xTrain[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+        
+        yTrainRegions[Regions[0]] = yTrain[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
+        yTrainRegions[Regions[1]] = yTrain[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
+        yTrainRegions[Regions[2]] = yTrain[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
+        yTrainRegions[Regions[3]] = yTrain[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
+        yTrainRegions[Regions[4]] = yTrain[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
+        yTrainRegions[Regions[5]] = yTrain[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
+        yTrainRegions[Regions[6]] = yTrain[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
+        yTrainRegions[Regions[7]] = yTrain[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
             
         # Split the validation data
-        for t in Tval:
-            xValRegions[Regions[0]] = xVal[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
-            xValRegions[Regions[1]] = xVal[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
-            xValRegions[Regions[2]] = xVal[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
-            xValRegions[Regions[3]] = xVal[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
-            xValRegions[Regions[4]] = xVal[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
-            xValRegions[Regions[5]] = xVal[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
-            xValRegions[Regions[6]] = xVal[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
-            xValRegions[Regions[7]] = xVal[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
-            
-            yValRegions[Regions[0]] = yVal[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
-            yValRegions[Regions[1]] = yVal[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
-            yValRegions[Regions[2]] = yVal[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
-            yValRegions[Regions[3]] = yVal[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
-            yValRegions[Regions[4]] = yVal[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
-            yValRegions[Regions[5]] = yVal[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
-            yValRegions[Regions[6]] = yVal[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
-            yValRegions[Regions[7]] = yVal[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+        xValRegions[Regions[0]] = xVal[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
+        xValRegions[Regions[1]] = xVal[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
+        xValRegions[Regions[2]] = xVal[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
+        xValRegions[Regions[3]] = xVal[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
+        xValRegions[Regions[4]] = xVal[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
+        xValRegions[Regions[5]] = xVal[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
+        xValRegions[Regions[6]] = xVal[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
+        xValRegions[Regions[7]] = xVal[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+        
+        yValRegions[Regions[0]] = yVal[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
+        yValRegions[Regions[1]] = yVal[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
+        yValRegions[Regions[2]] = yVal[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
+        yValRegions[Regions[3]] = yVal[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
+        yValRegions[Regions[4]] = yVal[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
+        yValRegions[Regions[5]] = yVal[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
+        yValRegions[Regions[6]] = yVal[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
+        yValRegions[Regions[7]] = yVal[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+        
+        # Reoder the data into 2D matrices
+        xTrainRegions[Regions[0]] = xTrainRegions[Regions[0]].reshape(xTrainRegions[Regions[0]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[1]] = xTrainRegions[Regions[1]].reshape(xTrainRegions[Regions[1]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[2]] = xTrainRegions[Regions[2]].reshape(xTrainRegions[Regions[2]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[3]] = xTrainRegions[Regions[3]].reshape(xTrainRegions[Regions[3]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[4]] = xTrainRegions[Regions[4]].reshape(xTrainRegions[Regions[4]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[5]] = xTrainRegions[Regions[5]].reshape(xTrainRegions[Regions[5]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[6]] = xTrainRegions[Regions[6]].reshape(xTrainRegions[Regions[6]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[7]] = xTrainRegions[Regions[7]].reshape(xTrainRegions[Regions[7]].shape[0] * Ttrain, NVar, order = 'F')
+        
+        yTrainRegions[Regions[0]] = yTrainRegions[Regions[0]].reshape(yTrainRegions[Regions[0]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[1]] = yTrainRegions[Regions[1]].reshape(yTrainRegions[Regions[1]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[2]] = yTrainRegions[Regions[2]].reshape(yTrainRegions[Regions[2]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[3]] = yTrainRegions[Regions[3]].reshape(yTrainRegions[Regions[3]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[4]] = yTrainRegions[Regions[4]].reshape(yTrainRegions[Regions[4]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[5]] = yTrainRegions[Regions[5]].reshape(yTrainRegions[Regions[5]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[6]] = yTrainRegions[Regions[6]].reshape(yTrainRegions[Regions[6]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[7]] = yTrainRegions[Regions[7]].reshape(yTrainRegions[Regions[7]].shape[0] * Ttrain, NMethods, order = 'F')
+        
+        xValRegions[Regions[0]] = xValRegions[Regions[0]].reshape(xValRegions[Regions[0]].shape[0] * Tval, NVar, order = 'F')
+        xValRegions[Regions[1]] = xValRegions[Regions[1]].reshape(xValRegions[Regions[1]].shape[0] * Tval, NVar, order = 'F')
+        xValRegions[Regions[2]] = xValRegions[Regions[2]].reshape(xValRegions[Regions[2]].shape[0] * Tval, NVar, order = 'F')
+        xValRegions[Regions[3]] = xValRegions[Regions[3]].reshape(xValRegions[Regions[3]].shape[0] * Tval, NVar, order = 'F')
+        xValRegions[Regions[4]] = xValRegions[Regions[4]].reshape(xValRegions[Regions[4]].shape[0] * Tval, NVar, order = 'F')
+        xValRegions[Regions[5]] = xValRegions[Regions[5]].reshape(xValRegions[Regions[5]].shape[0] * Tval, NVar, order = 'F')
+        xValRegions[Regions[6]] = xValRegions[Regions[6]].reshape(xValRegions[Regions[6]].shape[0] * Tval, NVar, order = 'F')
+        xValRegions[Regions[7]] = xValRegions[Regions[7]].reshape(xValRegions[Regions[7]].shape[0] * Tval, NVar, order = 'F')
+        
+        yValRegions[Regions[0]] = yValRegions[Regions[0]].reshape(yValRegions[Regions[0]].shape[0] * Tval, NMethods, order = 'F')
+        yValRegions[Regions[1]] = yValRegions[Regions[1]].reshape(yValRegions[Regions[1]].shape[0] * Tval, NMethods, order = 'F')
+        yValRegions[Regions[2]] = yValRegions[Regions[2]].reshape(yValRegions[Regions[2]].shape[0] * Tval, NMethods, order = 'F')
+        yValRegions[Regions[3]] = yValRegions[Regions[3]].reshape(yValRegions[Regions[3]].shape[0] * Tval, NMethods, order = 'F')
+        yValRegions[Regions[4]] = yValRegions[Regions[4]].reshape(yValRegions[Regions[4]].shape[0] * Tval, NMethods, order = 'F')
+        yValRegions[Regions[5]] = yValRegions[Regions[5]].reshape(yValRegions[Regions[5]].shape[0] * Tval, NMethods, order = 'F')
+        yValRegions[Regions[6]] = yValRegions[Regions[6]].reshape(yValRegions[Regions[6]].shape[0] * Tval, NMethods, order = 'F')
+        yValRegions[Regions[7]] = yValRegions[Regions[7]].reshape(yValRegions[Regions[7]].shape[0] * Tval, NMethods, order = 'F')
+        
         
     else:
-        pass
+        # Reorder data into 2D matrices
+        xTrain = xTrain.reshape(IJTrain*Ttrain, NVar, order = 'F')
+        xVal   = xVal.reshape(IJVal*Tval, NVar, order = 'F')
+        yTrain = yTrain.reshape(IJTrain*Ttrain, NMethods, order = 'F')
+        yVal   = yVal.reshape(IJVal*Tval, NMethods, order = 'F')
     
     # Next, Start performing SL models for each method.
     ##### Remember to add Li
     Methods = ['Christian', 'Noguera', 'Liu', 'Pendergrass', 'Otkin']
     
     for method in Methods:
-        if method == 'Christian': # Christian et al. method uses SESR
-            TrainData = ColumnRemoval(xTrain, cols = np.asarray([0, 1]))
-            ValData   = ColumnRemoval(xVal, cols = np.asarray([0, 1]))
-            TrainLabel = yTrain[:,0]
-            ValLabel   = yVal[:,0]
+        for r, region in enumerate(Regions):
+            if method == 'Christian': # Christian et al. method uses SESR
+                TrainData = ColumnRemoval(xTrainRegions[region], cols = np.asarray([0, 1]))
+                ValData   = ColumnRemoval(xValRegions[region], cols = np.asarray([0, 1]))
+                TrainLabel = yTrainRegions[region][:,0]
+                ValLabel   = yValRegions[region][:,0]
+                
+                NVarRemoved = 2
+                
+            elif method == 'Noguera': # Noguera et al method uses SPEI
+                TrainData = ColumnRemoval(xTrainRegions[region], cols = np.asarray([4, 5]))
+                ValData   = ColumnRemoval(xValRegions[region], cols = np.asarray([4, 5]))
+                TrainLabel = yTrainRegions[region][:,1]
+                ValLabel   = yValRegions[region][:,1]
+                
+                NVarRemoved = 2
             
-            NVarRemoved = 2
+            elif method == 'Li': # Li et al. method uses SEDI
+                TrainData = ColumnRemoval(xTrainRegions[region], cols = np.asarray([2, 3]))
+                ValData   = ColumnRemoval(xValRegions[region], cols = np.asarray([2, 3]))
+                TrainLabel = yTrainRegions[region][:,2]
+                ValLabel   = yValRegions[region][:,2]
+                
+                NVarRemoved = 2
+                
+            elif method == 'Liu': # Liu et al. method uses soil moisture
+                TrainData = xTrainRegions[region]
+                ValData   = xValRegions[region]
+                TrainLabel = yTrainRegions[region][:,3]
+                ValLabel   = yValRegions[region][:,3]
+                
+                NVarRemoved = 0
+                
+            elif method == 'Pendergrass': # Penndergrass et al. method uses EDDI
+                TrainData = ColumnRemoval(xTrainRegions[region], cols = np.asarray([9, 10]))
+                ValData   = ColumnRemoval(xValRegions[region], cols = np.asarray([9, 10]))
+                TrainLabel = yTrainRegions[region][:,4]
+                ValLabel   = yValRegions[region][:,4]
+                
+                NVarRemoved = 2
+                
+            else: # Otkin et al. Method uses FDII
+                TrainData = ColumnRemoval(xTrainRegions[region], cols = np.asarray([14]))
+                ValData   = ColumnRemoval(xValRegions[region], cols = np.asarray([14]))
+                TrainLabel = yTrainRegions[region][:,5]
+                ValLabel   = yValRegions[region][:,5]
+                
+                NVarRemoved = 1
             
-        elif method == 'Noguera': # Noguera et al method uses SPEI
-            TrainData = ColumnRemoval(xTrain, cols = np.asarray([4, 5]))
-            ValData   = ColumnRemoval(xVal, cols = np.asarray([4, 5]))
-            TrainLabel = yTrain[:,1]
-            ValLabel   = yVal[:,1]
-            
-            NVarRemoved = 2
-        
-        elif method == 'Li': # Li et al. method uses SEDI
-            TrainData = ColumnRemoval(xTrain, cols = np.asarray([2, 3]))
-            ValData   = ColumnRemoval(xVal, cols = np.asarray([2, 3]))
-            TrainLabel = yTrain[:,2]
-            ValLabel   = yVal[:,2]
-            
-            NVarRemoved = 2
-            
-        elif method == 'Liu': # Liu et al. method uses soil moisture
-            TrainData = xTrain
-            ValData   = xVal
-            TrainLabel = yTrain[:,3]
-            ValLabel   = yVal[:,3]
-            
-            NVarRemoved = 0
-            
-        elif method == 'Pendergrass': # Penndergrass et al. method uses EDDI
-            TrainData = ColumnRemoval(xTrain, cols = np.asarray([9, 10]))
-            ValData   = ColumnRemoval(xVal, cols = np.asarray([9, 10]))
-            TrainLabel = yTrain[:,4]
-            ValLabel   = yVal[:,4]
-            
-            NVarRemoved = 2
-            
-        else: # Otkin et al. Method uses FDII
-            TrainData = ColumnRemoval(xTrain, cols = np.asarray([14]))
-            ValData   = ColumnRemoval(xVal, cols = np.asarray([14]))
-            TrainLabel = yTrain[:,5]
-            ValLabel   = yVal[:,5]
-            
-            NVarRemoved = 1
-        
-        print('Creating the ' + Model + 's for the ' + method + ' et al. method.')
-        # Note on nomenclature: M# refers toa value(s) for Model #. So ProbM1 is probability values for Model 1, RMSEM2 is the RMSE for Model 2, etc. Names are generic to move across multiple SL models.
-        if (Model == 'RF') | (Model == 'Random Forest'):
-            # Past studies on predicting droughts with RFs have maintained default settings, while letting the number of trees vary from 10 to 50 to 100 to 200 to 1000.
-            # For simplicity and consistency, follow this procedure for now.
-            ProbM1, _ = RFModel(TrainData, TrainLabel, ValData, N_trees = 50, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = NJobs)
-            ProbM2, _ = RFModel(TrainData, TrainLabel, ValData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = NJobs)
-            ProbM3, _ = RFModel(TrainData, TrainLabel, ValData, N_trees = 200, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = NJobs)
-            ProbM4, _ = RFModel(TrainData, TrainLabel, ValData, N_trees = 1000, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = NJobs) # Note this last one can take a long time to run. It will only be excepted if it really outperforms the others.
-            
-            TextM1 = '50 tree random forest'
-            TextM2 = '100 tree random forest'
-            TextM3 = '200 tree random forest'
-            TextM4 = '1000 tree random forest'
+            print('Creating the ' + Model + 's for the ' + method + ' et al. method.')
+            # Note on nomenclature: M# refers toa value(s) for Model #. So ProbM1 is probability values for Model 1, RMSEM2 is the RMSE for Model 2, etc. Names are generic to move across multiple SL models.
+            if (Model == 'RF') | (Model == 'Random Forest'):
+                # Past studies on predicting droughts with RFs have maintained default settings, while letting the number of trees vary from 10 to 50 to 100 to 200 to 1000.
+                # For simplicity and consistency, follow this procedure for now.
+                ProbM1, _ = RFModel(TrainData, TrainLabel, ValData, N_trees = 50, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = NJobs)
+                ProbM2, _ = RFModel(TrainData, TrainLabel, ValData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = NJobs)
+                ProbM3, _ = RFModel(TrainData, TrainLabel, ValData, N_trees = 200, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = NJobs)
+                ProbM4, _ = RFModel(TrainData, TrainLabel, ValData, N_trees = 1000, crit = 'gini', max_depth = None, max_features = 'auto', NJobs = NJobs) # Note this last one can take a long time to run. It will only be excepted if it really outperforms the others.
+                
+                TextM1 = '50 tree random forest'
+                TextM2 = '100 tree random forest'
+                TextM3 = '200 tree random forest'
+                TextM4 = '1000 tree random forest'
+               
+            elif (Model == 'SVM') | (Model == 'Support Vector Machine'):
+                # Other studies are fairly consistent in using the radial basis function kernel, but do not detail other parameters. Modified parameter for this run will be kernal functions.
+                # May come back to this and toy with other parameters
+                
+                ProbM1 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'linear', RegParam = 1.0, Gamma = 'scale')
+                ProbM2 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'poly', RegParam = 1.0, Gamma = 'scale')
+                ProbM3 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
+                ProbM4 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'sigmoid', RegParam = 1.0, Gamma = 'scale')
+                
+                TextM1 = 'Linear SVM'
+                TextM2 = 'Polynomial SVM'
+                TextM3 = 'Radial basis SVM'
+                TextM4 = 'Sigmoid SVM'
+                
+            elif (Model == 'ANN') | (Model == 'Nueral Network'):
+                # Only one study gives the parameters used, which were 1 layerr with 14 and 15 neurons. Base parameter variation off of this.
+                # May come back to this and toy with other parameters
+                
+                ProbM1 = ANNModel(TrainData, TrainLabel, ValData, layers = (15,))
+                ProbM2 = ANNModel(TrainData, TrainLabel, ValData, layers = (25,))
+                ProbM3 = ANNModel(TrainData, TrainLabel, ValData, layers = (15, 15))
+                ProbM4 = ANNModel(TrainData, TrainLabel, ValData, layers = (25, 25))
+                
+                TextM1 = '1 layer, 15 node ANN'
+                TextM2 = '1 layer, 25 node ANN'
+                TextM3 = '2 layer, 15 node ANN'
+                TextM4 = '2 layer, 25 node ANN'
+                
+                
+            else: ##### Add more models here
+                pass
            
-        elif (Model == 'SVM') | (Model == 'Support Vector Machine'):
-            # Other studies are fairly consistent in using the radial basis function kernel, but do not detail other parameters. Modified parameter for this run will be kernal functions.
-            # May come back to this and toy with other parameters
+            print('Evaluating the ' + Model + 's for the ' + method + ' et al. method.')
+            TPRM1[:,r], FPRM1[:,r], EntM1, R2M1, RMSEM1, CpM1, AICM1, BICM1, AccM1, PrecM1, RecallM1, F1M1, SpecM1, RiskM1, AUCM1, YoudM1, YoudThreshM1, dM1, dThreshM1 = EvaluateModel(ProbM1[:,1], ValLabel, N = (NVar - NVarRemoved))
+            TPRM2[:,r], FPRM2[:,r], EntM2, R2M2, RMSEM2, CpM2, AICM2, BICM2, AccM2, PrecM2, RecallM2, F1M2, SpecM2, RiskM2, AUCM2, YoudM2, YoudThreshM2, dM2, dThreshM2 = EvaluateModel(ProbM2[:,1], ValLabel, N = (NVar - NVarRemoved))
+            TPRM3[:,r], FPRM3[:,r], EntM3, R2M3, RMSEM3, CpM3, AICM3, BICM3, AccM3, PrecM3, RecallM3, F1M3, SpecM3, RiskM3, AUCM3, YoudM3, YoudThreshM3, dM3, dThreshM3 = EvaluateModel(ProbM3[:,1], ValLabel, N = (NVar - NVarRemoved))
+            TPRM4[:,r], FPRM4[:,r], EntM4, R2M4, RMSEM4, CpM4, AICM4, BICM4, AccM4, PrecM4, RecallM4, F1M4, SpecM4, RiskM4, AUCM4, YoudM4, YoudThreshM4, dM4, dThreshM4 = EvaluateModel(ProbM4[:,1], ValLabel, N = (NVar - NVarRemoved))
             
-            ProbM1 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'linear', RegParam = 1.0, Gamma = 'scale')
-            ProbM2 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'poly', RegParam = 1.0, Gamma = 'scale')
-            ProbM3 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
-            ProbM4 = SVMModel(TrainData, TrainLabel, ValData, Kernel = 'sigmoid', RegParam = 1.0, Gamma = 'scale')
+            # Output the performance statistics
+    
+            #   Cross-Entropy
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a cross-entropy of: %4.2f' %EntM1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a cross-entropy of: %4.2f' %EntM2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a cross-entropy of: %4.2f' %EntM3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a cross-entropy of: %4.2f' %EntM4)
+            print('\n')
             
-            TextM1 = 'Linear SVM'
-            TextM2 = 'Polynomial SVM'
-            TextM3 = 'Radial basis SVM'
-            TextM4 = 'Sigmoid SVM'
+            #   Adjusted-R^2
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has an Adjusted-R^2 of: %4.2f' %R2M1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has an Adjusted-R^2 of: %4.2f' %R2M2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has an Adjusted-R^2 of: %4.2f' %R2M3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has an Adjusted-R^2 of: %4.2f' %R2M4)
+            print('\n')
             
-        elif (Model == 'ANN') | (Model == 'Nueral Network'):
-            # Only one study gives the parameters used, which were 1 layerr with 14 and 15 neurons. Base parameter variation off of this.
-            # May come back to this and toy with other parameters
+            #   RMSE
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a RMSE of: %4.2f' %RMSEM1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a RMSE of: %4.2f' %RMSEM2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a RMSE of: %4.2f' %RMSEM3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a RMSE of: %4.2f' %RMSEM4)
+            print('\n')
             
-            ProbM1 = ANNModel(TrainData, TrainLabel, ValData, layers = (15,))
-            ProbM2 = ANNModel(TrainData, TrainLabel, ValData, layers = (25,))
-            ProbM3 = ANNModel(TrainData, TrainLabel, ValData, layers = (15, 15))
-            ProbM4 = ANNModel(TrainData, TrainLabel, ValData, layers = (25, 25))
+            #   Cp
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Cp of: %4.2f' %CpM1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Cp of: %4.2f' %CpM2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Cp of: %4.2f' %CpM3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Cp of: %4.2f' %CpM4)
+            print('\n')
             
-            TextM1 = '1 layer, 15 node ANN'
-            TextM2 = '1 layer, 25 node ANN'
-            TextM3 = '2 layer, 15 node ANN'
-            TextM4 = '2 layer, 25 node ANN'
+            #   AIC
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a AIC of: %4.2f' %AICM1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a AIC of: %4.2f' %AICM2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a AIC of: %4.2f' %AICM3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a AIC of: %4.2f' %AICM4)
+            print('\n')
+            
+            #   BIC
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a BIC of: %4.2f' %BICM1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a BIC of: %4.2f' %BICM2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a BIC of: %4.2f' %BICM3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a BIC of: %4.2f' %BICM4)
+            print('\n')
+            
+            #   Accuracy
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Accuracy of: %4.2f' %AccM1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Accuracy of: %4.2f' %AccM2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Accuracy of: %4.2f' %AccM3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Accuracy of: %4.2f' %AccM4)
+            print('\n')
+            
+            #   Precision
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Precision of: %4.2f' %PrecM1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Precision of: %4.2f' %PrecM2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Precision of: %4.2f' %PrecM3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Precision of: %4.2f' %PrecM4)
+            print('\n')
+            
+            #   Recall
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Recall of: %4.2f' %RecallM1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Recall of: %4.2f' %RecallM2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Recall of: %4.2f' %RecallM3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Recall of: %4.2f' %RecallM4)
+            print('\n')
+            
+            #   F1-Score
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a F1-Score of: %4.2f' %F1M1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a F1-Score of: %4.2f' %F1M2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a F1-Score of: %4.2f' %F1M3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a F1-Score of: %4.2f' %F1M4)
+            print('\n')
+            
+            #   Specificity
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Specificity of: %4.2f' %SpecM1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Specificity of: %4.2f' %SpecM2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Specificity of: %4.2f' %SpecM3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Specificity of: %4.2f' %SpecM4)
+            print('\n')
+            
+            #   Risk
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Risk of: %4.2f' %RiskM1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Risk of: %4.2f' %RiskM2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Risk of: %4.2f' %RiskM3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Risk of: %4.2f' %RiskM4)
+            print('\n')
+            
+            #   AUC
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has an AUC of: %4.2f' %AUCM1)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has an AUC of: %4.2f' %AUCM2)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has an AUC of: %4.2f' %AUCM3)
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has an AUC of: %4.2f' %AUCM4)
+            print('\n')
+            
+            #   Youden Index
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM1, YoudThreshM1))
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM2, YoudThreshM2))
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM3, YoudThreshM3))
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM4, YoudThreshM4))
+            print('\n')
+            
+            #   Distance from leftmost corner of ROC curve
+            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM1, dThreshM1))
+            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM2, dThreshM2))
+            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM3, dThreshM3))
+            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM4, dThreshM4))
+            print('\n')
             
             
-        else: ##### Add more models here
-            pass
-       
-        print('Evaluating the ' + Model + 's for the ' + method + ' et al. method.')
-        TPRM1, FPRM1, EntM1, R2M1, RMSEM1, CpM1, AICM1, BICM1, AccM1, PrecM1, RecallM1, F1M1, SpecM1, RiskM1, AUCM1, YoudM1, YoudThreshM1, dM1, dThreshM1 = EvaluateModel(ProbM1[:,1], ValLabel, N = (NVar - NVarRemoved))
-        TPRM2, FPRM2, EntM2, R2M2, RMSEM2, CpM2, AICM2, BICM2, AccM2, PrecM2, RecallM2, F1M2, SpecM2, RiskM2, AUCM2, YoudM2, YoudThreshM2, dM2, dThreshM2 = EvaluateModel(ProbM2[:,1], ValLabel, N = (NVar - NVarRemoved))
-        TPRM3, FPRM3, EntM3, R2M3, RMSEM3, CpM3, AICM3, BICM3, AccM3, PrecM3, RecallM3, F1M3, SpecM3, RiskM3, AUCM3, YoudM3, YoudThreshM3, dM3, dThreshM3 = EvaluateModel(ProbM3[:,1], ValLabel, N = (NVar - NVarRemoved))
-        TPRM4, FPRM4, EntM4, R2M4, RMSEM4, CpM4, AICM4, BICM4, AccM4, PrecM4, RecallM4, F1M4, SpecM4, RiskM4, AUCM4, YoudM4, YoudThreshM4, dM4, dThreshM4 = EvaluateModel(ProbM4[:,1], ValLabel, N = (NVar - NVarRemoved))
-        
-        # Output the performance statistics
-
-        #   Cross-Entropy
-        print('The ' + method + ' et al. ' + TextM1 + ' has a cross-entropy of: %4.2f' %EntM1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has a cross-entropy of: %4.2f' %EntM2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has a cross-entropy of: %4.2f' %EntM3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has a cross-entropy of: %4.2f' %EntM4)
-        print('\n')
-        
-        #   Adjusted-R^2
-        print('The ' + method + ' et al. ' + TextM1 + ' has an Adjusted-R^2 of: %4.2f' %R2M1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has an Adjusted-R^2 of: %4.2f' %R2M2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has an Adjusted-R^2 of: %4.2f' %R2M3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has an Adjusted-R^2 of: %4.2f' %R2M4)
-        print('\n')
-        
-        #   RMSE
-        print('The ' + method + ' et al. ' + TextM1 + ' has a RMSE of: %4.2f' %RMSEM1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has a RMSE of: %4.2f' %RMSEM2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has a RMSE of: %4.2f' %RMSEM3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has a RMSE of: %4.2f' %RMSEM4)
-        print('\n')
-        
-        #   Cp
-        print('The ' + method + ' et al. ' + TextM1 + ' has a Cp of: %4.2f' %CpM1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has a Cp of: %4.2f' %CpM2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has a Cp of: %4.2f' %CpM3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has a Cp of: %4.2f' %CpM4)
-        print('\n')
-        
-        #   AIC
-        print('The ' + method + ' et al. ' + TextM1 + ' has a AIC of: %4.2f' %AICM1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has a AIC of: %4.2f' %AICM2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has a AIC of: %4.2f' %AICM3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has a AIC of: %4.2f' %AICM4)
-        print('\n')
-        
-        #   BIC
-        print('The ' + method + ' et al. ' + TextM1 + ' has a BIC of: %4.2f' %BICM1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has a BIC of: %4.2f' %BICM2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has a BIC of: %4.2f' %BICM3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has a BIC of: %4.2f' %BICM4)
-        print('\n')
-        
-        #   Accuracy
-        print('The ' + method + ' et al. ' + TextM1 + ' has a Accuracy of: %4.2f' %AccM1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has a Accuracy of: %4.2f' %AccM2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has a Accuracy of: %4.2f' %AccM3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has a Accuracy of: %4.2f' %AccM4)
-        print('\n')
-        
-        #   Precision
-        print('The ' + method + ' et al. ' + TextM1 + ' has a Precision of: %4.2f' %PrecM1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has a Precision of: %4.2f' %PrecM2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has a Precision of: %4.2f' %PrecM3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has a Precision of: %4.2f' %PrecM4)
-        print('\n')
-        
-        #   Recall
-        print('The ' + method + ' et al. ' + TextM1 + ' has a Recall of: %4.2f' %RecallM1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has a Recall of: %4.2f' %RecallM2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has a Recall of: %4.2f' %RecallM3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has a Recall of: %4.2f' %RecallM4)
-        print('\n')
-        
-        #   F1-Score
-        print('The ' + method + ' et al. ' + TextM1 + ' has a F1-Score of: %4.2f' %F1M1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has a F1-Score of: %4.2f' %F1M2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has a F1-Score of: %4.2f' %F1M3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has a F1-Score of: %4.2f' %F1M4)
-        print('\n')
-        
-        #   Specificity
-        print('The ' + method + ' et al. ' + TextM1 + ' has a Specificity of: %4.2f' %SpecM1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has a Specificity of: %4.2f' %SpecM2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has a Specificity of: %4.2f' %SpecM3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has a Specificity of: %4.2f' %SpecM4)
-        print('\n')
-        
-        #   Risk
-        print('The ' + method + ' et al. ' + TextM1 + ' has a Risk of: %4.2f' %RiskM1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has a Risk of: %4.2f' %RiskM2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has a Risk of: %4.2f' %RiskM3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has a Risk of: %4.2f' %RiskM4)
-        print('\n')
-        
-        #   AUC
-        print('The ' + method + ' et al. ' + TextM1 + ' has an AUC of: %4.2f' %AUCM1)
-        print('The ' + method + ' et al. ' + TextM2 + ' has an AUC of: %4.2f' %AUCM2)
-        print('The ' + method + ' et al. ' + TextM3 + ' has an AUC of: %4.2f' %AUCM3)
-        print('The ' + method + ' et al. ' + TextM4 + ' has an AUC of: %4.2f' %AUCM4)
-        print('\n')
-        
-        #   Youden Index
-        print('The ' + method + ' et al. ' + TextM1 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM1, YoudThreshM1))
-        print('The ' + method + ' et al. ' + TextM2 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM2, YoudThreshM2))
-        print('The ' + method + ' et al. ' + TextM3 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM3, YoudThreshM3))
-        print('The ' + method + ' et al. ' + TextM4 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM4, YoudThreshM4))
-        print('\n')
-        
-        #   Distance from leftmost corner of ROC curve
-        print('The ' + method + ' et al. ' + TextM1 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM1, dThreshM1))
-        print('The ' + method + ' et al. ' + TextM2 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM2, dThreshM2))
-        print('The ' + method + ' et al. ' + TextM3 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM3, dThreshM3))
-        print('The ' + method + ' et al. ' + TextM4 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM4, dThreshM4))
-        print('\n')
-        
-        
-        # Finally output a ROC curve to finish evaluating the models
-        fig = plt.figure(figsize = [14,14])
-        ax = fig.add_subplot(1,1,1)
-        
-        #   Set the title
-        ax.set_title('Receiver Operating Characteristic Curve for ' + Model + 's using the ' + method + ' et al. Method', fontsize = 24)
-        
-        #   Create the plots
-        ax.plot(FPRM1, TPRM1, 'r-', linewidth = 2.0, label = TextM1)
-        ax.plot(FPRM2, TPRM2, 'b-', linewidth = 2.0, label = TextM2)
-        ax.plot(FPRM3, TPRM3, 'k-', linewidth = 2.0, label = TextM3)
-        ax.plot(FPRM4, TPRM4, 'g-', linewidth = 2.0, label = TextM4)
-        
-        #   Set the legend
-        ax.legend(loc = 'best', fontsize = 33)
-        
-        #   Set the figure limits and labels
-        ax.set_xlim([0, 1.02])
-        ax.set_ylim([0, 1.02])
-        
-        ax.set_xlabel('False Positive Rate', fontsize = 22)
-        ax.set_ylabel('True Positive Rate', fontsize = 22)
-        
-        #   Set the tick sizes
-        for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-            i.set_size(22)
+            # Finally output a ROC curve to finish evaluating the models
+            fig = plt.figure(figsize = [14,14])
+            ax = fig.add_subplot(1,1,1)
             
-        plt.show(block = False)
-        
+            #   Set the title
+            ax.set_title('Receiver Operating Characteristic Curve for ' + Model + 's using the ' + method + ' et al. Method', fontsize = 24)
+            
+            #   Create the plots
+            ax.plot(FPRM1[:,r], TPRM1[:,r], 'r-', linewidth = 2.0, label = TextM1)
+            ax.plot(FPRM2[:,r], TPRM2[:,r], 'b-', linewidth = 2.0, label = TextM2)
+            ax.plot(FPRM3[:,r], TPRM3[:,r], 'k-', linewidth = 2.0, label = TextM3)
+            ax.plot(FPRM4[:,r], TPRM4[:,r], 'g-', linewidth = 2.0, label = TextM4)
+            
+            #   Set the legend
+            ax.legend(loc = 'best', fontsize = 33)
+            
+            #   Set the figure limits and labels
+            ax.set_xlim([0, 1.02])
+            ax.set_ylim([0, 1.02])
+            
+            ax.set_xlabel('False Positive Rate', fontsize = 22)
+            ax.set_ylabel('True Positive Rate', fontsize = 22)
+            
+            #   Set the tick sizes
+            for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+                i.set_size(22)
+                
+            plt.show(block = False)
+            
+        # Create the a figure showing the ROC curve for all regions
+        print('Creating a regional plot for the ' + method + ' et al. method.\n')
+        USRegionPlots(np.stack((FPRM1, FPRM2, FPRM3, FPRM4), axis = -1), np.stack((TPRM1, TPRM2, TPRM3, TPRM4), axis = -1), Regions, labels = [TextM1, TextM2, TextM3, TextM4], 
+                      title = 'ROC Curves for ' + Model + 's using the ' + method + 'et al. Method', savename = './Figures/' + Model + '_' + method + '_Parameter_Test.png')
         
 #%%
 # cell
 # Create a function to create the final SL models, based on the best performing parameters, and output their performance
-def CreateSLModel(Train, Label, Model):
+def CreateSLModel(Train, Label, Model, lat, lon, GriddedRegion):
     '''
     
     '''
@@ -1153,11 +1330,114 @@ def CreateSLModel(Train, Label, Model):
     IJTest, Ttest, NVar   = xTest.shape
     IJTest, Ttest, NMethods = yTest.shape
     
-    # Reorder data into 2D matrices
-    xTrain = xTrain.reshape(IJTrain*Ttrain, NVar, order = 'F')
-    xTest  = xTest.reshape(IJTest*Ttest, NVar, order = 'F')
-    yTrain = yTrain.reshape(IJTrain*Ttrain, NMethods, order = 'F')
-    yTest  = yTest.reshape(IJTest*Ttest, NMethods, order = 'F')
+    # Split the data into regions depending on scale of the dataset
+    if GriddedRegion == 'USA':
+        # Define the regions
+        Regions = ['Northwest', 'West North Central', 'East North Central', 'Northeast', 'West', 'Southwest', 'South', 'Southeast']
+        
+        # Define the TPR and FPR to the number of regions
+        TPRCh  = np.ones((101, len(Regions))) * np.nan
+        TPRNog = np.ones((101, len(Regions))) * np.nan
+        TPRLiu = np.ones((101, len(Regions))) * np.nan
+        TPRPe  = np.ones((101, len(Regions))) * np.nan
+        TPROt  = np.ones((101, len(Regions))) * np.nan
+        
+        FPRCh  = np.ones((101, len(Regions))) * np.nan
+        FPRNog = np.ones((101, len(Regions))) * np.nan
+        FPRLiu = np.ones((101, len(Regions))) * np.nan
+        FPRPe  = np.ones((101, len(Regions))) * np.nan
+        FPROt  = np.ones((101, len(Regions))) * np.nan
+        
+        # Initialize the dictonaries for split training and validation data.
+        xTrainRegions = {}
+        xTestRegions = {}
+        yTrainRegions = {}
+        yTestRegions = {}
+        
+        # Split the training data
+        xTrainRegions[Regions[0]] = xTrain[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
+        xTrainRegions[Regions[1]] = xTrain[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
+        xTrainRegions[Regions[2]] = xTrain[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
+        xTrainRegions[Regions[3]] = xTrain[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
+        xTrainRegions[Regions[4]] = xTrain[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
+        xTrainRegions[Regions[5]] = xTrain[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
+        xTrainRegions[Regions[6]] = xTrain[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
+        xTrainRegions[Regions[7]] = xTrain[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+        
+        yTrainRegions[Regions[0]] = yTrain[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
+        yTrainRegions[Regions[1]] = yTrain[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
+        yTrainRegions[Regions[2]] = yTrain[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
+        yTrainRegions[Regions[3]] = yTrain[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
+        yTrainRegions[Regions[4]] = yTrain[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
+        yTrainRegions[Regions[5]] = yTrain[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
+        yTrainRegions[Regions[6]] = yTrain[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
+        yTrainRegions[Regions[7]] = yTrain[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+            
+        # Split the validation data
+        xTestRegions[Regions[0]] = xTest[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
+        xTestRegions[Regions[1]] = xTest[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
+        xTestRegions[Regions[2]] = xTest[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
+        xTestRegions[Regions[3]] = xTest[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
+        xTestRegions[Regions[4]] = xTest[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
+        xTestRegions[Regions[5]] = xTest[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
+        xTestRegions[Regions[6]] = xTest[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
+        xTestRegions[Regions[7]] = xTest[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+        
+        yTestRegions[Regions[0]] = yTest[(lat >= 42) & (lat <= 50) & (lon >= -130) & (lon <= -111),:,:] # NW region
+        yTestRegions[Regions[1]] = yTest[(lat >= 42) & (lat <= 50) & (lon >= -111) & (lon <= -94),:,:] # WNC region
+        yTestRegions[Regions[2]] = yTest[(lat >= 38) & (lat <= 50) & (lon >= -94) & (lon <= -75.5),:,:] # EWC region
+        yTestRegions[Regions[3]] = yTest[(lat >= 38) & (lat <= 50) & (lon >= -75.5) & (lon <= -65),:,:] # NE region
+        yTestRegions[Regions[4]] = yTest[(lat >= 25) & (lat <= 42) & (lon >= -130) & (lon <= -114),:,:] # W region
+        yTestRegions[Regions[5]] = yTest[(lat >= 25) & (lat <= 42) & (lon >= -114) & (lon <= -105),:,:] # SW region
+        yTestRegions[Regions[6]] = yTest[(lat >= 25) & (lat <= 42) & (lon >= -105) & (lon <= -94),:,:] # S region
+        yTestRegions[Regions[7]] = yTest[(lat >= 25) & (lat <= 38) & (lon >= -94) & (lon <= -65),:,:] # SE region
+        
+        # Reoder the data into 2D matrices
+        xTrainRegions[Regions[0]] = xTrainRegions[Regions[0]].reshape(xTrainRegions[Regions[0]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[1]] = xTrainRegions[Regions[1]].reshape(xTrainRegions[Regions[1]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[2]] = xTrainRegions[Regions[2]].reshape(xTrainRegions[Regions[2]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[3]] = xTrainRegions[Regions[3]].reshape(xTrainRegions[Regions[3]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[4]] = xTrainRegions[Regions[4]].reshape(xTrainRegions[Regions[4]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[5]] = xTrainRegions[Regions[5]].reshape(xTrainRegions[Regions[5]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[6]] = xTrainRegions[Regions[6]].reshape(xTrainRegions[Regions[6]].shape[0] * Ttrain, NVar, order = 'F')
+        xTrainRegions[Regions[7]] = xTrainRegions[Regions[7]].reshape(xTrainRegions[Regions[7]].shape[0] * Ttrain, NVar, order = 'F')
+        
+        yTrainRegions[Regions[0]] = yTrainRegions[Regions[0]].reshape(yTrainRegions[Regions[0]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[1]] = yTrainRegions[Regions[1]].reshape(yTrainRegions[Regions[1]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[2]] = yTrainRegions[Regions[2]].reshape(yTrainRegions[Regions[2]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[3]] = yTrainRegions[Regions[3]].reshape(yTrainRegions[Regions[3]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[4]] = yTrainRegions[Regions[4]].reshape(yTrainRegions[Regions[4]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[5]] = yTrainRegions[Regions[5]].reshape(yTrainRegions[Regions[5]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[6]] = yTrainRegions[Regions[6]].reshape(yTrainRegions[Regions[6]].shape[0] * Ttrain, NMethods, order = 'F')
+        yTrainRegions[Regions[7]] = yTrainRegions[Regions[7]].reshape(yTrainRegions[Regions[7]].shape[0] * Ttrain, NMethods, order = 'F')
+        
+        xTestRegions[Regions[0]] = xTestRegions[Regions[0]].reshape(xTestRegions[Regions[0]].shape[0] * Ttest, NVar, order = 'F')
+        xTestRegions[Regions[1]] = xTestRegions[Regions[1]].reshape(xTestRegions[Regions[1]].shape[0] * Ttest, NVar, order = 'F')
+        xTestRegions[Regions[2]] = xTestRegions[Regions[2]].reshape(xTestRegions[Regions[2]].shape[0] * Ttest, NVar, order = 'F')
+        xTestRegions[Regions[3]] = xTestRegions[Regions[3]].reshape(xTestRegions[Regions[3]].shape[0] * Ttest, NVar, order = 'F')
+        xTestRegions[Regions[4]] = xTestRegions[Regions[4]].reshape(xTestRegions[Regions[4]].shape[0] * Ttest, NVar, order = 'F')
+        xTestRegions[Regions[5]] = xTestRegions[Regions[5]].reshape(xTestRegions[Regions[5]].shape[0] * Ttest, NVar, order = 'F')
+        xTestRegions[Regions[6]] = xTestRegions[Regions[6]].reshape(xTestRegions[Regions[6]].shape[0] * Ttest, NVar, order = 'F')
+        xTestRegions[Regions[7]] = xTestRegions[Regions[7]].reshape(xTestRegions[Regions[7]].shape[0] * Ttest, NVar, order = 'F')
+        
+        yTestRegions[Regions[0]] = yTestRegions[Regions[0]].reshape(yTestRegions[Regions[0]].shape[0] * Ttest, NMethods, order = 'F')
+        yTestRegions[Regions[1]] = yTestRegions[Regions[1]].reshape(yTestRegions[Regions[1]].shape[0] * Ttest, NMethods, order = 'F')
+        yTestRegions[Regions[2]] = yTestRegions[Regions[2]].reshape(yTestRegions[Regions[2]].shape[0] * Ttest, NMethods, order = 'F')
+        yTestRegions[Regions[3]] = yTestRegions[Regions[3]].reshape(yTestRegions[Regions[3]].shape[0] * Ttest, NMethods, order = 'F')
+        yTestRegions[Regions[4]] = yTestRegions[Regions[4]].reshape(yTestRegions[Regions[4]].shape[0] * Ttest, NMethods, order = 'F')
+        yTestRegions[Regions[5]] = yTestRegions[Regions[5]].reshape(yTestRegions[Regions[5]].shape[0] * Ttest, NMethods, order = 'F')
+        yTestRegions[Regions[6]] = yTestRegions[Regions[6]].reshape(yTestRegions[Regions[6]].shape[0] * Ttest, NMethods, order = 'F')
+        yTestRegions[Regions[7]] = yTestRegions[Regions[7]].reshape(yTestRegions[Regions[7]].shape[0] * Ttest, NMethods, order = 'F')
+        
+        
+    else:
+        # Reorder data into 2D matrices
+        xTrain = xTrain.reshape(IJTrain*Ttrain, NVar, order = 'F')
+        xTest  = xTest.reshape(IJTest*Ttest, NVar, order = 'F')
+        yTrain = yTrain.reshape(IJTrain*Ttrain, NMethods, order = 'F')
+        yTest  = yTest.reshape(IJTest*Ttest, NMethods, order = 'F')
+    
+    
     
     
     
@@ -1165,330 +1445,337 @@ def CreateSLModel(Train, Label, Model):
     ##### Remember to add Li
     Methods = ['Christian', 'Noguera', 'Liu', 'Pendergrass', 'Otkin']
     
-    for method in Methods:
-        if method == 'Christian': # Christian et al. method uses SESR
-            TrainData = ColumnRemoval(xTrain, cols = np.asarray([0, 1]))
-            TestData  = ColumnRemoval(xTest, cols = np.asarray([0, 1]))
-            TrainLabel = yTrain[:,0]
-            TestLabel  = yTest[:,0]
+    for r, region in enumerate(Regions):
+        for method in Methods:
+            if method == 'Christian': # Christian et al. method uses SESR
+                TrainData = ColumnRemoval(xTrainRegions[region], cols = np.asarray([0, 1]))
+                TestData  = ColumnRemoval(xTestRegions[region], cols = np.asarray([0, 1]))
+                TrainLabel = yTrainRegions[region][:,0]
+                TestLabel  = yTestRegions[region][:,0]
+                
+                NVarRemoved = 2
+                
+            elif method == 'Noguera': # Noguera et al method uses SPEI
+                TrainData = ColumnRemoval(xTrainRegions[region], cols = np.asarray([4, 5]))
+                TestData  = ColumnRemoval(xTestRegions[region], cols = np.asarray([4, 5]))
+                TrainLabel = yTrainRegions[region][:,1]
+                TestLabel  = yTestRegions[region][:,1]
+                
+                NVarRemoved = 2
             
-            NVarRemoved = 2
+            elif method == 'Li': # Li et al. method uses SEDI
+                TrainData = ColumnRemoval(xTrainRegions[region], cols = np.asarray([2, 3]))
+                TestData  = ColumnRemoval(xTestRegions[region], cols = np.asarray([2, 3]))
+                TrainLabel = yTrainRegions[region][:,2]
+                TestLabel  = yTestRegions[region][:,2]
+                
+                NVarRemoved = 2
+                
+            elif method == 'Liu': # Liu et al. method uses soil moisture
+                TrainData = xTrainRegions[region]
+                TestData  = xTestRegions[region]
+                TrainLabel = yTrainRegions[region][:,3]
+                TestLabel  = yTestRegions[region][:,3]
+                
+                NVarRemoved = 0
+                
+            elif method == 'Pendergrass': # Penndergrass et al. method uses EDDI
+                TrainData = ColumnRemoval(xTrainRegions[region], cols = np.asarray([9, 10]))
+                TestData  = ColumnRemoval(xTestRegions[region], cols = np.asarray([9, 10]))
+                TrainLabel = yTrainRegions[region][:,4]
+                TestLabel  = yTestRegions[region][:,4]
+                
+                NVarRemoved = 2
+                
+            else: # Otkin et al. Method uses FDII
+                TrainData = ColumnRemoval(xTrainRegions[region], cols = np.asarray([14]))
+                TestData  = ColumnRemoval(xTestRegions[region], cols = np.asarray([14]))
+                TrainLabel = yTrainRegions[region][:,5]
+                TestLabel  = yTestRegions[region][:,5]
+                
+                NVarRemoved = 1
             
-        elif method == 'Noguera': # Noguera et al method uses SPEI
-            TrainData = ColumnRemoval(xTrain, cols = np.asarray([4, 5]))
-            TestData  = ColumnRemoval(xTest, cols = np.asarray([4, 5]))
-            TrainLabel = yTrain[:,1]
-            TestLabel  = yTest[:,1]
+            print('Creating the ' + Model + 's for the ' + method + ' et al. method.')
+            if (Model == 'RF') | (Model == 'Random Forest'):
+                # Create random forest based on the best parameters
+                # The Probability threshholds are based on the maximum Youden and minimum distance probabilities 
+                if method == 'Christian':
+                    ChProb, ChWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+                    
+                    ChThresh = 0.02
+                    
+                elif method == 'Noguera':
+                    NogProb, NogWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+                    
+                    NogThresh = 0.06
+                    
+                elif method == 'Li':
+                    LiProb, LiWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+                    
+                    LiThresh = 0.05
+                    
+                elif method == 'Liu':
+                    LiuProb, LiuWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+                    
+                    LiuThresh = 0.05
+                    
+                elif method == 'Pendergrass':
+                    PeProb, PeWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+                    
+                    PeThresh = 0.01
+                    
+                else:
+                    OtProb, OtWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
+                    
+                    OtThresh = 0.03
+                    
+            elif (Model == 'SVM') | (Model == 'Support Vector Machine'):
+                # Create SVM based on the best parameters
+                # The Probability threshholds are based on the maximum Youden and minimum distance probabilities
+                if method == 'Christian':
+                    ChProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
+                    
+                    ChThresh = 0.02
+                    
+                elif method == 'Noguera':
+                    NogProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
+                    
+                    NogThresh = 0.06
+                    
+                elif method == 'Li':
+                    LiProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
+                    
+                    LiThresh = 0.05
+                    
+                elif method == 'Liu':
+                    LiuProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
+                    
+                    LiuThresh = 0.05
+                    
+                elif method == 'Pendergrass':
+                    PeProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
+                    
+                    PeThresh = 0.01
+                    
+                else:
+                    OtProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
+                    
+                    OtThresh = 0.03
+                    
+            elif (Model == 'ANN') | (Model == 'Nueral Network'):
+                # Create ANN based on the best parameters
+                # The Probability threshholds are based on the maximum Youden and minimum distance probabilities
+                if method == 'Christian':
+                    ChProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15,))
+                    
+                    ChThresh = 0.01
+                    
+                elif method == 'Noguera':
+                    NogProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15, 15))
+                    
+                    NogThresh = 0.04
+                    
+                elif method == 'Li':
+                    LiProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15,))
+                    
+                    LiThresh = 0.03
+                    
+                elif method == 'Liu':
+                    LiuProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15,))
+                    
+                    LiuThresh = 0.03
+                    
+                elif method == 'Pendergrass':
+                    PeProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15, 15))
+                    
+                    PeThresh = 0.01
+                    
+                else:
+                    OtProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15, 15))
+                    
+                    OtThresh = 0.03
+    
+            else: ##### Add more models here
+                pass
             
-            NVarRemoved = 2
+        print('Evaluating the models.')
+        TPRCh[:,r], FPRCh[:,r], EntCh, R2Ch, RMSECh, CpCh, AICCh, BICCh, AccCh, PrecCh, RecallCh, F1Ch, SpecCh, RiskCh, AUCCh, YoudCh, YoudThreshCh, dCh, dThreshCh = EvaluateModel(ChProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = ChThresh)
+        TPRNog[:,r], FPRNog[:,r], EntNog, R2Nog, RMSENog, CpNog, AICNog, BICNog, AccNog, PrecNog, RecallNog, F1Nog, SpecNog, RiskNog, AUCNog, YoudNog, YoudThreshNog, dNog, dThreshNog = EvaluateModel(NogProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = NogThresh)
+        TPRLiu[:,r], FPRLiu[:,r], EntLiu, R2Liu, RMSELiu, CpLiu, AICLiu, BICLiu, AccLiu, PrecLiu, RecallLiu, F1Liu, SpecLiu, RiskLiu, AUCLiu, YoudLiu, YoudThreshLiu, dLiu, dThreshLiu = EvaluateModel(LiuProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = LiuThresh)
+        TPRPe[:,r], FPRPe[:,r], EntPe, R2Pe, RMSEPe, CpPe, AICPe, BICPe, AccPe, PrecPe, RecallPe, F1Pe, SpecPe, RiskPe, AUCPe, YoudPe, YoudThreshPe, dPe, dThreshPe = EvaluateModel(PeProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = PeThresh)
+        TPROt[:,r], FPROt[:,r], EntOt, R2Ot, RMSEOt, CpOt, AICOt, BICOt, AccOt, PrecOt, RecallOt, F1Ot, SpecOt, RiskOt, AUCOt, YoudOt, YoudThreshOt, dOt, dThreshOt = EvaluateModel(OtProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = OtThresh)
         
-        elif method == 'Li': # Li et al. method uses SEDI
-            TrainData = ColumnRemoval(xTrain, cols = np.asarray([2, 3]))
-            TestData  = ColumnRemoval(xTest, cols = np.asarray([2, 3]))
-            TrainLabel = yTrain[:,2]
-            TestLabel  = yTest[:,2]
-            
-            NVarRemoved = 2
-            
-        elif method == 'Liu': # Liu et al. method uses soil moisture
-            TrainData = xTrain
-            TestData  = xTest
-            TrainLabel = yTrain[:,3]
-            TestLabel  = yTest[:,3]
-            
-            NVarRemoved = 0
-            
-        elif method == 'Pendergrass': # Penndergrass et al. method uses EDDI
-            TrainData = ColumnRemoval(xTrain, cols = np.asarray([9, 10]))
-            TestData  = ColumnRemoval(xTest, cols = np.asarray([9, 10]))
-            TrainLabel = yTrain[:,4]
-            TestLabel  = yTest[:,4]
-            
-            NVarRemoved = 2
-            
-        else: # Otkin et al. Method uses FDII
-            TrainData = ColumnRemoval(xTrain, cols = np.asarray([14]))
-            TestData  = ColumnRemoval(xTest, cols = np.asarray([14]))
-            TrainLabel = yTrain[:,5]
-            TestLabel  = yTest[:,5]
-            
-            NVarRemoved = 1
         
-        print('Creating the ' + Model + 's for the ' + method + ' et al. method.')
+        # Output the model performance
+        
+        #   Cross-Entropy
+        print(str(region) + ': The Christian et al. Method has a cross-entropy of: %4.2f' %EntCh)
+        print(str(region) + ': The Nogeura et al. Method has a cross-entropy of: %4.2f' %EntNog)
+        print(str(region) + ': The Liu et al. Method has a cross-entropy of: %4.2f' %EntLiu)
+        print(str(region) + ': The Pendergrass et al. Method has a cross-entropy of: %4.2f' %EntPe)
+        print(str(region) + ': The Otkin et al. Method has a cross-entropy of: %4.2f' %EntOt)
+        print('\n')
+        
+        #   Adjusted-R^2
+        print(str(region) + ': The Christian et al. Method has an Adjusted-R^2 of: %4.2f' %R2Ch)
+        print(str(region) + ': The Nogeura et al. Method has an Adjusted-R^2 of: %4.2f' %R2Nog)
+        print(str(region) + ': The Liu et al. Method has an Adjusted-R^2 of: %4.2f' %R2Liu)
+        print(str(region) + ': The Pendergrass et al. Method has an Adjusted-R^2 of: %4.2f' %R2Pe)
+        print(str(region) + ': The Otkin et al. Method has an Adjusted-R^2 of: %4.2f' %R2Ot)
+        print('\n')
+        
+        #   RMSE
+        print(str(region) + ': The Christian et al. Method has a RMSE of: %4.2f' %RMSECh)
+        print(str(region) + ': The Nogeura et al. Method has a RMSE of: %4.2f' %RMSENog)
+        print(str(region) + ': The Liu et al. Method has a RMSE of: %4.2f' %RMSELiu)
+        print(str(region) + ': The Pendergrass et al. Method has a RMSE of: %4.2f' %RMSEPe)
+        print(str(region) + ': The Otkin et al. Method has a RMSE of: %4.2f' %RMSEOt)
+        print('\n')
+        
+        #   Cp
+        print(str(region) + ': The Christian et al. Method has a Cp of: %4.2f' %CpCh)
+        print(str(region) + ': The Nogeura et al. Method has a Cp of: %4.2f' %CpNog)
+        print(str(region) + ': The Liu et al. Method has a Cp of: %4.2f' %CpLiu)
+        print(str(region) + ': The Pendergrass et al. Method has a Cp of: %4.2f' %CpPe)
+        print(str(region) + ': The Otkin et al. Method has a Cp of: %4.2f' %CpOt)
+        print('\n')
+        
+        #   AIC
+        print(str(region) + ': The Christian et al. Method has a AIC of: %4.2f' %AICCh)
+        print(str(region) + ': The Nogeura et al. Method has a AIC of: %4.2f' %AICNog)
+        print(str(region) + ': The Liu et al. Method has a AIC of: %4.2f' %AICLiu)
+        print(str(region) + ': The Pendergrass et al. Method has a AIC of: %4.2f' %AICPe)
+        print(str(region) + ': The Otkin et al. Method has a AIC of: %4.2f' %AICOt)
+        print('\n')
+        
+        #   BIC
+        print(str(region) + ': The Christian et al. Method has a BIC of: %4.2f' %BICCh)
+        print(str(region) + ': The Nogeura et al. Method has a BIC of: %4.2f' %BICNog)
+        print(str(region) + ': The Liu et al. Method has a BIC of: %4.2f' %BICLiu)
+        print(str(region) + ': The Pendergrass et al. Method has a BIC of: %4.2f' %BICPe)
+        print(str(region) + ': The Otkin et al. Method has a BIC of: %4.2f' %BICOt)
+        print('\n')
+        
+        #   Accuracy
+        print(str(region) + ': The Christian et al. Method has a Accuracy of: %4.2f' %AccCh)
+        print(str(region) + ': The Nogeura et al. Method has a Accuracy of: %4.2f' %AccNog)
+        print(str(region) + ': The Liu et al. Method has a Accuracy of: %4.2f' %AccLiu)
+        print(str(region) + ': The Pendergrass et al. Method has a Accuracy of: %4.2f' %AccPe)
+        print(str(region) + ': The Otkin et al. Method has a Accuracy of: %4.2f' %AccOt)
+        print('\n')
+        
+        #   Precision
+        print(str(region) + ': The Christian et al. Method has a Precision of: %4.2f' %PrecCh)
+        print(str(region) + ': The Nogeura et al. Method has a Precision of: %4.2f' %PrecNog)
+        print(str(region) + ': The Liu et al. Method has a Precision of: %4.2f' %PrecLiu)
+        print(str(region) + ': The Pendergrass et al. Method has a Precision of: %4.2f' %PrecPe)
+        print(str(region) + ': The Otkin et al. Method has a Precision of: %4.2f' %PrecOt)
+        print('\n')
+        
+        #   Recall
+        print(str(region) + ': The Christian et al. Method has a Recall of: %4.2f' %RecallCh)
+        print(str(region) + ': The Nogeura et al. Method has a Recall of: %4.2f' %RecallNog)
+        print(str(region) + ': The Liu et al. Method has a Recall of: %4.2f' %RecallLiu)
+        print(str(region) + ': The Pendergrass et al. Method has a Recall of: %4.2f' %RecallPe)
+        print(str(region) + ': The Otkin et al. Method has a Recall of: %4.2f' %RecallOt)
+        print('\n')
+        
+        #   F1-Score
+        print(str(region) + ': The Christian et al. Method has a F1-Score of: %4.2f' %F1Ch)
+        print(str(region) + ': The Nogeura et al. Method has a F1-Score of: %4.2f' %F1Nog)
+        print(str(region) + ': The Liu et al. Method has a F1-Score of: %4.2f' %F1Liu)
+        print(str(region) + ': The Pendergrass et al. Method has a F1-Score of: %4.2f' %F1Pe)
+        print(str(region) + ': The Otkin et al. Method has a F1-Score of: %4.2f' %F1Ot)
+        print('\n')
+        
+        #   Specificity
+        print(str(region) + ': The Christian et al. Method has a Specificity of: %4.2f' %SpecCh)
+        print(str(region) + ': The Nogeura et al. Method has a Specificity of: %4.2f' %SpecNog)
+        print(str(region) + ': The Liu et al. Method has a Specificity of: %4.2f' %SpecLiu)
+        print(str(region) + ': The Pendergrass et al. Method has a Specificity of: %4.2f' %SpecPe)
+        print(str(region) + ': The Otkin et al. Method has a Specificity of: %4.2f' %SpecOt)
+        print('\n')
+        
+        #   Risk
+        print(str(region) + ': The Christian et al. Method has a Risk of: %4.2f' %RiskCh)
+        print(str(region) + ': The Nogeura et al. Method has a Risk of: %4.2f' %RiskNog)
+        print(str(region) + ': The Liu et al. Method has a Risk of: %4.2f' %RiskLiu)
+        print(str(region) + ': The Pendergrass et al. Method has a Risk of: %4.2f' %RiskPe)
+        print(str(region) + ': The Otkin et al. Method has a Risk of: %4.2f' %RiskOt)
+        print('\n')
+        
+        #   AUC
+        print(str(region) + ': The Christian et al. Method has an AUC of: %4.2f' %AUCCh)
+        print(str(region) + ': The Nogeura et al. Method has an AUC of: %4.2f' %AUCNog)
+        print(str(region) + ': The Liu et al. Method has an AUC of: %4.2f' %AUCLiu)
+        print(str(region) + ': The Pendergrass et al. Method has an AUC of: %4.2f' %AUCPe)
+        print(str(region) + ': The Otkin et al. Method has an AUC of: %4.2f' %AUCOt)
+        print('\n')
+        
+        #   Youden Index
+        print(str(region) + ': The Christian et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudCh, YoudThreshCh))
+        print(str(region) + ': The Nogeura et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudNog, YoudThreshNog))
+        print(str(region) + ': The Liu et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudLiu, YoudThreshLiu))
+        print(str(region) + ': The Pendergrass et al. Method has amaximum Youden index of %4.2f at the threshold of %4.3f' %(YoudPe, YoudThreshPe))
+        print(str(region) + ': The Otkin et al. Method has amaximum Youden index of %4.2f at the threshold of %4.3f' %(YoudOt, YoudThreshOt))
+        print('\n')
+        
+        #   Distance from leftmost corner of ROC curve
+        print(str(region) + ': The Christian et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dCh, dThreshCh))
+        print(str(region) + ': The Nogeura et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dNog, dThreshNog))
+        print(str(region) + ': The Liu et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dLiu, dThreshLiu))
+        print(str(region) + ': The Pendergrass et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dPe, dThreshPe))
+        print(str(region) + ': The Otkin et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dOt, dThreshOt))
+        print('\n')
+        
+        # Feature Importance
         if (Model == 'RF') | (Model == 'Random Forest'):
-            # Create random forest based on the best parameters
-            # The Probability threshholds are based on the maximum Youden and minimum distance probabilities 
-            if method == 'Christian':
-                ChProb, ChWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
-                
-                ChThresh = 0.02
-                
-            elif method == 'Noguera':
-                NogProb, NogWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
-                
-                NogThresh = 0.06
-                
-            elif method == 'Li':
-                LiProb, LiWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
-                
-                LiThresh = 0.05
-                
-            elif method == 'Liu':
-                LiuProb, LiuWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
-                
-                LiuThresh = 0.05
-                
-            elif method == 'Pendergrass':
-                PeProb, PeWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
-                
-                PeThresh = 0.01
-                
-            else:
-                OtProb, OtWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
-                
-                OtThresh = 0.03
-                
-        elif (Model == 'SVM') | (Model == 'Support Vector Machine'):
-            # Create SVM based on the best parameters
-            # The Probability threshholds are based on the maximum Youden and minimum distance probabilities
-            if method == 'Christian':
-                ChProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
-                
-                ChThresh = 0.02
-                
-            elif method == 'Noguera':
-                NogProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
-                
-                NogThresh = 0.06
-                
-            elif method == 'Li':
-                LiProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
-                
-                LiThresh = 0.05
-                
-            elif method == 'Liu':
-                LiuProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
-                
-                LiuThresh = 0.05
-                
-            elif method == 'Pendergrass':
-                PeProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
-                
-                PeThresh = 0.01
-                
-            else:
-                OtProb = SVMModel(TrainData, TrainLabel, TestData, Kernel = 'rbf', RegParam = 1.0, Gamma = 'scale')
-                
-                OtThresh = 0.03
-                
-        elif (Model == 'ANN') | (Model == 'Nueral Network'):
-            # Create ANN based on the best parameters
-            # The Probability threshholds are based on the maximum Youden and minimum distance probabilities
-            if method == 'Christian':
-                ChProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15,))
-                
-                ChThresh = 0.01
-                
-            elif method == 'Noguera':
-                NogProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15, 15))
-                
-                NogThresh = 0.04
-                
-            elif method == 'Li':
-                LiProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15,))
-                
-                LiThresh = 0.03
-                
-            elif method == 'Liu':
-                LiuProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15,))
-                
-                LiuThresh = 0.03
-                
-            elif method == 'Pendergrass':
-                PeProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15, 15))
-                
-                PeThresh = 0.01
-                
-            else:
-                OtProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15, 15))
-                
-                OtThresh = 0.03
-
-        else: ##### Add more models here
+            print(str(region) + ': The feature importance for the Christian et al. Method is:', ChWeights)
+            print(str(region) + ': The feature importance for the Noguera et al. Method is:', NogWeights)
+            print(str(region) + ': The feature importance for the Liu et al. Method is:', LiuWeights)
+            print(str(region) + ': The feature importance for the Pendergrass et al. Method is:', PeWeights)
+            print(str(region) + ': The feature importance for the Otkin et al. Method is:', OtWeights)
+            print('\n')
+        else:
             pass
         
-    print('Evaluating the models.')
-    TPRCh, FPRCh, EntCh, R2Ch, RMSECh, CpCh, AICCh, BICCh, AccCh, PrecCh, RecallCh, F1Ch, SpecCh, RiskCh, AUCCh, YoudCh, YoudThreshCh, dCh, dThreshCh = EvaluateModel(ChProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = ChThresh)
-    TPRNog, FPRNog, EntNog, R2Nog, RMSENog, CpNog, AICNog, BICNog, AccNog, PrecNog, RecallNog, F1Nog, SpecNog, RiskNog, AUCNog, YoudNog, YoudThreshNog, dNog, dThreshNog = EvaluateModel(NogProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = NogThresh)
-    TPRLiu, FPRLiu, EntLiu, R2Liu, RMSELiu, CpLiu, AICLiu, BICLiu, AccLiu, PrecLiu, RecallLiu, F1Liu, SpecLiu, RiskLiu, AUCLiu, YoudLiu, YoudThreshLiu, dLiu, dThreshLiu = EvaluateModel(LiuProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = LiuThresh)
-    TPRPe, FPRPe, EntPe, R2Pe, RMSEPe, CpPe, AICPe, BICPe, AccPe, PrecPe, RecallPe, F1Pe, SpecPe, RiskPe, AUCPe, YoudPe, YoudThreshPe, dPe, dThreshPe = EvaluateModel(PeProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = PeThresh)
-    TPROt, FPROt, EntOt, R2Ot, RMSEOt, CpOt, AICOt, BICOt, AccOt, PrecOt, RecallOt, F1Ot, SpecOt, RiskOt, AUCOt, YoudOt, YoudThreshOt, dOt, dThreshOt = EvaluateModel(OtProb[:,1], TestLabel, N = (NVar - NVarRemoved), ProbThreshold = OtThresh)
+        
+        # Finally, create and save a ROC curve
+        fig = plt.figure(figsize = [14,14])
+        ax = fig.add_subplot(1,1,1)
+        
+        #   Set the title
+        ax.set_title('Receiver Operating Characteristic Curve for ' + Model + 's', fontsize = 24)
+        
+        #   Create the plots
+        ax.plot(FPRCh[:,r], TPRCh[:,r], 'r-', linewidth = 2.0, label = 'Christian et al. 2019 Method')
+        ax.plot(FPRNog[:,r], TPRNog[:,r], 'b-', linewidth = 2.0, label = 'Noguera et al. 2020 Method')
+        ax.plot(FPRLiu[:,r], TPRLiu[:,r], 'k-', linewidth = 2.0, label = 'Liu et al. 2020 Method')
+        ax.plot(FPRPe[:,r], TPRPe[:,r], 'g-', linewidth = 2.0, label = 'Pendergrass et al. 2020 Method')
+        ax.plot(FPROt[:,r], TPROt[:,r], 'c-', linewidth = 2.0, label = 'Otkin et al. 2021 Method')
+        
+        #   Set the legend
+        ax.legend(loc = 'best', fontsize = 33)
+        
+        #   Set the figure limits and labels
+        ax.set_xlim([0, 1.02])
+        ax.set_ylim([0, 1.02])
+        
+        ax.set_xlabel('False Positive Rate', fontsize = 22)
+        ax.set_ylabel('True Positive Rate', fontsize = 22)
+        
+        #   Set the tick sizes
+        for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+            i.set_size(22)
+        
+        plt.savefig('./Figures/' + Model + '_' + region + '_ROC.png', bbox_inches = 'tight')
+        plt.show(block = False)
     
-    
-    # Output the model performance
-    
-    #   Cross-Entropy
-    print('The Christian et al. Method has a cross-entropy of: %4.2f' %EntCh)
-    print('The Nogeura et al. Method has a cross-entropy of: %4.2f' %EntNog)
-    print('The Liu et al. Method has a cross-entropy of: %4.2f' %EntLiu)
-    print('The Pendergrass et al. Method has a cross-entropy of: %4.2f' %EntPe)
-    print('The Otkin et al. Method has a cross-entropy of: %4.2f' %EntOt)
-    print('\n')
-    
-    #   Adjusted-R^2
-    print('The Christian et al. Method has an Adjusted-R^2 of: %4.2f' %R2Ch)
-    print('The Nogeura et al. Method has an Adjusted-R^2 of: %4.2f' %R2Nog)
-    print('The Liu et al. Method has an Adjusted-R^2 of: %4.2f' %R2Liu)
-    print('The Pendergrass et al. Method has an Adjusted-R^2 of: %4.2f' %R2Pe)
-    print('The Otkin et al. Method has an Adjusted-R^2 of: %4.2f' %R2Ot)
-    print('\n')
-    
-    #   RMSE
-    print('The Christian et al. Method has a RMSE of: %4.2f' %RMSECh)
-    print('The Nogeura et al. Method has a RMSE of: %4.2f' %RMSENog)
-    print('The Liu et al. Method has a RMSE of: %4.2f' %RMSELiu)
-    print('The Pendergrass et al. Method has a RMSE of: %4.2f' %RMSEPe)
-    print('The Otkin et al. Method has a RMSE of: %4.2f' %RMSEOt)
-    print('\n')
-    
-    #   Cp
-    print('The Christian et al. Method has a Cp of: %4.2f' %CpCh)
-    print('The Nogeura et al. Method has a Cp of: %4.2f' %CpNog)
-    print('The Liu et al. Method has a Cp of: %4.2f' %CpLiu)
-    print('The Pendergrass et al. Method has a Cp of: %4.2f' %CpPe)
-    print('The Otkin et al. Method has a Cp of: %4.2f' %CpOt)
-    print('\n')
-    
-    #   AIC
-    print('The Christian et al. Method has a AIC of: %4.2f' %AICCh)
-    print('The Nogeura et al. Method has a AIC of: %4.2f' %AICNog)
-    print('The Liu et al. Method has a AIC of: %4.2f' %AICLiu)
-    print('The Pendergrass et al. Method has a AIC of: %4.2f' %AICPe)
-    print('The Otkin et al. Method has a AIC of: %4.2f' %AICOt)
-    print('\n')
-    
-    #   BIC
-    print('The Christian et al. Method has a BIC of: %4.2f' %BICCh)
-    print('The Nogeura et al. Method has a BIC of: %4.2f' %BICNog)
-    print('The Liu et al. Method has a BIC of: %4.2f' %BICLiu)
-    print('The Pendergrass et al. Method has a BIC of: %4.2f' %BICPe)
-    print('The Otkin et al. Method has a BIC of: %4.2f' %BICOt)
-    print('\n')
-    
-    #   Accuracy
-    print('The Christian et al. Method has a Accuracy of: %4.2f' %AccCh)
-    print('The Nogeura et al. Method has a Accuracy of: %4.2f' %AccNog)
-    print('The Liu et al. Method has a Accuracy of: %4.2f' %AccLiu)
-    print('The Pendergrass et al. Method has a Accuracy of: %4.2f' %AccPe)
-    print('The Otkin et al. Method has a Accuracy of: %4.2f' %AccOt)
-    print('\n')
-    
-    #   Precision
-    print('The Christian et al. Method has a Precision of: %4.2f' %PrecCh)
-    print('The Nogeura et al. Method has a Precision of: %4.2f' %PrecNog)
-    print('The Liu et al. Method has a Precision of: %4.2f' %PrecLiu)
-    print('The Pendergrass et al. Method has a Precision of: %4.2f' %PrecPe)
-    print('The Otkin et al. Method has a Precision of: %4.2f' %PrecOt)
-    print('\n')
-    
-    #   Recall
-    print('The Christian et al. Method has a Recall of: %4.2f' %RecallCh)
-    print('The Nogeura et al. Method has a Recall of: %4.2f' %RecallNog)
-    print('The Liu et al. Method has a Recall of: %4.2f' %RecallLiu)
-    print('The Pendergrass et al. Method has a Recall of: %4.2f' %RecallPe)
-    print('The Otkin et al. Method has a Recall of: %4.2f' %RecallOt)
-    print('\n')
-    
-    #   F1-Score
-    print('The Christian et al. Method has a F1-Score of: %4.2f' %F1Ch)
-    print('The Nogeura et al. Method has a F1-Score of: %4.2f' %F1Nog)
-    print('The Liu et al. Method has a F1-Score of: %4.2f' %F1Liu)
-    print('The Pendergrass et al. Method has a F1-Score of: %4.2f' %F1Pe)
-    print('The Otkin et al. Method has a F1-Score of: %4.2f' %F1Ot)
-    print('\n')
-    
-    #   Specificity
-    print('The Christian et al. Method has a Specificity of: %4.2f' %SpecCh)
-    print('The Nogeura et al. Method has a Specificity of: %4.2f' %SpecNog)
-    print('The Liu et al. Method has a Specificity of: %4.2f' %SpecLiu)
-    print('The Pendergrass et al. Method has a Specificity of: %4.2f' %SpecPe)
-    print('The Otkin et al. Method has a Specificity of: %4.2f' %SpecOt)
-    print('\n')
-    
-    #   Risk
-    print('The Christian et al. Method has a Risk of: %4.2f' %RiskCh)
-    print('The Nogeura et al. Method has a Risk of: %4.2f' %RiskNog)
-    print('The Liu et al. Method has a Risk of: %4.2f' %RiskLiu)
-    print('The Pendergrass et al. Method has a Risk of: %4.2f' %RiskPe)
-    print('The Otkin et al. Method has a Risk of: %4.2f' %RiskOt)
-    print('\n')
-    
-    #   AUC
-    print('The Christian et al. Method has an AUC of: %4.2f' %AUCCh)
-    print('The Nogeura et al. Method has an AUC of: %4.2f' %AUCNog)
-    print('The Liu et al. Method has an AUC of: %4.2f' %AUCLiu)
-    print('The Pendergrass et al. Method has an AUC of: %4.2f' %AUCPe)
-    print('The Otkin et al. Method has an AUC of: %4.2f' %AUCOt)
-    print('\n')
-    
-    #   Youden Index
-    print('The Christian et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudCh, YoudThreshCh))
-    print('The Nogeura et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudNog, YoudThreshNog))
-    print('The Liu et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudLiu, YoudThreshLiu))
-    print('The Pendergrass et al. Method has amaximum Youden index of %4.2f at the threshold of %4.3f' %(YoudPe, YoudThreshPe))
-    print('The Otkin et al. Method has amaximum Youden index of %4.2f at the threshold of %4.3f' %(YoudOt, YoudThreshOt))
-    print('\n')
-    
-    #   Distance from leftmost corner of ROC curve
-    print('The Christian et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dCh, dThreshCh))
-    print('The Nogeura et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dNog, dThreshNog))
-    print('The Liu et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dLiu, dThreshLiu))
-    print('The Pendergrass et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dPe, dThreshPe))
-    print('The Otkin et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dOt, dThreshOt))
-    print('\n')
-    
-    # Feature Importance
-    if (Model == 'RF') | (Model == 'Random Forest'):
-        print('The feature importance for the Christian et al. Method is:', ChWeights)
-        print('The feature importance for the Noguera et al. Method is:', NogWeights)
-        print('The feature importance for the Liu et al. Method is:', LiuWeights)
-        print('The feature importance for the Pendergrass et al. Method is:', PeWeights)
-        print('The feature importance for the Otkin et al. Method is:', OtWeights)
-        print('\n')
-    else:
-        pass
-    
-    
-    # Finally, create and save a ROC curve
-    fig = plt.figure(figsize = [14,14])
-    ax = fig.add_subplot(1,1,1)
-    
-    #   Set the title
-    ax.set_title('Receiver Operating Characteristic Curve for ' + Model + 's', fontsize = 24)
-    
-    #   Create the plots
-    ax.plot(FPRCh, TPRCh, 'r-', linewidth = 2.0, label = 'Christian et al. 2019 Method')
-    ax.plot(FPRNog, TPRNog, 'b-', linewidth = 2.0, label = 'Noguera et al. 2020 Method')
-    ax.plot(FPRLiu, TPRLiu, 'k-', linewidth = 2.0, label = 'Liu et al. 2020 Method')
-    ax.plot(FPRPe, TPRPe, 'g-', linewidth = 2.0, label = 'Pendergrass et al. 2020 Method')
-    ax.plot(FPROt, TPROt, 'c-', linewidth = 2.0, label = 'Otkin et al. 2021 Method')
-    
-    #   Set the legend
-    ax.legend(loc = 'best', fontsize = 33)
-    
-    #   Set the figure limits and labels
-    ax.set_xlim([0, 1.02])
-    ax.set_ylim([0, 1.02])
-    
-    ax.set_xlabel('False Positive Rate', fontsize = 22)
-    ax.set_ylabel('True Positive Rate', fontsize = 22)
-    
-    #   Set the tick sizes
-    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-        i.set_size(22)
-    
-    plt.savefig('./Figures/' + Model + '_ROC.png', bbox_inches = 'tight')
-    plt.show(block = False)
+    # Create a regional plot to summarize all the ROC curves
+    print('Creating a plot for all regions')
+    USRegionPlots(np.stack((FPRCh, FPRNog, FPRLiu, FPRPe, FPROt), axis = -1), np.stacknp.stack((TPRCh, TPRNog, TPRLiu, TPRPe, TPROt), axis = -1), Regions,
+                  labels = ['Christian et al. 2019 Method', 'Noguera et al. 2020 Method', 'Liu et al. 2020 Method', 'Pendergrass et al. 2020 Method', 'Otkin et al. 2021 Method'],
+                  title = 'ROC Curves for ' + Model + 's', savename = './Figures/' + Model + '_ROC_all_regions.png')
     
 
 #%%
@@ -2146,7 +2433,7 @@ del OtFD2D
 # Run the models using parallel processing. 
 ### NOTE, This is designed to run all the cores on the computer for the quickest performance. Then the computer CANNOT be used while this is running.
 
-DetermineParameters(x, y, Model = 'Random Forest', NJobs = -1)
+DetermineParameters(x, y, Model = 'Random Forest', lat = Lat1DnoSea, lon = Lon1DnoSea, NJobs = -1)
 
 
 # # Remove unnecessary variables to conserve space
