@@ -21,6 +21,7 @@ Created on Sat Oct  2 17:52:45 2021
 # Version History: 
 #   1.0.0 - 12/24/2021 - Initial reformatting of the script to use a 'version' setting (note the version number is not in the script name, so this is not a full version version control)
 #   1.1.0 - 12/25/2021 - Implemented code to split the dataset into regions in the DetermineParameters and CreateSLModel functions
+#   1.2.0 - 12/30/2021 - Modified the main functions to write outputs to .txt file instead of output to the terminal (easier to save everything)
 #
 # Inputs:
 #   - Data files for FD indices and identified FD (.nc format)
@@ -473,7 +474,7 @@ def EvaluateModel(Probs, y, N = 15, ProbThreshold = 0.5):
     return TPR, FPR, Ent, AdjustedR2, RMSE, Cp, AIC, BIC, Accuracy, Precision, Recall, F1Score, Specificity, Risk, AUC, YoudenMax, YoudThresh, dMin, dThresh
 
 #%%
-# cell
+# cell 7
 # Create some functions to generate maps of results
 
 # Create a function to create climatology maps using SL predictions
@@ -844,10 +845,12 @@ def USRegionPlots(x, y, Regions, labels, title = 'tmp', savename = 'tmp.png'):
         # Adjust the tick size
         for i in axins[region].xaxis.get_ticklabels() + axins[region].yaxis.get_ticklabels():
             i.set_size(16)
+            
+    plt.savefig(savename, bbox_inches = 'tight')
         
     
 #%%
-# cell
+# cell 8
 # Create functions that will create, train, and make probabilistic predictions of SL models and output the weights of of each index
 
 ### Function for SL models
@@ -909,7 +912,7 @@ def ANNModel(xTrain, yTrain, xVal, layers = (15,), activation = 'relu', solver =
 
 
 #%%
-# cell 
+# cell 9
 # Create a function to create SL models and output performance metrics to test parameters
 def DetermineParameters(Train, Label, Model, lat, lon, GriddedRegion = 'USA', NJobs = -1):
     '''
@@ -1115,6 +1118,9 @@ def DetermineParameters(Train, Label, Model, lat, lon, GriddedRegion = 'USA', NJ
                 TextM2 = '100 tree random forest'
                 TextM3 = '200 tree random forest'
                 TextM4 = '1000 tree random forest'
+                
+                OutPathFig = './Figures/RF/Performance/'
+                OutPathResults = './Results/TestParameters/RF/'
                
             elif (Model == 'SVM') | (Model == 'Support Vector Machine'):
                 # Other studies are fairly consistent in using the radial basis function kernel, but do not detail other parameters. Modified parameter for this run will be kernal functions.
@@ -1130,6 +1136,9 @@ def DetermineParameters(Train, Label, Model, lat, lon, GriddedRegion = 'USA', NJ
                 TextM3 = 'Radial basis SVM'
                 TextM4 = 'Sigmoid SVM'
                 
+                OutPathFig = './Figures/SVM/Performance/'
+                OutPathResults = './Results/TestParameters/SVM/'
+                
             elif (Model == 'ANN') | (Model == 'Nueral Network'):
                 # Only one study gives the parameters used, which were 1 layerr with 14 and 15 neurons. Base parameter variation off of this.
                 # May come back to this and toy with other parameters
@@ -1144,6 +1153,9 @@ def DetermineParameters(Train, Label, Model, lat, lon, GriddedRegion = 'USA', NJ
                 TextM3 = '2 layer, 15 node ANN'
                 TextM4 = '2 layer, 25 node ANN'
                 
+                OutPathFig = './Figures/ANN/Performance/'
+                OutPathResults = './Results/TestParameters/ANN/'
+                
                 
             else: ##### Add more models here
                 pass
@@ -1155,111 +1167,131 @@ def DetermineParameters(Train, Label, Model, lat, lon, GriddedRegion = 'USA', NJ
             TPRM4[:,r], FPRM4[:,r], EntM4, R2M4, RMSEM4, CpM4, AICM4, BICM4, AccM4, PrecM4, RecallM4, F1M4, SpecM4, RiskM4, AUCM4, YoudM4, YoudThreshM4, dM4, dThreshM4 = EvaluateModel(ProbM4[:,1], ValLabel, N = (NVar - NVarRemoved))
             
             # Output the performance statistics
+            file = open(OutPathResults + Model + '_DetermineParameters_' + region + '.txt', 'w')
+            file.write('Performance metrics for multiple ' + Model + 's to determine the best parameters.\n')
     
             #   Cross-Entropy
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a cross-entropy of: %4.2f' %EntM1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a cross-entropy of: %4.2f' %EntM2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a cross-entropy of: %4.2f' %EntM3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a cross-entropy of: %4.2f' %EntM4)
-            print('\n')
+            file.write('Cross-Entropy:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a cross-entropy of: %4.2f\n' %EntM1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a cross-entropy of: %4.2f\n' %EntM2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a cross-entropy of: %4.2f\n' %EntM3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a cross-entropy of: %4.2f\n' %EntM4)
+            file.write('\n')
             
             #   Adjusted-R^2
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has an Adjusted-R^2 of: %4.2f' %R2M1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has an Adjusted-R^2 of: %4.2f' %R2M2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has an Adjusted-R^2 of: %4.2f' %R2M3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has an Adjusted-R^2 of: %4.2f' %R2M4)
-            print('\n')
+            file.write('Adjusted R^2:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has an Adjusted-R^2 of: %4.2f\n' %R2M1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has an Adjusted-R^2 of: %4.2f\n' %R2M2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has an Adjusted-R^2 of: %4.2f\n' %R2M3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has an Adjusted-R^2 of: %4.2f\n' %R2M4)
+            file.write('\n')
             
             #   RMSE
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a RMSE of: %4.2f' %RMSEM1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a RMSE of: %4.2f' %RMSEM2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a RMSE of: %4.2f' %RMSEM3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a RMSE of: %4.2f' %RMSEM4)
-            print('\n')
+            file.write('RMSE:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a RMSE of: %4.2f\n' %RMSEM1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a RMSE of: %4.2f\n' %RMSEM2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a RMSE of: %4.2f\n' %RMSEM3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a RMSE of: %4.2f\n' %RMSEM4)
+            file.write('\n')
             
             #   Cp
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Cp of: %4.2f' %CpM1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Cp of: %4.2f' %CpM2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Cp of: %4.2f' %CpM3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Cp of: %4.2f' %CpM4)
-            print('\n')
+            file.write('Cp:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Cp of: %4.2f\n' %CpM1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Cp of: %4.2f\n' %CpM2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Cp of: %4.2f\n' %CpM3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Cp of: %4.2f\n' %CpM4)
+            file.write('\n')
             
             #   AIC
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a AIC of: %4.2f' %AICM1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a AIC of: %4.2f' %AICM2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a AIC of: %4.2f' %AICM3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a AIC of: %4.2f' %AICM4)
-            print('\n')
+            file.write('AIC:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a AIC of: %4.2f\n' %AICM1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a AIC of: %4.2f\n' %AICM2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a AIC of: %4.2f\n' %AICM3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a AIC of: %4.2f\n' %AICM4)
+            file.write('\n')
             
             #   BIC
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a BIC of: %4.2f' %BICM1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a BIC of: %4.2f' %BICM2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a BIC of: %4.2f' %BICM3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a BIC of: %4.2f' %BICM4)
-            print('\n')
+            file.write('BIC:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a BIC of: %4.2f\n' %BICM1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a BIC of: %4.2f\n' %BICM2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a BIC of: %4.2f\n' %BICM3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a BIC of: %4.2f\n' %BICM4)
+            file.write('\n')
             
             #   Accuracy
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Accuracy of: %4.2f' %AccM1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Accuracy of: %4.2f' %AccM2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Accuracy of: %4.2f' %AccM3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Accuracy of: %4.2f' %AccM4)
-            print('\n')
+            file.write('Accuracy:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Accuracy of: %4.2f\n' %AccM1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Accuracy of: %4.2f\n' %AccM2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Accuracy of: %4.2f\n' %AccM3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Accuracy of: %4.2f\n' %AccM4)
+            file.write('\n')
             
             #   Precision
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Precision of: %4.2f' %PrecM1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Precision of: %4.2f' %PrecM2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Precision of: %4.2f' %PrecM3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Precision of: %4.2f' %PrecM4)
-            print('\n')
+            file.write('Precision:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Precision of: %4.2f\n' %PrecM1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Precision of: %4.2f\n' %PrecM2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Precision of: %4.2f\n' %PrecM3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Precision of: %4.2f\n' %PrecM4)
+            file.write('\n')
             
             #   Recall
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Recall of: %4.2f' %RecallM1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Recall of: %4.2f' %RecallM2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Recall of: %4.2f' %RecallM3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Recall of: %4.2f' %RecallM4)
-            print('\n')
+            file.write('Recall:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Recall of: %4.2f\n' %RecallM1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Recall of: %4.2f\n' %RecallM2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Recall of: %4.2f\n' %RecallM3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Recall of: %4.2f\n' %RecallM4)
+            file.write('\n')
             
             #   F1-Score
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a F1-Score of: %4.2f' %F1M1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a F1-Score of: %4.2f' %F1M2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a F1-Score of: %4.2f' %F1M3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a F1-Score of: %4.2f' %F1M4)
-            print('\n')
+            file.write('F1-Score:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a F1-Score of: %4.2f\n' %F1M1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a F1-Score of: %4.2f\n' %F1M2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a F1-Score of: %4.2f\n' %F1M3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a F1-Score of: %4.2f\n' %F1M4)
+            file.write('\n')
             
             #   Specificity
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Specificity of: %4.2f' %SpecM1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Specificity of: %4.2f' %SpecM2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Specificity of: %4.2f' %SpecM3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Specificity of: %4.2f' %SpecM4)
-            print('\n')
+            file.write('Specificity:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Specificity of: %4.2f\n' %SpecM1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Specificity of: %4.2f\n' %SpecM2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Specificity of: %4.2f\n' %SpecM3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Specificity of: %4.2f\n' %SpecM4)
+            file.write('\n')
             
             #   Risk
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Risk of: %4.2f' %RiskM1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Risk of: %4.2f' %RiskM2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Risk of: %4.2f' %RiskM3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Risk of: %4.2f' %RiskM4)
-            print('\n')
+            file.write('Risk:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a Risk of: %4.2f\n' %RiskM1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a Risk of: %4.2f\n' %RiskM2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a Risk of: %4.2f\n' %RiskM3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a Risk of: %4.2f\n' %RiskM4)
+            file.write('\n')
             
             #   AUC
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has an AUC of: %4.2f' %AUCM1)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has an AUC of: %4.2f' %AUCM2)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has an AUC of: %4.2f' %AUCM3)
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has an AUC of: %4.2f' %AUCM4)
-            print('\n')
+            file.write('AUC:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has an AUC of: %4.2f' %AUCM1)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has an AUC of: %4.2f' %AUCM2)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has an AUC of: %4.2f' %AUCM3)
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has an AUC of: %4.2f' %AUCM4)
+            file.write('\n')
             
             #   Youden Index
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM1, YoudThreshM1))
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM2, YoudThreshM2))
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM3, YoudThreshM3))
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM4, YoudThreshM4))
-            print('\n')
+            file.write('Youden Index:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM1, YoudThreshM1))
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM2, YoudThreshM2))
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM3, YoudThreshM3))
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudM4, YoudThreshM4))
+            file.write('\n')
             
             #   Distance from leftmost corner of ROC curve
-            print(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM1, dThreshM1))
-            print(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM2, dThreshM2))
-            print(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM3, dThreshM3))
-            print(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM4, dThreshM4))
-            print('\n')
+            file.write('Distance from leftmost corner of the ROC curve:\n')
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM1 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM1, dThreshM1))
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM2 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM2, dThreshM2))
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM3 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM3, dThreshM3))
+            file.write(str(region) + ': The ' + method + ' et al. ' + TextM4 + ' has a minimum distance of %4.2f at the threshold of %4.3f' %(dM4, dThreshM4))
+            file.write('\n')
+            
+            # Close the file
+            file.close()
             
             
             # Finally output a ROC curve to finish evaluating the models
@@ -1294,12 +1326,12 @@ def DetermineParameters(Train, Label, Model, lat, lon, GriddedRegion = 'USA', NJ
         # Create the a figure showing the ROC curve for all regions
         print('Creating a regional plot for the ' + method + ' et al. method.\n')
         USRegionPlots(np.stack((FPRM1, FPRM2, FPRM3, FPRM4), axis = -1), np.stack((TPRM1, TPRM2, TPRM3, TPRM4), axis = -1), Regions, labels = [TextM1, TextM2, TextM3, TextM4], 
-                      title = 'ROC Curves for ' + Model + 's using the ' + method + 'et al. Method', savename = './Figures/' + Model + '_' + method + '_Parameter_Test.png')
+                      title = 'ROC Curves for ' + Model + 's using the ' + method + 'et al. Method', savename = OutPathFig + Model + '_' + method + '_Parameter_Test.png')
         
 #%%
-# cell
+# cell 10
 # Create a function to create the final SL models, based on the best performing parameters, and output their performance
-def CreateSLModel(Train, Label, Model, lat, lon, GriddedRegion):
+def CreateSLModel(Train, Label, Model, lat, lon, GriddedRegion = 'USA'):
     '''
     
     '''
@@ -1528,6 +1560,10 @@ def CreateSLModel(Train, Label, Model, lat, lon, GriddedRegion):
                     OtProb, OtWeights = RFModel(TrainData, TrainLabel, TestData, N_trees = 100, crit = 'gini', max_depth = None, max_features = 'auto')
                     
                     OtThresh = 0.03
+                
+                # Define output paths
+                OutPathFig = './Figures/RF/Performance/'
+                OutPathResults = './Results/TestFinalModel/RF/'
                     
             elif (Model == 'SVM') | (Model == 'Support Vector Machine'):
                 # Create SVM based on the best parameters
@@ -1562,6 +1598,10 @@ def CreateSLModel(Train, Label, Model, lat, lon, GriddedRegion):
                     
                     OtThresh = 0.03
                     
+                # Define output paths
+                OutPathFig = './Figures/SVM/Performance/'
+                OutPathResults = './Results/TestFinalModel/SVM/'
+                    
             elif (Model == 'ANN') | (Model == 'Nueral Network'):
                 # Create ANN based on the best parameters
                 # The Probability threshholds are based on the maximum Youden and minimum distance probabilities
@@ -1594,6 +1634,10 @@ def CreateSLModel(Train, Label, Model, lat, lon, GriddedRegion):
                     OtProb = ANNModel(TrainData, TrainLabel, TestData, layers = (15, 15))
                     
                     OtThresh = 0.03
+                    
+                # Define output paths
+                OutPathFig = './Figures/ANN/Performance/'
+                OutPathResults = './Results/TestFinalModel/ANN/'
     
             else: ##### Add more models here
                 pass
@@ -1607,137 +1651,162 @@ def CreateSLModel(Train, Label, Model, lat, lon, GriddedRegion):
         
         
         # Output the model performance
+        file = open(OutPathResults + Model + '_ModelPerformance_' + region + '.txt', 'w')
+        file.write('Performance metrics for ' + Model + ' using all FD identification methods to investigate overall perforamce.\n')
         
         #   Cross-Entropy
-        print(str(region) + ': The Christian et al. Method has a cross-entropy of: %4.2f' %EntCh)
-        print(str(region) + ': The Nogeura et al. Method has a cross-entropy of: %4.2f' %EntNog)
-        print(str(region) + ': The Liu et al. Method has a cross-entropy of: %4.2f' %EntLiu)
-        print(str(region) + ': The Pendergrass et al. Method has a cross-entropy of: %4.2f' %EntPe)
-        print(str(region) + ': The Otkin et al. Method has a cross-entropy of: %4.2f' %EntOt)
-        print('\n')
+        file.write('Cross-Entropy:\n')
+        file.write(str(region) + ': The Christian et al. Method has a cross-entropy of: %4.2f\n' %EntCh)
+        file.write(str(region) + ': The Nogeura et al. Method has a cross-entropy of: %4.2f\n' %EntNog)
+        file.write(str(region) + ': The Liu et al. Method has a cross-entropy of: %4.2f\n' %EntLiu)
+        file.write(str(region) + ': The Pendergrass et al. Method has a cross-entropy of: %4.2f\n' %EntPe)
+        file.write(str(region) + ': The Otkin et al. Method has a cross-entropy of: %4.2f\n' %EntOt)
+        file.write('\n')
         
         #   Adjusted-R^2
-        print(str(region) + ': The Christian et al. Method has an Adjusted-R^2 of: %4.2f' %R2Ch)
-        print(str(region) + ': The Nogeura et al. Method has an Adjusted-R^2 of: %4.2f' %R2Nog)
-        print(str(region) + ': The Liu et al. Method has an Adjusted-R^2 of: %4.2f' %R2Liu)
-        print(str(region) + ': The Pendergrass et al. Method has an Adjusted-R^2 of: %4.2f' %R2Pe)
-        print(str(region) + ': The Otkin et al. Method has an Adjusted-R^2 of: %4.2f' %R2Ot)
-        print('\n')
+        file.write('Adjusted-R^2:\n')
+        file.write(str(region) + ': The Christian et al. Method has an Adjusted-R^2 of: %4.2f\n' %R2Ch)
+        file.write(str(region) + ': The Nogeura et al. Method has an Adjusted-R^2 of: %4.2f\n' %R2Nog)
+        file.write(str(region) + ': The Liu et al. Method has an Adjusted-R^2 of: %4.2f\n' %R2Liu)
+        file.write(str(region) + ': The Pendergrass et al. Method has an Adjusted-R^2 of: %4.2f\n' %R2Pe)
+        file.write(str(region) + ': The Otkin et al. Method has an Adjusted-R^2 of: %4.2f\n' %R2Ot)
+        file.write('\n')
         
         #   RMSE
-        print(str(region) + ': The Christian et al. Method has a RMSE of: %4.2f' %RMSECh)
-        print(str(region) + ': The Nogeura et al. Method has a RMSE of: %4.2f' %RMSENog)
-        print(str(region) + ': The Liu et al. Method has a RMSE of: %4.2f' %RMSELiu)
-        print(str(region) + ': The Pendergrass et al. Method has a RMSE of: %4.2f' %RMSEPe)
-        print(str(region) + ': The Otkin et al. Method has a RMSE of: %4.2f' %RMSEOt)
-        print('\n')
+        file.write('RMSE:\n')
+        file.write(str(region) + ': The Christian et al. Method has a RMSE of: %4.2f\n' %RMSECh)
+        file.write(str(region) + ': The Nogeura et al. Method has a RMSE of: %4.2f\n' %RMSENog)
+        file.write(str(region) + ': The Liu et al. Method has a RMSE of: %4.2f\n' %RMSELiu)
+        file.write(str(region) + ': The Pendergrass et al. Method has a RMSE of: %4.2f\n' %RMSEPe)
+        file.write(str(region) + ': The Otkin et al. Method has a RMSE of: %4.2f\n' %RMSEOt)
+        file.write('\n')
         
         #   Cp
-        print(str(region) + ': The Christian et al. Method has a Cp of: %4.2f' %CpCh)
-        print(str(region) + ': The Nogeura et al. Method has a Cp of: %4.2f' %CpNog)
-        print(str(region) + ': The Liu et al. Method has a Cp of: %4.2f' %CpLiu)
-        print(str(region) + ': The Pendergrass et al. Method has a Cp of: %4.2f' %CpPe)
-        print(str(region) + ': The Otkin et al. Method has a Cp of: %4.2f' %CpOt)
-        print('\n')
+        file.write('Cp:\n')
+        file.write(str(region) + ': The Christian et al. Method has a Cp of: %4.2f\n' %CpCh)
+        file.write(str(region) + ': The Nogeura et al. Method has a Cp of: %4.2f\n' %CpNog)
+        file.write(str(region) + ': The Liu et al. Method has a Cp of: %4.2f\n' %CpLiu)
+        file.write(str(region) + ': The Pendergrass et al. Method has a Cp of: %4.2f\n' %CpPe)
+        file.write(str(region) + ': The Otkin et al. Method has a Cp of: %4.2f\n' %CpOt)
+        file.write('\n')
         
         #   AIC
-        print(str(region) + ': The Christian et al. Method has a AIC of: %4.2f' %AICCh)
-        print(str(region) + ': The Nogeura et al. Method has a AIC of: %4.2f' %AICNog)
-        print(str(region) + ': The Liu et al. Method has a AIC of: %4.2f' %AICLiu)
-        print(str(region) + ': The Pendergrass et al. Method has a AIC of: %4.2f' %AICPe)
-        print(str(region) + ': The Otkin et al. Method has a AIC of: %4.2f' %AICOt)
-        print('\n')
+        file.write('AIC:\n')
+        file.write(str(region) + ': The Christian et al. Method has a AIC of: %4.2f\n' %AICCh)
+        file.write(str(region) + ': The Nogeura et al. Method has a AIC of: %4.2f\n' %AICNog)
+        file.write(str(region) + ': The Liu et al. Method has a AIC of: %4.2f\n' %AICLiu)
+        file.write(str(region) + ': The Pendergrass et al. Method has a AIC of: %4.2f\n' %AICPe)
+        file.write(str(region) + ': The Otkin et al. Method has a AIC of: %4.2f\n' %AICOt)
+        file.write('\n')
         
         #   BIC
-        print(str(region) + ': The Christian et al. Method has a BIC of: %4.2f' %BICCh)
-        print(str(region) + ': The Nogeura et al. Method has a BIC of: %4.2f' %BICNog)
-        print(str(region) + ': The Liu et al. Method has a BIC of: %4.2f' %BICLiu)
-        print(str(region) + ': The Pendergrass et al. Method has a BIC of: %4.2f' %BICPe)
-        print(str(region) + ': The Otkin et al. Method has a BIC of: %4.2f' %BICOt)
-        print('\n')
+        file.write('BIC:\n')
+        file.write(str(region) + ': The Christian et al. Method has a BIC of: %4.2f\n' %BICCh)
+        file.write(str(region) + ': The Nogeura et al. Method has a BIC of: %4.2f\n' %BICNog)
+        file.write(str(region) + ': The Liu et al. Method has a BIC of: %4.2f\n' %BICLiu)
+        file.write(str(region) + ': The Pendergrass et al. Method has a BIC of: %4.2f\n' %BICPe)
+        file.write(str(region) + ': The Otkin et al. Method has a BIC of: %4.2f\n' %BICOt)
+        file.write('\n')
         
         #   Accuracy
-        print(str(region) + ': The Christian et al. Method has a Accuracy of: %4.2f' %AccCh)
-        print(str(region) + ': The Nogeura et al. Method has a Accuracy of: %4.2f' %AccNog)
-        print(str(region) + ': The Liu et al. Method has a Accuracy of: %4.2f' %AccLiu)
-        print(str(region) + ': The Pendergrass et al. Method has a Accuracy of: %4.2f' %AccPe)
-        print(str(region) + ': The Otkin et al. Method has a Accuracy of: %4.2f' %AccOt)
-        print('\n')
+        file.write('Accuracy:\n')
+        file.write(str(region) + ': The Christian et al. Method has a Accuracy of: %4.2f\n' %AccCh)
+        file.write(str(region) + ': The Nogeura et al. Method has a Accuracy of: %4.2f\n' %AccNog)
+        file.write(str(region) + ': The Liu et al. Method has a Accuracy of: %4.2f\n' %AccLiu)
+        file.write(str(region) + ': The Pendergrass et al. Method has a Accuracy of: %4.2f\n' %AccPe)
+        file.write(str(region) + ': The Otkin et al. Method has a Accuracy of: %4.2f\n' %AccOt)
+        file.write('\n')
         
         #   Precision
-        print(str(region) + ': The Christian et al. Method has a Precision of: %4.2f' %PrecCh)
-        print(str(region) + ': The Nogeura et al. Method has a Precision of: %4.2f' %PrecNog)
-        print(str(region) + ': The Liu et al. Method has a Precision of: %4.2f' %PrecLiu)
-        print(str(region) + ': The Pendergrass et al. Method has a Precision of: %4.2f' %PrecPe)
-        print(str(region) + ': The Otkin et al. Method has a Precision of: %4.2f' %PrecOt)
-        print('\n')
+        file.write('Precision:\n')
+        file.write(str(region) + ': The Christian et al. Method has a Precision of: %4.2f\n' %PrecCh)
+        file.write(str(region) + ': The Nogeura et al. Method has a Precision of: %4.2f\n' %PrecNog)
+        file.write(str(region) + ': The Liu et al. Method has a Precision of: %4.2f\n' %PrecLiu)
+        file.write(str(region) + ': The Pendergrass et al. Method has a Precision of: %4.2f\n' %PrecPe)
+        file.write(str(region) + ': The Otkin et al. Method has a Precision of: %4.2f\n' %PrecOt)
+        file.write('\n')
         
         #   Recall
-        print(str(region) + ': The Christian et al. Method has a Recall of: %4.2f' %RecallCh)
-        print(str(region) + ': The Nogeura et al. Method has a Recall of: %4.2f' %RecallNog)
-        print(str(region) + ': The Liu et al. Method has a Recall of: %4.2f' %RecallLiu)
-        print(str(region) + ': The Pendergrass et al. Method has a Recall of: %4.2f' %RecallPe)
-        print(str(region) + ': The Otkin et al. Method has a Recall of: %4.2f' %RecallOt)
-        print('\n')
+        file.write('Recall:\n')
+        file.write(str(region) + ': The Christian et al. Method has a Recall of: %4.2f\n' %RecallCh)
+        file.write(str(region) + ': The Nogeura et al. Method has a Recall of: %4.2f\n' %RecallNog)
+        file.write(str(region) + ': The Liu et al. Method has a Recall of: %4.2f\n' %RecallLiu)
+        file.write(str(region) + ': The Pendergrass et al. Method has a Recall of: %4.2f\n' %RecallPe)
+        file.write(str(region) + ': The Otkin et al. Method has a Recall of: %4.2f\n' %RecallOt)
+        file.write('\n')
         
         #   F1-Score
-        print(str(region) + ': The Christian et al. Method has a F1-Score of: %4.2f' %F1Ch)
-        print(str(region) + ': The Nogeura et al. Method has a F1-Score of: %4.2f' %F1Nog)
-        print(str(region) + ': The Liu et al. Method has a F1-Score of: %4.2f' %F1Liu)
-        print(str(region) + ': The Pendergrass et al. Method has a F1-Score of: %4.2f' %F1Pe)
-        print(str(region) + ': The Otkin et al. Method has a F1-Score of: %4.2f' %F1Ot)
-        print('\n')
+        file.write('F1-Score:\n')
+        file.write(str(region) + ': The Christian et al. Method has a F1-Score of: %4.2f\n' %F1Ch)
+        file.write(str(region) + ': The Nogeura et al. Method has a F1-Score of: %4.2f\n' %F1Nog)
+        file.write(str(region) + ': The Liu et al. Method has a F1-Score of: %4.2f\n' %F1Liu)
+        file.write(str(region) + ': The Pendergrass et al. Method has a F1-Score of: %4.2f\n' %F1Pe)
+        file.write(str(region) + ': The Otkin et al. Method has a F1-Score of: %4.2f\n' %F1Ot)
+        file.write('\n')
         
         #   Specificity
-        print(str(region) + ': The Christian et al. Method has a Specificity of: %4.2f' %SpecCh)
-        print(str(region) + ': The Nogeura et al. Method has a Specificity of: %4.2f' %SpecNog)
-        print(str(region) + ': The Liu et al. Method has a Specificity of: %4.2f' %SpecLiu)
-        print(str(region) + ': The Pendergrass et al. Method has a Specificity of: %4.2f' %SpecPe)
-        print(str(region) + ': The Otkin et al. Method has a Specificity of: %4.2f' %SpecOt)
-        print('\n')
+        file.write('Specificity:\n')
+        file.write(str(region) + ': The Christian et al. Method has a Specificity of: %4.2f\n' %SpecCh)
+        file.write(str(region) + ': The Nogeura et al. Method has a Specificity of: %4.2f\n' %SpecNog)
+        file.write(str(region) + ': The Liu et al. Method has a Specificity of: %4.2f\n' %SpecLiu)
+        file.write(str(region) + ': The Pendergrass et al. Method has a Specificity of: %4.2f\n' %SpecPe)
+        file.write(str(region) + ': The Otkin et al. Method has a Specificity of: %4.2f\n' %SpecOt)
+        file.write('\n')
         
         #   Risk
-        print(str(region) + ': The Christian et al. Method has a Risk of: %4.2f' %RiskCh)
-        print(str(region) + ': The Nogeura et al. Method has a Risk of: %4.2f' %RiskNog)
-        print(str(region) + ': The Liu et al. Method has a Risk of: %4.2f' %RiskLiu)
-        print(str(region) + ': The Pendergrass et al. Method has a Risk of: %4.2f' %RiskPe)
-        print(str(region) + ': The Otkin et al. Method has a Risk of: %4.2f' %RiskOt)
-        print('\n')
+        file.write('Risk:\n')
+        file.write(str(region) + ': The Christian et al. Method has a Risk of: %4.2f\n' %RiskCh)
+        file.write(str(region) + ': The Nogeura et al. Method has a Risk of: %4.2f\n' %RiskNog)
+        file.write(str(region) + ': The Liu et al. Method has a Risk of: %4.2f\n' %RiskLiu)
+        file.write(str(region) + ': The Pendergrass et al. Method has a Risk of: %4.2f\n' %RiskPe)
+        file.write(str(region) + ': The Otkin et al. Method has a Risk of: %4.2f\n' %RiskOt)
+        file.write('\n')
         
         #   AUC
-        print(str(region) + ': The Christian et al. Method has an AUC of: %4.2f' %AUCCh)
-        print(str(region) + ': The Nogeura et al. Method has an AUC of: %4.2f' %AUCNog)
-        print(str(region) + ': The Liu et al. Method has an AUC of: %4.2f' %AUCLiu)
-        print(str(region) + ': The Pendergrass et al. Method has an AUC of: %4.2f' %AUCPe)
-        print(str(region) + ': The Otkin et al. Method has an AUC of: %4.2f' %AUCOt)
-        print('\n')
+        file.write('AUC:\n')
+        file.write(str(region) + ': The Christian et al. Method has an AUC of: %4.2f\n' %AUCCh)
+        file.write(str(region) + ': The Nogeura et al. Method has an AUC of: %4.2f\n' %AUCNog)
+        file.write(str(region) + ': The Liu et al. Method has an AUC of: %4.2f\n' %AUCLiu)
+        file.write(str(region) + ': The Pendergrass et al. Method has an AUC of: %4.2f\n' %AUCPe)
+        file.write(str(region) + ': The Otkin et al. Method has an AUC of: %4.2f\n' %AUCOt)
+        file.write('\n')
         
         #   Youden Index
-        print(str(region) + ': The Christian et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudCh, YoudThreshCh))
-        print(str(region) + ': The Nogeura et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudNog, YoudThreshNog))
-        print(str(region) + ': The Liu et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f' %(YoudLiu, YoudThreshLiu))
-        print(str(region) + ': The Pendergrass et al. Method has amaximum Youden index of %4.2f at the threshold of %4.3f' %(YoudPe, YoudThreshPe))
-        print(str(region) + ': The Otkin et al. Method has amaximum Youden index of %4.2f at the threshold of %4.3f' %(YoudOt, YoudThreshOt))
-        print('\n')
+        file.write('Youden Index:\n')
+        file.write(str(region) + ': The Christian et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f\n' %(YoudCh, YoudThreshCh))
+        file.write(str(region) + ': The Nogeura et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f\n' %(YoudNog, YoudThreshNog))
+        file.write(str(region) + ': The Liu et al. Method has a maximum Youden index of %4.2f at the threshold of %4.3f\n' %(YoudLiu, YoudThreshLiu))
+        file.write(str(region) + ': The Pendergrass et al. Method has amaximum Youden index of %4.2f at the threshold of %4.3f\n' %(YoudPe, YoudThreshPe))
+        file.write(str(region) + ': The Otkin et al. Method has amaximum Youden index of %4.2f at the threshold of %4.3f\n' %(YoudOt, YoudThreshOt))
+        file.write('\n')
         
         #   Distance from leftmost corner of ROC curve
-        print(str(region) + ': The Christian et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dCh, dThreshCh))
-        print(str(region) + ': The Nogeura et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dNog, dThreshNog))
-        print(str(region) + ': The Liu et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dLiu, dThreshLiu))
-        print(str(region) + ': The Pendergrass et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dPe, dThreshPe))
-        print(str(region) + ': The Otkin et al. Method has a minimum distance of %4.2f at the threshold of %4.3f' %(dOt, dThreshOt))
-        print('\n')
+        file.write('Distance from the leftmost corner of the ROC curve:\n')
+        file.write(str(region) + ': The Christian et al. Method has a minimum distance of %4.2f at the threshold of %4.3f\n' %(dCh, dThreshCh))
+        file.write(str(region) + ': The Nogeura et al. Method has a minimum distance of %4.2f at the threshold of %4.3f\n' %(dNog, dThreshNog))
+        file.write(str(region) + ': The Liu et al. Method has a minimum distance of %4.2f at the threshold of %4.3f\n' %(dLiu, dThreshLiu))
+        file.write(str(region) + ': The Pendergrass et al. Method has a minimum distance of %4.2f at the threshold of %4.3f\n' %(dPe, dThreshPe))
+        file.write(str(region) + ': The Otkin et al. Method has a minimum distance of %4.2f at the threshold of %4.3f\n' %(dOt, dThreshOt))
+        file.write('\n')
         
         # Feature Importance
         if (Model == 'RF') | (Model == 'Random Forest'):
-            print(str(region) + ': The feature importance for the Christian et al. Method is:', ChWeights)
-            print(str(region) + ': The feature importance for the Noguera et al. Method is:', NogWeights)
-            print(str(region) + ': The feature importance for the Liu et al. Method is:', LiuWeights)
-            print(str(region) + ': The feature importance for the Pendergrass et al. Method is:', PeWeights)
-            print(str(region) + ': The feature importance for the Otkin et al. Method is:', OtWeights)
-            print('\n')
+            file.write('Contribution of each feature for the RF model:\n')
+            file.write(str(region) + ': The feature importance for the Christian et al. Method is:\n')
+            file.write('{:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}\n'.format(ChWeights[0], ChWeights[1], ChWeights[2], ChWeights[3], ChWeights[4], ChWeights[5], ChWeights[6], ChWeights[7], ChWeights[8], ChWeights[9], ChWeights[10], ChWeights[11], ChWeights[12]))
+            file.write(str(region) + ': The feature importance for the Noguera et al. Method is:\n') 
+            file.write('{:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}\n'.format(NogWeights[0], NogWeights[1], NogWeights[2], NogWeights[3], NogWeights[4], NogWeights[5], NogWeights[6], NogWeights[7], NogWeights[8], NogWeights[9], NogWeights[10], NogWeights[11], NogWeights[12]))
+            file.write(str(region) + ': The feature importance for the Liu et al. Method is:\n') 
+            file.write('{:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}\n'.format(LiuWeights[0], LiuWeights[1], LiuWeights[2], LiuWeights[3], LiuWeights[4], LiuWeights[5], LiuWeights[6], LiuWeights[7], LiuWeights[8], LiuWeights[9], LiuWeights[10], LiuWeights[11], LiuWeights[12], LiuWeights[13], LiuWeights[14]))
+            file.write(str(region) + ': The feature importance for the Pendergrass et al. Method is:\n') 
+            file.write('{:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}\n'.format(PeWeights[0], PeWeights[1], PeWeights[2], PeWeights[3], PeWeights[4], PeWeights[5], PeWeights[6], PeWeights[7], PeWeights[8], PeWeights[9], PeWeights[10], PeWeights[11], PeWeights[12]))
+            file.write(str(region) + ': The feature importance for the Otkin et al. Method is:\n') 
+            file.write('{:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}  {:4.4f}\n'.format(OtWeights[0], OtWeights[1], OtWeights[2], OtWeights[3], OtWeights[4], OtWeights[5], OtWeights[6], OtWeights[7], OtWeights[8], OtWeights[9], OtWeights[10], OtWeights[11], OtWeights[12], OtWeights[13]))
         else:
             pass
+        
+        # Close the file
+        file.close()
         
         
         # Finally, create and save a ROC curve
@@ -1745,7 +1814,7 @@ def CreateSLModel(Train, Label, Model, lat, lon, GriddedRegion):
         ax = fig.add_subplot(1,1,1)
         
         #   Set the title
-        ax.set_title('Receiver Operating Characteristic Curve for ' + Model + 's', fontsize = 24)
+        ax.set_title(region + ': Receiver Operating Characteristic Curve for ' + Model + 's', fontsize = 24)
         
         #   Create the plots
         ax.plot(FPRCh[:,r], TPRCh[:,r], 'r-', linewidth = 2.0, label = 'Christian et al. 2019 Method')
@@ -1768,18 +1837,18 @@ def CreateSLModel(Train, Label, Model, lat, lon, GriddedRegion):
         for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
             i.set_size(22)
         
-        plt.savefig('./Figures/' + Model + '_' + region + '_ROC.png', bbox_inches = 'tight')
+        plt.savefig(OutPathFig + Model + '_' + region + '_ROC.png', bbox_inches = 'tight')
         plt.show(block = False)
     
     # Create a regional plot to summarize all the ROC curves
     print('Creating a plot for all regions')
-    USRegionPlots(np.stack((FPRCh, FPRNog, FPRLiu, FPRPe, FPROt), axis = -1), np.stacknp.stack((TPRCh, TPRNog, TPRLiu, TPRPe, TPROt), axis = -1), Regions,
+    USRegionPlots(np.stack((FPRCh, FPRNog, FPRLiu, FPRPe, FPROt), axis = -1), np.stack((TPRCh, TPRNog, TPRLiu, TPRPe, TPROt), axis = -1), Regions,
                   labels = ['Christian et al. 2019 Method', 'Noguera et al. 2020 Method', 'Liu et al. 2020 Method', 'Pendergrass et al. 2020 Method', 'Otkin et al. 2021 Method'],
-                  title = 'ROC Curves for ' + Model + 's', savename = './Figures/' + Model + '_ROC_all_regions.png')
+                  title = 'ROC Curves for ' + Model + 's', savename = OutPathFig + Model + '_ROC_all_regions.png')
     
 
 #%%
-# cell
+# cell 11
     
 # Define a function to create climatology and case study maps for the Christian and Otkin methods (since they have good performance and they have good climatologies to compare)
 def ModelPredictions(Train, Label, Model, lat, lon, Mask, months, years):
@@ -1898,7 +1967,7 @@ def ModelPredictions(Train, Label, Model, lat, lon, Mask, months, years):
 
 
 #%%
-# cell 7
+# cell 12
 # Load in the index data
 
 path = './Data/Indices/'
@@ -1916,7 +1985,7 @@ fdii  = LoadNC('fdii', 'fdii.NARR.CONUS.pentad.nc', path = path)
 FDInt  = LoadNC('ric', 'fd_int.NARR.CONUS.pentad.nc', path = path)
 
 #%%
-# cell 8
+# cell 13
 # Load the flash drought data
 
 path = './Data/FD_Data/'
@@ -1930,7 +1999,7 @@ OtFD  = LoadNC('otfd', 'OtkinFD.NARR.CONUS.pentad.nc', path = path)
 
 
 #%%
-# cell 9
+# cell 14
 # Load the mask data incase it is needed
 
 
@@ -1983,7 +2052,7 @@ maskSub, LatSub, LonSub = SubsetData(maskNew, lat, lon, LatMin = LatMin, LatMax 
 
 
 #%%
-# cell 10
+# cell 15
 # Interpolate missing values and replace sea values with 0. I.e., remove NaNs
 I, J, T = sesr['sesr'].shape
 
@@ -2136,7 +2205,7 @@ OtFD['otfd'][OtFD['otfd'] < 0.5] = 0
             
 
 #%%
-# cell 11
+# cell 16
 # Determine the mean change in each index (minus FDII which has its own intensification component pre-calculated) to get the intensification.
 
 I, J, T = sesr['sesr'].shape
@@ -2214,6 +2283,7 @@ del Dsodi
 
 
 #%%
+# cell 17
 # Remove sea points to remove potential bias
 Lat1D = sesr['lat'].reshape(I*J, order = 'F')
 Lon1D = sesr['lon'].reshape(I*J, order = 'F')
@@ -2291,7 +2361,7 @@ OtFD2D = OtFD['otfd'].reshape(I*J, T, order = 'F')
 OtFD2D = np.delete(OtFD2D, ind, axis = 0)
 
 #%%
-# cell 12
+# cell 18
 # Organize the data into two variables x (training) and y (label)
 IJ, T = sesr2D.shape
 
@@ -2423,7 +2493,7 @@ del OtFD2D
 # NVar = xTrain.shape[-1] # Number of variables
 
 #%%
-# cell
+# cell 19
 # Split the data
 
 # Model testing for random forests
@@ -2445,10 +2515,10 @@ DetermineParameters(x, y, Model = 'Random Forest', lat = Lat1DnoSea, lon = Lon1D
 # The best performing model for the Li et al. method was the # tree RF.
 # The best performing model for the Liu et al. method was the 100 tree RF (200 only had minor improvement). Largest Youden index was around 0.05
 # The best performing model for the Pendergrass et al. method was the 100 tree RF. Largest Youden index was around 0.01
-# The best performing model for the Otkin et al. method was the 100 tree RF (200 only had minor improvement). Largest Youden index was around 0.03
+# The best performing model for the Otkin et al. method was the 100 tree RF (200 only had minor improvement). Largest Youden index was around 0.03 (all regions)
 
 #%%
-# cell
+# cell 20
 # With the model parameters tested, make and compare models for each FD method. Start with RFs
     
 ### Main results with RFs
@@ -2457,7 +2527,7 @@ DetermineParameters(x, y, Model = 'Random Forest', lat = Lat1DnoSea, lon = Lon1D
 ### NOTE, This is designed to run all the cores on the computer for the quickest performance. Then the computer CANNOT be used while this is running.
 
 
-CreateSLModel(x, y, 'Random Forest')
+CreateSLModel(x, y, 'Random Forest', lat = Lat1DnoSea, lon = Lon1DnoSea)
 
 # Create some climatologies and case studies using the RF predictions to further examine performance
 ModelPredictions(x, y, 'RF', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], sesr['year'])
@@ -2465,7 +2535,7 @@ ModelPredictions(x, y, 'RF', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], se
 
 
 #%%
-# cell
+# cell 21
 
 # Model testing for boosted trees
     
@@ -2476,7 +2546,7 @@ ModelPredictions(x, y, 'RF', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], se
 
 
 #%%
-# cell
+# cell 22
 
 # Model testing for SVMs
 
@@ -2496,7 +2566,7 @@ DetermineParameters(x, y, Model = 'SVM')
 # The best performing model for the Otkin et al. method was the SVM with # kernal. Largest Youden index was around 0.03
 
 #%%
-# cell
+# cell 23
 # With the model parameters tested, make and compare models for each FD method. Start with SVMs
     
 ### Main results with SVMs
@@ -2512,7 +2582,7 @@ ModelPredictions(x, y, 'SVM', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], s
 
 
 #%%
-# cell
+# cell 24
 
 # Model testing for traditional NNs    
 
@@ -2533,7 +2603,7 @@ DetermineParameters(x, y, Model = 'ANN')
 
 
 #%%
-# cell
+# cell 25
 # With the model parameters tested, make and compare models for each FD method. Start with ANNs
     
 ### Main results with ANNs
@@ -2548,7 +2618,7 @@ CreateSLModel(x, y, 'ANN')
 ModelPredictions(x, y, 'ANN', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], sesr['year'])
 
 #%%
-# cell
+# cell 26
 
 # Model testing for wavelets
 
@@ -2559,7 +2629,7 @@ ModelPredictions(x, y, 'ANN', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], s
 
 
 #%%
-# cell
+# cell 27
 
 # This was used to make a prelimary figure
 # # More Examination of model performance.
@@ -2714,7 +2784,7 @@ ModelPredictions(x, y, 'ANN', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], s
 
 
 #%%
-# cell
+# cell 28
 
 # This was used to make a prelimary figure
 # Finally, produce a figure for 2017    
