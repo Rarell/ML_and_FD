@@ -2551,7 +2551,7 @@ ModelPredictions(x, y, 'RF', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], se
 # Model testing for SVMs
 
 ### SVMs
-DetermineParameters(x, y, Model = 'SVM')
+DetermineParameters(x, y, Model = 'SVM', lat = Lat1DnoSea, lon = Lon1DnoSea)
 
 # Other studies are fairly consistent in using the radial basis function kernel, but do not detail other parameters. Modified parameter for this run will be kernal functions.
 #   May come back to this and toy with other parameters
@@ -2575,7 +2575,7 @@ DetermineParameters(x, y, Model = 'SVM')
 ### NOTE, This is designed to run all the cores on the computer for the quickest performance. Then the computer CANNOT be used while this is running.
 
 
-CreateSLModel(x, y, 'SVM')
+CreateSLModel(x, y, 'SVM', lat = Lat1DnoSea, lon = Lon1DnoSea)
 
 # Create some climatologies and case studies using the RF predictions to further examine performance
 ModelPredictions(x, y, 'SVM', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], sesr['year'])
@@ -2587,7 +2587,7 @@ ModelPredictions(x, y, 'SVM', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], s
 # Model testing for traditional NNs    
 
 ### Nueral Networks
-DetermineParameters(x, y, Model = 'ANN')
+DetermineParameters(x, y, Model = 'ANN', lat = Lat1DnoSea, lon = Lon1DnoSea)
 
 # Other studies are fairly consistent in using the radial basis function kernel, but do not detail other parameters. Modified parameter for this run will be kernal functions.
 #   May come back to this and toy with other parameters
@@ -2612,7 +2612,7 @@ DetermineParameters(x, y, Model = 'ANN')
 ### NOTE, This is designed to run all the cores on the computer for the quickest performance. Then the computer CANNOT be used while this is running.
 
 
-CreateSLModel(x, y, 'ANN')
+CreateSLModel(x, y, 'ANN', lat = Lat1DnoSea, lon = Lon1DnoSea)
 
 # Create some climatologies and case studies using the RF predictions to further examine performance
 ModelPredictions(x, y, 'ANN', sesr['lat'], sesr['lon'], Mask1D, sesr['month'], sesr['year'])
