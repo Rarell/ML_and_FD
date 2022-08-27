@@ -20,7 +20,6 @@ TODO:
 - Add other reanalysis model descriptions to compress_raw_data() and load_mask()
 - Update test_map() to also display the world
 - Update soil moisture calculations to include arbitrary layers between 0 and 40 cm
-- Test reworked code
 """
 
 #%%
@@ -71,7 +70,7 @@ FunctionNames = ['os', 'sys', 'np', 'plt', 'mcolors', 'ccrs', 'cfeature', 'ctick
 ##############################################
 # Create a function to import the nc files
 
-def load_raw_nc(SName, filename, sm = False, model = 'narr', narr = False, path = './Data/Raw/'):
+def load_raw_nc(SName, filename, sm = False, model = 'narr', path = './Data/Raw/', meta_path = './Data/Raw/'):
     '''
     Load a raw, unprocessed .nc files.
     
@@ -83,7 +82,7 @@ def load_raw_nc(SName, filename, sm = False, model = 'narr', narr = False, path 
                needs to be loaded).
     :param model: String of the model name the dataset comes from.
     :param path: The path from the current directory to the directory the .nc file is in.
-    :param narr: Boolean indicating whether NARR data is being loaded (longitude values have to be corrected if so)
+    :param meta_path: The path to the metadata (lon and lat) of the raw data.
     
     Outputs:
     :param X: A dictionary containing all the data loaded from the .nc file. The 
@@ -97,13 +96,13 @@ def load_raw_nc(SName, filename, sm = False, model = 'narr', narr = False, path 
     DateFormat = '%Y-%m-%d %H:%M:%S'
     
     # Load lat and lon data
-    lat = load2D_nc('lat_%s.nc'%model, sname = 'lat', path = path)
-    lon = load2D_nc('lat_%s.nc'%model, sname = 'lon', path = path)
+    lat = load2D_nc('lat_%s.nc'%model, 'lat', path = meta_path)
+    lon = load2D_nc('lon_%s.nc'%model, 'lon', path = meta_path)
     
     with Dataset(path + filename, 'r') as nc:
         
         # Correct longitude so values?
-        if narr == True:
+        if model == 'narr':
             for n in range(len(lon[:,0])):
                 ind = np.where(lon[n,:] > 0)[0]
                 lon[n,ind] = -1*lon[n,ind]
@@ -188,7 +187,7 @@ def load_nc(SName, filename, sm = False, path = './Data/Processed_Data/'):
 ##############################################
 # Create a function to load 2D data
 
-def load2D_nc(filename, SName, path = './Data/'):
+def load2D_nc(filename, sname, path = './Data/'):
     '''
     This function loads 2 dimensional .nc files (e.g., the lat or lon files/
     only spatial files). Function is simple as these files only contain the raw data.
@@ -203,8 +202,8 @@ def load2D_nc(filename, SName, path = './Data/'):
     :param x: The main variable in the .nc file.
     '''
     
-    with Dataset(path + filename, 'r') as nc:
-        x = nc.variables[SName][:,:]
+    with Dataset('%s/%s'%(path, filename), 'r') as nc:
+        x = nc.variables[sname][:,:]
         
     return x
 
@@ -222,7 +221,7 @@ def load_mask(model):
     
     # Determine model specific variables
     if model == 'narr':
-        path = './Data/narr/'
+        path = './Data/narr'
         filename = 'land.nc'
         sname = 'land'
         
@@ -296,7 +295,7 @@ def write_nc(var, lat, lon, dates, filename = 'tmp.nc', sm = False, level = 'tmp
         # Create the date variable
         nc.createVariable('date', str, ('time', ))
         for n in range(len(dates)):
-            nc.variables['date'][n] = np.str(dates[n])
+            nc.variables['date'][n] = str(dates[n])
             
         # Create the main variable
         nc.createVariable(VarSName, var.dtype, ('time', 'x', 'y'))
@@ -515,6 +514,8 @@ def pentad_compression(X, summation = False):
             X_pentad[t,:,:] = np.nanmean(X[n:n+5,:,:], axis = 0)
             
         n = n + 5
+        
+    return X_pentad
 
 #%%
 ##############################################
@@ -533,7 +534,7 @@ def test_map(data, lat, lon, dates, data_name):
     '''
     
     # Pick a random date to plot
-    rand_int = np.random.randint(dates.size, size = 1)
+    rand_int = np.random.randint(dates.size)
     
     # Lonitude and latitude tick information
     lat_int = 15
@@ -549,7 +550,11 @@ def test_map(data, lat, lon, dates, data_name):
 
     # Colorbar information
     #### NOTE: Might need to adjust cmin, cmax, and cint for other variables
-    cmin = -0.5; cmax = 0.5; cint = 0.05
+    if (np.ceil(np.nanmin(data[rand_int,:,:])) == 1) & (np.floor(np.nanmax(data[rand_int,:,:])) == 0): # Special case if the variable varies from 0 to 1
+        cmin = np.round(np.nanmin(data[rand_int,:,:]), 2); cmax = np.round(np.nanmax(data[rand_int,:,:]), 2); cint = (cmax - cmin)/100
+    else:
+        cmin = np.ceil(np.nanmin(data[rand_int,:,:])); cmax = np.floor(np.nanmax(data[rand_int,:,:])); cint = (cmax - cmin)/100
+    
     clevs = np.arange(cmin, cmax+cint, cint)
     nlevs = len(clevs) - 1
     cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
@@ -580,8 +585,8 @@ def test_map(data, lat, lon, dates, data_name):
                      transform = data_proj, extend = 'both', zorder = 1)
 
     # Add a colorbar
-    cbax = fig.add_axes([0.92, 0.325, 0.02, 0.35])
-    cbar = fig.colorbar(cs, cax = cbax)
+    cbax = fig.add_axes([0.125, 0.35, 0.80, 0.02])
+    cbar = fig.colorbar(cs, cax = cbax, orientation = 'horizontal')
 
     ax.set_extent([np.nanmin(lon), np.nanmax(lon), np.nanmin(lat), np.nanmax(lat)], 
                     crs = fig_proj)
@@ -629,7 +634,7 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
     # Determine information specific to the variable
     print('Collecting variable specific information')
     
-    if data_name == 'tempature':
+    if data_name == 'temperature':
         input_path = '%s/%s/%s/'%(path, 'Raw', 'Temperature_2m')
         output_path = '%s/%s/'%(path, 'Processed_Data')
         output_filename = '%s.%s.pentad.nc'%(data_name, model)
@@ -763,7 +768,9 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
         summation = False
     
     else:
-        pass
+        # Variable is known and not in one of the examined variables
+        print('%s is not one of the variables examined for this experiment'%data_name)
+        return
     
     
     # Check if output processed file already exists
@@ -777,14 +784,14 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
     print('Constructing filenames')
     filenames = []
     if model == 'narr':
-        for year in years:
+        for year in np.unique(years):
             if sm == True:
                 # Soil moisture datafiles are monthly in the NARR
                 for month in np.unique(months):
                     if month < 10:
                         mon_str = '0%s'%(month)
                     else:
-                        mon_str = '%s'(month)
+                        mon_str = '%s'%(month)
                         
                     fn = '%s.%s%s.nc'%(fname_base, year, mon_str)
                     filenames.append(fn)
@@ -831,32 +838,34 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
        
     
     # Load a sample file to get dimesions
-    examp = load_raw_nc(SName = 'soill', filename = 'soill.197901.nc', sm = True, path = './Data/%s/Raw/Liquid_VSM/'%model)
+    examp = load_raw_nc(SName = 'soill', filename = 'soill.197901.nc', sm = True, path = './Data/%s/Raw/Liquid_VSM/'%model, meta_path = path)
     T, l, I, J = examp['soill'].shape
     T = dates.size
 
     # Initialize the combined data
     raw_data = np.ones((T, I, J)) * np.nan
 
-
+    print(T)
     # Load all the data for the chosen variable and reduce it to the daily timescale.
     print('Loading raw data')
     t = 0
     for fn in filenames:
         
         # Load the raw data
-        x = load_raw_nc(SName = raw_sname, filename = fn, sm = sm, path = input_path)
+        x_raw = load_raw_nc(SName = raw_sname, filename = fn, sm = sm, model = model, path = input_path, meta_path = path)
             
         # Determine whether soil moisture at a specific depth or all depths are desired
-        if fnmatch(data_name, 'soilmoist?0'):
-            x = x[str(raw_sname)][:,depth,:,:], summation = summation
-            
+        if fnmatch(data_name, 'soil_moisture?0'):
+            x = x_raw[str(raw_sname)][:,depth,:,:]
+        elif fnmatch(data_name, 'soil_moisture'):
+            x = np.nanmean(x_raw[str(raw_sname)][:,depth,:,:], axis = 1)
         else:
-            x = np.nanmean(x[str(raw_sname)][:,depth,:,:], axis = 1)
+            x = x_raw[str(raw_sname)][:,:,:]
             
         daily_x = daily_compression(x, summation = summation, N_per_day = N_per_day)
 
         var_T = daily_x.shape[0]
+        print(fn)
         raw_data[t:t+var_T,:,:] = daily_x[:,:,:]
         
         t = t + var_T
@@ -881,13 +890,13 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
     # Subset the data?
     if subset == True:
         print('Subsetting data')
-        data_processed, lat, lon = subset_data(data_pentad, x['lat'], x['lon'], 
+        data_processed, lat, lon = subset_data(data_pentad, x_raw['lat'], x_raw['lon'], 
                                                        LatMin = LatMin, LatMax = LatMax, 
                                                        LonMin = LonMin, LonMax = LonMax)
         
     else:
         data_processed = data_pentad
-        lat = x['lat']; lon = x['lon']
+        lat = x_raw['lat']; lon = x_raw['lon']
 
 
     # Write the data to a file.
@@ -898,11 +907,11 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
     
     # Plot the data?
     if plot:
-        test_map(data_processed, lat, lon, dates, data_name)
+        test_map(data_processed, lat, lon, dates[::5], data_name)
     
     
     # Since some of these files are large, remove them from the namespace to ensure conserve memory
-    del examp, x, raw_data, daily_x, data_pentad, data_processed
+    del examp, x_raw, x, raw_data, daily_x, data_pentad, data_processed
     gc.collect() # Clears deleted variables from memory 
 
 
@@ -941,7 +950,7 @@ def parse_data(data, dates, path, fname, years = None, months = None, days = Non
     data_stacked = np.stack(data, axis = 0)
     Nf, T, I, J = data_stacked.shape
     
-    data_stacked = data_stacked(Nf, T, I*J, order = 'F')
+    data_stacked = data_stacked.reshape(Nf, T, I*J, order = 'F')
     
     Nyears = np.unique(years)
     
@@ -955,7 +964,7 @@ def parse_data(data, dates, path, fname, years = None, months = None, days = Non
     data_parsed = np.stack(data_parsed, axis = -1)
     
     # Write the data
-    with open("%s\%s"%(path, fname), "wb") as fp:
+    with open("%s/%s"%(path, fname), "wb") as fp:
         pickle.dump(data_parsed, fp)
     
     
@@ -1018,8 +1027,8 @@ if __name__ == '__main__':
     dataset_dir = '%s/%s'%(args.dataset, args.model)
     
     # Turn the start and end dates into datetimes
-    start_date = datetime.strptime(args.start_date, format = '%Y-%m-%d')
-    end_date = datetime.strptime(args.end_date, format = '%Y-%m-%d')
+    start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
+    end_date = datetime.strptime(args.end_date, '%Y-%m-%d')
     
     # Process each of the variables specified, if they have not been done
     for var, fbase, sname in zip(args.variables, args.fname_bases, args.snames):
@@ -1040,10 +1049,6 @@ if __name__ == '__main__':
             print("File %s already exists"%feature_fname)
         
         else:
-            # Construct dates
-            date_gen = date_range(start_date, end_date)
-            dates = np.asarray([date for date in date_gen])
-            
             # Load the data that will make up the input data
             temp = load_nc('temp', 'temperature.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
             evap = load_nc('evap', 'evaporation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
@@ -1052,7 +1057,7 @@ if __name__ == '__main__':
             soilm = load_nc('soilm', 'soil_moisture.0-40cm.%s.pentad.nc'%args.model, sm = True, path = '%s/Processed_Data/'%dataset_dir)
             
             # Parse and save the input data into a pickle file
-            parse_data([temp['temp'], evap['evap'], pevap['pevap'], precip['precip'], soilm['soilm']], dates, dataset_dir, feature_fname)
+            parse_data([temp['temp'], evap['evap'], pevap['pevap'], precip['precip'], soilm['soilm']], temp['ymd'], dataset_dir, feature_fname)
         
     
     
