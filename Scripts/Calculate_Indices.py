@@ -31,12 +31,17 @@ Full citations for the referenced papers can be found at:
 - Vicente-Serrano et al. 2010 (for SPEI): https://doi.org/10.1175/2009JCLI2909.1
 - Anderson et al. 2013 (for ESI): https://doi.org/10.1175/2010JCLI3812.1
 
+Notes:
+- Note EDDI and SEDI do not use the 1990 - 2020 climatology period, but the entire dataset
+    - EDDI ranks the data and does not normalize anything by a climate period at any point, but uses the entire dataset
+    - SEDI exhibited a strange behavior; if the 1990 - 2020 climatology is used to calculate the mean and std, then SEDI becomes a uniform distribution
+
 
 TODO:
 - Make the climatologies focus on 1990 - 2020 (EDDI)
 - Modify map creation functions to include the whole world
 - Update soil moisture calculations to include arbitrary layers between 0 and 40 cm
-- Test reworked code
+- Investigate EDDI further. The histogram for it is quite odd.
 """
 
 
@@ -85,7 +90,10 @@ def collect_climatology(X, dates, start_year, end_year):
     # Determine all the points between the start and end points
     ind = np.where( (dates >= begin_date) & (dates <= end_date) )[0]
     
-    X_climo = X[ind,:,:]
+    if len(X.shape) < 3:
+        X_climo = X[ind]
+    else:
+        X_climo = X[ind,:,:]
     
     return X_climo
 
@@ -154,15 +162,37 @@ def calculate_climatology(X, pentad = True):
         ind = np.where(i == day)[0]
         
         if len(X.shape) < 3:
-            clim_mean[i-1] = np.nanmean(X[ind], axis = -1)
-            clim_std[i-1]  = np.nanstd(X[ind], axis = -1)
+            clim_mean[i-1] = np.nanmean(X[ind], axis = 0)
+            clim_std[i-1]  = np.nanstd(X[ind], axis = 0)
         else:
-            clim_mean[i-1,:,:] = np.nanmean(X[ind,:,:], axis = -1)
-            clim_std[i-1,:,:]  = np.nanstd(X[ind,:,:], axis = -1)
+            clim_mean[i-1,:,:] = np.nanmean(X[ind,:,:], axis = 0)
+            clim_std[i-1,:,:]  = np.nanstd(X[ind,:,:], axis = 0)
     
     return clim_mean, clim_std
 
+#%%
+##############################################
 
+# Function to remove sea data points
+def apply_mask(data, mask):
+    '''
+    Turn sea points into NaNs based on a land-sea mask where 0 is sea and 1 is land
+    
+    Inputs:
+    :param data: Data to be masked
+    :param mask: Land-sea mask. Must have the same spatial dimensions as data
+    
+    Outputs:
+    :param data_mask: Data with all labeled sea grids at NaN
+    '''
+    
+    T, I, J = data.shape
+    
+    data_mask = np.ones((T, I, J)) * np.nan
+    for t in range(T):
+        data_mask[t,:,:] = np.where(mask == 1, data[t,:,:], np.nan)
+        
+    return data_mask
 
 #%%
 ##############################################
@@ -230,8 +260,13 @@ def calculate_sesr(et, pet, dates, mask, start_year = 1990, end_year = 2020, yea
             sesr[t,:,:] = (esr[t,:,:] - esr_mean[n,:,:])/esr_std[n,:,:]
             
 
+    # Remove any unrealistic points
+    sesr = np.where(sesr < -5, -5, sesr)
+    sesr = np.where(sesr > 5, 5, sesr)
+    
     # Remove any sea data points
-    sesr[mask[:,:] == 0] = np.nan
+    sesr = apply_mask(sesr, mask)
+    # sesr[mask[:,:] == 0] = np.nan
     
     return sesr
 
@@ -280,7 +315,10 @@ def calculate_sedi(et, pet, dates, mask, start_year = 1990, end_year = 2020, yea
     ed_climo = collect_climatology(ed, dates, start_year = start_year, end_year = end_year)
 
     # Determine the climatological mean and standard deviations of ED
-    ed_mean, ed_std = calculate_climatology(ed_climo, pentad = True)
+    ed_mean, ed_std = calculate_climatology(ed, pentad = True)
+    
+    print(np.nanmax(ed_mean), np.nanmin(ed_mean), np.nanmean(ed_mean))
+    print(np.nanmax(ed_std), np.nanmin(ed_std), np.nanmean(ed_std))
 
     # Find the time stamps for a singular year
     ind = np.where(years == 1999)[0] # Note, any non-leap year will do
@@ -299,7 +337,10 @@ def calculate_sedi(et, pet, dates, mask, start_year = 1990, end_year = 2020, yea
             
 
     # Remove any sea data points
-    sedi[mask[:,:] == 0] = np.nan
+    sedi = apply_mask(sedi, mask)
+    # sedi[mask[:,:] == 0] = np.nan
+    
+    print(np.nanmax(sedi), np.nanmin(sedi), np.nanmean(sedi), np.nanstd(sedi))
     
     return sedi
 
@@ -311,14 +352,16 @@ def calculate_sedi(et, pet, dates, mask, start_year = 1990, end_year = 2020, yea
 # Details for SPEI can be found in the Vicente-Serrano et al. 2010 paper.
 # Details for SAPEI can be found in the Li et al. 2020b paper.
 
-def transform_pearson3(data, time, climo = None, years = None, months = None, days = None):
+def transform_pearson3(data, time, climo = None, start_year = 1990, end_year = 2020, years = None, months = None, days = None):
     '''
     Transform 3D gridded data in Pearson Type III distribution to a standard normal distribution.
     
     Inputs:
     :param data: Pearson Type III distributed data to be transformed
-    :param climo: Subset of data consisting of the data used to determine the parameters of Pearson Type III distribution. Default is data
     :param time: Vector of datetimes corresponding to the timestamp in each timestep in precip and pet
+    :param climo: Subset of data consisting of the data used to determine the parameters of Pearson Type III distribution. Default is data
+    :param start_year: The start year in the climatological period used
+    :param end_year: The last year in the climatological period used
     :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
     :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
     :param days: Array of intergers corresponding to the dates.day. If None, it is made from dates
@@ -330,7 +373,7 @@ def transform_pearson3(data, time, climo = None, years = None, months = None, da
     print('Initializing some values')
     
     # Climo dataset specified?
-    if climo == None:
+    if climo.all() == None:
         climo = data
 
     # Make the years, months, and/or days variables?
@@ -346,10 +389,9 @@ def transform_pearson3(data, time, climo = None, years = None, months = None, da
     
     # Initialize some needed variables.
     T, I, J = data.shape
-    T_climo = climo.shpae[0]
+    T_climo = climo.shape[0]
 
-    climo_index = np.array([int(n) if (data[n,0,0] == climo[n,0,0]) else -999 for n in np.arange(T)])
-    climo_index[climo_index == -999] = []
+    climo_index = np.where((years >= start_year) & (years <= end_year))[0]
     
     N = int(T/len(np.unique(years))) # Number of observations per year
     N_obs = int(T_climo/N) # Number of observations per time series; number of years in climo
@@ -375,7 +417,7 @@ def transform_pearson3(data, time, climo = None, years = None, months = None, da
         ind = np.where( (months[climo_index] == date.month) & (days[climo_index] == date.day) )[0]
 
         # Get the frequency estimator
-        frequencies[ind,:,:] = (stats.mstats.rankdata(D[ind,:,:], axis = 0) - 0.35)/N_obs
+        frequencies[ind,:,:] = (stats.mstats.rankdata(climo[ind,:,:], axis = 0) - 0.35)/N_obs
 
         # Get the moments
         PWM0[t,:,:] = np.nansum(((1 - frequencies[ind,:,:])**0)*climo[ind,:,:], axis = 0)/N_obs
@@ -398,7 +440,7 @@ def transform_pearson3(data, time, climo = None, years = None, months = None, da
         ind = np.where( (date.month == months) & (date.day == days) )[0]
 
         for t in ind:
-            F[t,:,:] = (1 + (alpha[n,:,:]/(D[t,:,:] - gamm[n,:,:]))**beta[n,:,:])**-1
+            F[t,:,:] = (1 + (alpha[n,:,:]/(data[t,:,:] - gamm[n,:,:]))**beta[n,:,:])**-1
 
     # Some variables are no longer needed. Remove them to conserve memory.
     del frequencies, PWM0, PWM1, PWM2, beta, alpha, gamm
@@ -472,10 +514,11 @@ def calculate_spei(precip, pet, dates, mask, start_year = 1990, end_year = 2020,
     D_climo = collect_climatology(D, dates, start_year = start_year, end_year = end_year)
     
     # Transform D from a Pearson Type III distribution to a standard normal distribution
-    spei = transform_pearson3(D, dates, climo = D_climo, years = years, months = months, days = days)
+    spei = transform_pearson3(D, dates, climo = D_climo, start_year = start_year, end_year = end_year, years = years, months = months, days = days)
     
     # Remove any sea data points
-    spei[mask[:,:] == 0] = np.nan
+    spei = apply_mask(spei, mask)
+    # spei[mask[:,:] == 0] = np.nan
     
     return spei
 
@@ -530,10 +573,11 @@ def calculate_sapei(precip, pet, dates, mask, start_year = 1990, end_year = 2020
     D_climo = collect_climatology(D, dates, start_year = start_year, end_year = end_year)
     
     # Transform D from a Pearson Type III distribution to a standard normal distribution
-    sapei = transform_pearson3(D, dates, climo = D_climo, years = years, months = months, days = days)
+    sapei = transform_pearson3(D, dates, climo = D_climo, start_year = start_year, end_year = end_year, years = years, months = months, days = days)
     
     # Remove any sea data points
-    sapei[mask[:,:] == 0] = np.nan
+    sapei = apply_mask(sapei, mask)
+    # sapei[mask[:,:] == 0] = np.nan
     
     return sapei
 
@@ -575,9 +619,13 @@ def calculate_eddi(pet, dates, mask, start_year = 1990, end_year = 2020, years =
     if days == None:
         days = np.array([date.day for date in dates])
     
+    climo_index = np.where((years >= start_year) & (years <= end_year))[0]
+    months_climo = np.array([date.month for date in dates[climo_index]])
+    days_climo = np.array([date.day for date in dates[climo_index]])
     
     # Initialize the set of probabilities of getting a certain PET.
     T, I, J = pet.shape
+    # T = len(climo_index)
 
     prob = np.ones((T, I, J)) * np.nan
     eddi = np.ones((T, I, J)) * np.nan
@@ -613,10 +661,14 @@ def calculate_eddi(pet, dates, mask, start_year = 1990, end_year = 2020, years =
     prob2d = prob.reshape(T, I*J, order = 'F')
     eddi2d = eddi.reshape(T, I*J, order = 'F')
 
+    # prob2d = 1 - prob2d
 
     # Calculate EDDI based on the inverse normal approximation given in Hobbins et al. 2016, Sec. 3a
     eddi_sign = 1
     for ij in range(I*J):
+        if (ij%1000) == 0:
+            print('%d/%d'%(int(ij/1000), int(I*J/1000)))
+        
         for t in range(T):
             if prob2d[t,ij] <= 0.5:
                 prob2d[t,ij] = prob2d[t,ij]
@@ -627,13 +679,22 @@ def calculate_eddi(pet, dates, mask, start_year = 1990, end_year = 2020, years =
                 
             W = np.sqrt(-2 * np.log(prob2d[t,ij]))
             
-            eddi2d[ij,t] = eddi_sign * (W - (C0 + C1 * W + C2 * (W**2))/(1 + d1 * W + d2 * (W**2) + d3 * (W**3)))
+            eddi2d[t,ij] = eddi_sign * (W - (C0 + C1 * W + C2 * (W**2))/(1 + d1 * W + d2 * (W**2) + d3 * (W**3)))
+        
+        # for date in one_year:
+        #     ind = np.where( (months == date.month) & (days == date.day) )[0]
+        #     eddi2d[ind,ij] = stats.norm.ppf(prob2d[ind,ij], loc = 0, scale = 1)
             
     # Reorder the data back to 3D
     eddi = eddi2d.reshape(T, I, J, order = 'F')
 
+    # eddi = transform_pearson3(pet, dates, climo = pet, start_year = start_year, end_year = end_year)
+
     # Remove any sea data points
-    eddi[mask[:,:] == 0] = np.nan
+    eddi = apply_mask(eddi, mask)
+    # eddi[mask[:,:] == 0] = np.nan
+    
+    # print(np.nanmin(eddi), np.nanmax(eddi), np.nanmean(eddi), np.nanstd(eddi))
     
     return eddi
 
@@ -676,9 +737,9 @@ def caculate_smi(vsm, dates, mask, start_year = 1990, end_year = 2020, years = N
         
     
     # Collect the individual vsm data
-    vsm0 = data[0]
-    vsm10 = data[1]
-    vsm40 = data[2]
+    vsm0 = vsm[0]
+    vsm10 = vsm[1]
+    vsm40 = vsm[2]
     
     # Initialize some other variables
     T, I, J = vsm0.shape
@@ -720,13 +781,15 @@ def caculate_smi(vsm, dates, mask, start_year = 1990, end_year = 2020, years = N
         smi40 = -5 + 10*(vsm40_2d[:,ij] - vsm40_wp)/(vsm40_fc - vsm40_wp)
         
         # Average these values together to get the full SMI
-        smi2d[:,ij] = np.nanmean(np.stack([smi0, smi10, smi40], axis = 2), axis = 2)
+        smi_tmp = np.stack([smi0, smi10, smi40], axis = 0)
+        smi2d[:,ij] = np.nanmean(smi_tmp, axis = 0)
         
     # Reshape data back to a 3D array.
     smi = smi2d.reshape(T, I, J, order = 'F')
 
     # Remove any sea data points
-    smi[mask[:,:] == 0] = np.nan
+    smi = apply_mask(smi, mask)
+    # smi[mask[:,:] == 0] = np.nan
     
     return smi
 
@@ -836,20 +899,31 @@ def calculate_sodi(precip, et, pet, vsm, ro, dates, mask, start_year = 1990, end
     # Next, perform the Box-Car transformation and standardize the data to create SODI, according to equations 5 and 6 in Sohrabi et al. 2015
     sodi = np.ones((T, I, J)) * np.nan
 
-    sodi2d = sodi.reshape(I*J, T, order = 'F')
-    D2d    = D.reshape(I*J, T, order = 'F')
+    sodi2d = sodi.reshape(T, I*J, order = 'F')
+    D2d    = D.reshape(T, I*J, order = 'F')
     
     
     for ij in range(I*J):
         
-        # From looking around at various features, it seems as if lambda2 in the Box-Car transformation is the minimum value of the data, so that all values are > 0.
+        # Estimate the lambda1 parameter for the climatological period
         if np.nanmin(D2d[climo_index,ij]) < 0: # Ensure the shift is positive
             lambda2 = -1 * np.nanmin(D2d[climo_index,ij])
+    
         else:
             lambda2 = np.nanmin(D2d[climo_index,ij])
+            
+        y, lambda1 = stats.boxcox(D2d[climo_index,ij] + lambda2 + 0.001)
+        
+        
+        # From looking around at various features, it seems as if lambda2 in the Box-Car transformation is the minimum value of the data, so that all values are > 0.
+        if np.nanmin(D2d[:,ij]) < 0: # Ensure the shift is positive
+            lambda2 = -1 * np.nanmin(D2d[:,ij])
+    
+        else:
+            lambda2 = np.nanmin(D2d[:,ij])
         
         # Perform the Box-Car transformation. Note boxcar only accepts a vector, so this has to be done for 1 grid point at a time
-        y, lambda1 = stats.boxcox(D2d[:,ij] + lambda2 + 0.001) # 0.001 should have a small impact on values, but ensure D + lambda2 is not 0 at any point
+        y = stats.boxcox(D2d[:,ij] + lambda2 + 0.001, lmbda = lambda1) # 0.001 should have a small impact on values, but ensure D + lambda2 is not 0 at any point
         
         # Collect the climatology
         y_climo = collect_climatology(y, dates, start_year = start_year, end_year = end_year)
@@ -864,12 +938,18 @@ def calculate_sodi(precip, et, pet, vsm, ro, dates, mask, start_year = 1990, end
             for t in ind:
                 sodi2d[t,ij] = (y[t] - y_mean[n])/y_std[n]
                 
-                
+    
     # Transform the data back into a 3D array
     sodi = sodi2d.reshape(T, I, J, order = 'F')
 
+    sodi = np.where(sodi > 5, 5, sodi)
+    sodi = np.where(sodi < -5, -5, sodi)
+
     # Remove any sea data points
-    sodi[mask[:,:] == 0] = np.nan
+    sodi = apply_mask(sodi, mask)
+    # sodi[mask[:,:] == 0] = np.nan
+    
+    return sodi
     
 
 #%%
@@ -927,16 +1007,18 @@ def calculate_fdii(vsm, dates, mask, start_year = 1990, end_year = 2020, years =
     sm_per2d = sm_percentile.reshape(T, I*J, order = 'F')
     
     # Get the climatology months
-    climo_index = np.where( (start_year >= years) & (end_year <= years) )[0]
+    climo_index = np.where( (years >= start_year) & (years <= end_year) )[0]
 
     # Determine soil moisture percentiles
-    for t in range(T):
-        ind = np.where( (days[t] == days[climo_index]) & (months[t] == months[climo_index]) )[0]
+    for ij in range(I*J):
+        for t in range(T):
+            ind = np.where( (days[t] == days[climo_index]) & (months[t] == months[climo_index]) )[0]
         
-        for ij in range(I*J):
             sm_per2d[t,ij] = stats.percentileofscore(sm2d[ind,ij], sm2d[t,ij])
     
     
+    print(np.nanmin(sm_per2d), np.nanmax(sm_per2d))
+    print(np.nanmean(sm_per2d))
     
     print('Calculating rapid intensification of flash drought')
     # Determine the rapid intensification based on percentile changes based on equation 1 in Otkin et al. 2021 (and detailed in section 2.2 of the same paper)
@@ -1009,16 +1091,20 @@ def calculate_fdii(vsm, dates, mask, start_year = 1990, end_year = 2020, years =
     
     print('Calculating FDII')
     # Reorder the data back into 3D data
-    fd_int  = fd_int2d.reshape(I, J, T, order = 'F')
-    dro_sev = dro_sev2d.reshape(I, J, T, order = 'F')
+    fd_int  = fd_int2d.reshape(T, I, J, order = 'F')
+    dro_sev = dro_sev2d.reshape(T, I, J, order = 'F')
     
     # Finally, FDII is the product of the components
     fdii = fd_int * dro_sev
     
     # Remove any sea data points
-    fd_int[mask[:,:] == 0] = np.nan
-    dro_sev[mask[:,:] == 0] = np.nan
-    fdii[mask[:,:] == 0] = np.nan
+    fd_int = apply_mask(fd_int, mask)
+    dro_sev = apply_mask(dro_sev, mask)
+    fdii = apply_mask(fdii, mask)
+    
+    # fd_int[mask[:,:] == 0] = np.nan
+    # dro_sev[mask[:,:] == 0] = np.nan
+    # fdii[mask[:,:] == 0] = np.nan
     
     print('Done')
     
@@ -1053,6 +1139,14 @@ def display_histogram(data, data_name, path = './Figures'):
     ax.set_xlabel(data_name, fontsize = 18)
     ax.set_ylabel('Frequency', fontsize = 18)
     
+    # Set the limits of -5 to 5 (for most indices)
+    if np.nanmin(data) == 0: # Exception for FDII, which can go from 0 to 70+
+        ax.set_xlim([0, np.ceil(np.nanmax(data))])
+    elif (data_name == 'smi') | (data_name == 'sedi'): 
+        ax.set_xlim([-10, 10])
+    else:
+        ax.set_xlim([-5, 5])
+    
     # Save this example
     plt.savefig('%s/%s_histogram_example.png'%(path,data_name))
 
@@ -1074,6 +1168,16 @@ def display_maximum_map(data, lat, lon, dates, examine_start, examine_end, data_
     :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
     :param days: Array of intergers corresponding to the dates.day. If None, it is made from dates
     '''
+    
+    # Make the years, months, and/or days variables?
+    if years == None:
+        years = np.array([date.year for date in dates])
+        
+    if months == None:
+        months = np.array([date.month for date in dates])
+        
+    if days == None:
+        days = np.array([date.day for date in dates])
 
     # Determine the period to examine
     ind = np.where( (years == examine_start.year) & (months >= examine_start.month) & (months <= examine_end.month) )[0]
@@ -1094,7 +1198,11 @@ def display_maximum_map(data, lat, lon, dates, examine_start, examine_end, data_
     fig_proj  = ccrs.PlateCarree()
     
     # Colorbar information
-    cmin = 0; cmax = 60; cint = 1.0
+    if (np.ceil(np.nanmin(data[ind,:,:])) == 1) & (np.floor(np.nanmax(data[ind,:,:])) == 0): # Special case if the variable varies from 0 to 1
+        cmin = np.round(np.nanmin(data[ind,:,:]), 2); cmax = np.round(np.nanmax(data[ind,:,:]), 2); cint = (cmax - cmin)/100
+    else:
+        cmin = np.ceil(np.nanmin(data[ind,:,:])); cmax = np.floor(np.nanmax(data[ind,:,:])); cint = (cmax - cmin)/100
+        
     clevs = np.arange(cmin, cmax+cint, cint)
     nlevs = len(clevs) - 1
     cmap  = plt.get_cmap(name = 'gist_rainbow_r', lut = nlevs)
@@ -1128,7 +1236,7 @@ def display_maximum_map(data, lat, lon, dates, examine_start, examine_end, data_
     ax.yaxis.tick_left()
     
     # Plot the data
-    cs = ax.contourf(lon, lat, np.nanmax(data[ind,:,:], axis = -1), levels = clevs, cmap = cmap,
+    cs = ax.contourf(lon, lat, np.nanmax(data[ind,:,:], axis = 0), levels = clevs, cmap = cmap,
                      transform = data_proj, extend = 'both', zorder = 1)
     
     # Create and set the colorbar
