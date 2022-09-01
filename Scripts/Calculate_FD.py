@@ -645,10 +645,6 @@ def liu_fd(vsm, mask, dates, start_year = 1990, end_year = 2020, years = None, m
             sm_percentiles2d[t,ij] = stats.percentileofscore(sm2d[ind,ij], sm2d[t,ij])
         
         
-    print(np.nanmin(sm_percentiles2d), np.nanmax(sm_percentiles2d), np.nanmean(sm_percentiles2d))
-    print(np.sum(np.isnan(sm_percentiles2d)))
-    print(np.nansum(sm_percentiles2d <= 40))
-        
     # Begin drought identification process
     print('Identifying flash droughts')
     fd = np.ones((T, I, J)) * np.nan
@@ -659,8 +655,6 @@ def liu_fd(vsm, mask, dates, start_year = 1990, end_year = 2020, years = None, m
     fut_pentads = np.arange(0, 13)
     fp = len(fut_pentads)
 
-    print(mask2d.size)
-    print(np.nansum(mask2d != 0))
     
     for ij in range(I*J):
         if (ij%1000) == 0:
@@ -737,10 +731,7 @@ def liu_fd(vsm, mask, dates, start_year = 1990, end_year = 2020, years = None, m
             #     continue
     
     
-    fd = fd2d.reshape(T, I, J, order = 'F')
-    
-    print(np.nansum(fd == 0))
-    print(np.nanmin(fd), np.nanmax(fd), np.nanmean(fd))
+    fd = fd2d.reshape(T, I, J, order = 'F')    
     
     print('Done')
     
