@@ -62,7 +62,7 @@ from Calculate_Indices import *
 ##############################################
 
 # Create a function to make climatology maps for FD
-def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', path = './Figures', years = None, months = None):
+def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', path = './Figures', grow_season = False, years = None, months = None):
     '''
     Display the climatology of flash drought (percentage of years with flash drought)
     
@@ -74,6 +74,7 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', path = '
     :param method: String describing the method used to calculate the flash drought
     :param model: String describing what reanalysis model the data comes from. Used to name the figure
     :param path: Path the figure will be saved to
+    :param grow_season: Boolean indicating whether fd has already been set into growing seasons.
     :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
     :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
     '''
@@ -96,7 +97,10 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', path = '
     
     # Calculate the average number of rapid intensifications and flash droughts in a year
     for y in range(all_years.size):
-        y_ind = np.where( (all_years[y] == years) & ((months >= 4) & (months <= 10)) )[0] # Second set of conditions ensures only growing season values
+        if grow_season:
+            y_ind = np.where( (all_years[y] == years) )[0]
+        else:
+            y_ind = np.where( (all_years[y] == years) & ((months >= 4) & (months <= 10)) )[0] # Second set of conditions ensures only growing season values
         
         # Calculate the mean number of flash drought for each year    
         ann_fd[y,:,:] = np.nanmean(fd[y_ind,:,:], axis = 0)
@@ -808,6 +812,7 @@ def otkin_fd(fdii):
     
     # Turn values > 0 to 1
     fd[fd > 0] = 1
+    fd[fd <= 0] = 0
     print('Done')
     
     return fd
@@ -1123,6 +1128,12 @@ if __name__ == '__main__':
         liu_fd = load_nc('fd', 'liu.%s.pentad.nc'%args.model, path = '%s/FD_Data/'%dataset_dir)
         # li_fd = load_nc('fd', 'li.%s.pentad.nc'%args.model, path = '%s/FD_Data/'%dataset_dir)
         ot_fd = load_nc('fd', 'otkin.%s.pentad.nc'%args.model, path = '%s/FD_Data/'%dataset_dir)
+        
+        print(np.nanmin(ch_fd['fd']), np.nanmax(ch_fd['fd']))
+        print(np.nanmin(nog_fd['fd']), np.nanmax(nog_fd['fd']))
+        print(np.nanmin(pen_fd['fd']), np.nanmax(pen_fd['fd']))
+        print(np.nanmin(liu_fd['fd']), np.nanmax(liu_fd['fd']))
+        print(np.nanmin(ot_fd['fd']), np.nanmax(ot_fd['fd']))
         
         # Parse and save the label data into a pickle file
         parse_data([ch_fd['fd'], nog_fd['fd'], pen_fd['fd'], liu_fd['fd'], ot_fd['fd']], dates, dataset_dir, label_fname)

@@ -221,7 +221,7 @@ def load_mask(model):
     
     # Determine model specific variables
     if model == 'narr':
-        path = './Data/narr'
+        path = '../Data/narr'
         filename = 'land.nc'
         sname = 'land'
         
@@ -1056,8 +1056,30 @@ if __name__ == '__main__':
             precip = load_nc('precip', 'precipitation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
             soilm = load_nc('soilm', 'soil_moisture.0-40cm.%s.pentad.nc'%args.model, sm = True, path = '%s/Processed_Data/'%dataset_dir)
             
+            # Initialize the change in ET/PET/SM variables
+            T, I, J = evap['evap'].shape
+            
+            del_et = np.ones((T, I, J)) * np.nan
+            del_pet = np.ones((T, I, J)) * np.nan
+            del_sm = np.ones((T, I, J)) * np.nan
+            
+            # Perform a running mean of 1 month (6 pentads) long so the changes simulate something like a 1 month change
+            runmean = 6
+            
+            for i in range(I):
+                for j in range(J):
+                    et_mean = np.convolve(evap['evap'][:,i,j], np.ones((runmean,))/runmean)[(runmean-1):]
+                    pet_mean = np.convolve(pevap['pevap'][:,i,j], np.ones((runmean,))/runmean)[(runmean-1):]
+                    sm_mean = np.convolve(soilm['soilm'][:,i,j], np.ones((runmean,))/runmean)[(runmean-1):]
+
+                    # Calculate the change
+                    del_et[:-1,i,j] = et_mean[1:] - et_mean[:-1]
+                    del_pet[:-1,i,j] = pet_mean[1:] - pet_mean[:-1]
+                    del_sm[:-1,i,j] = sm_mean[1:] - sm_mean[:-1]
+            
             # Parse and save the input data into a pickle file
-            parse_data([temp['temp'], evap['evap'], pevap['pevap'], precip['precip'], soilm['soilm']], temp['ymd'], dataset_dir, feature_fname)
+            parse_data([temp['temp'], evap['evap'], del_et, pevap['pevap'], del_pet, precip['precip'], soilm['soilm'], del_sm], 
+                       temp['ymd'], dataset_dir, feature_fname)
         
     
     

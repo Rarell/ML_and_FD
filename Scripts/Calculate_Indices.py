@@ -1097,6 +1097,11 @@ def calculate_fdii(vsm, dates, mask, start_year = 1990, end_year = 2020, years =
     # Finally, FDII is the product of the components
     fdii = fd_int * dro_sev
     
+    # Remove values less than 0
+    fd_int[fd_int <= 0] = 0
+    dro_sev[dro_sev <= 0] = 0
+    fdii[fdii <= 0] = 0
+    
     # Remove any sea data points
     fd_int = apply_mask(fd_int, mask)
     dro_sev = apply_mask(dro_sev, mask)
