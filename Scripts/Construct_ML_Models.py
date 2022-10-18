@@ -81,6 +81,9 @@ def build_sklearn_model(args):
         
     elif (args.ml_model.lower() == 'svm') | (args.ml_model.lower() == 'support_vector_machine'):
         model = build_svm_model(args)
+        
+    elif (args.ml_model.lower() == 'ada') | (args.ml_model.lower() == 'boosting') | (args.ml_model.lower() == 'ada_boosting'):
+        model = build_adaboost_model(args)
     
     return model
 
@@ -445,8 +448,8 @@ def build_adaboost_model(args):
                                        class_weight = weights)
     
     # Build the model
-    model = ensemble.AdaBoost(base_estimator = base,
-                              n_estimators = args.ada_n_estimators,
-                              learning_rate = args.ada_learning_rate)
+    model = ensemble.AdaBoostClassifier(base_estimator = base,
+                                        n_estimators = args.ada_n_estimators,
+                                        learning_rate = args.ada_learning_rate)
     
     return model
