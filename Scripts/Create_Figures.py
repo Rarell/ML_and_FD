@@ -617,7 +617,8 @@ def display_case_study_maps(data, lon, lat, time, year_list, method, label, data
 # Function to calculate the threat score
 def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label = 'christian', globe = False, path = './Figures/'):
     '''
-    Calculate and display the threatscore and equitable threat score in time
+    Calculate and display the threatscore and equitable threat score in space and in time. Note the threat score is also called the 
+    critical success index (CSI).
     
     Inputs:
     :param true: 3D array of true values
@@ -897,3 +898,372 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     filename = 'equitable_threat_score_%s_map.png'%(label)
     plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
     plt.show(block = False)
+    
+    
+# Function to calculate the threat score
+def display_far(true, pred, lat, lon, time, model = 'narr', label = 'christian', globe = False, path = './Figures/'):
+    '''
+    Calculate and display the false alarm ratio (FAR) in space and in time
+    
+    Inputs:
+    :param true: 3D array of true values
+    :param pred: 3D array of predicted values
+    :param lat: Gridded latitude values corresponding to true/pred
+    :param lon: Gridded longitude values corresponding to true/pred
+    :param time: The datetimes corresponding to each entry in true/pred
+    :param model: The name of the reanalysis model the data is based on
+    :param label: A label used to distinguish the experiment
+    :param globe: Boolean indicating whether the maps are of the globe (true) or CONUS (false)
+    :param path: Path from the current directory to the directory the maps will be saved to
+    '''
+    
+    
+    # Determine the hits, misses, and false alarms
+    hits = np.where((true == 1) & (pred == 1), 1, 0)
+    misses = np.where((true == 1) & (pred == 0), 1, 0)
+    false_alarms = np.where((true == 0) & (pred == 1), 1, 0)
+    
+    # Initialize variables
+    T, I, J = true.shape
+    
+    far_s = np.ones((T)) * np.nan
+    
+    far_t = np.ones((I, J)) * np.nan
+    
+    # Calculate the spatial number of hits/misses/false alarms in space
+    hits_s = np.nansum(hits, axis = -1)
+    hits_s = np.nansum(hits_s, axis = -1)
+
+    misses_s = np.nansum(misses, axis = -1)
+    misses_s = np.nansum(misses_s, axis = -1)
+
+    false_alarms_s = np.nansum(false_alarms, axis = -1)
+    false_alarms_s = np.nansum(false_alarms_s, axis = -1)
+
+    # Calculate the FAR score in space for each time stamp
+    ts_s = false_alarms_s/(hits_s + false_alarms_s)
+    
+    
+    # Determine the equitable threat score in time
+    hits_t = np.nansum(hits, axis = 0)
+    misses_t = np.nansum(misses, axis = 0)
+    false_alarms_t = np.nansum(false_alarms, axis = 0)
+    
+    # Calculate the FAR score in time for each grid point
+    far_t = false_alarms_t/(hits_t + false_alarms_t)
+        
+        
+    # Plot the FAR scores in time
+    fig, ax = plt.subplots(figsize = [12, 8])
+    
+    # Set the title
+    ax.set_title('Time Series of the FAR score for the %s'%(model), fontsize = 16)
+    
+    # Make the plots
+    ax.plot(time, far_s, 'r-', linewidth = 2, label = 'True values')
+
+    
+    # Set the labels
+    ax.set_ylabel('FAR', fontsize = 16)
+    ax.set_xlabel('Time', fontsize = 16)
+    
+    # Set the ticks
+    ax.xaxis.set_major_formatter(DateFormatter('%Y'))
+    
+    # Set the tick sizes
+    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+        i.set_size(16)
+        
+    # Save the figure
+    filename = 'far_%s_time_series.png'%(label)
+    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
+    plt.show(block = False)
+    
+    
+    # Plot the FAR scores in space
+    
+    # Set colorbar information
+    cmin = 0; cmax = 1; cint = 0.05
+    clevs = np.arange(cmin, cmax + cint, cint)
+    nlevs = len(clevs)
+    
+    cname = 'Reds'
+    cmap  = plt.get_cmap(name = cname, lut = nlevs)
+    
+    # Lonitude and latitude tick information
+    if np.invert(globe):
+        lat_int = 10
+        lon_int = 20
+    else:
+        lat_int = 30
+        lon_int = 60
+    
+    LatLabel = np.arange(-90, 90, lat_int)
+    LonLabel = np.arange(-180, 180, lon_int)
+    
+    LonFormatter = cticker.LongitudeFormatter()
+    LatFormatter = cticker.LatitudeFormatter()
+    
+    # Projection information
+    data_proj = ccrs.PlateCarree()
+    fig_proj  = ccrs.PlateCarree()
+    
+    # Collect shapefile information for the U.S. and other countries
+    # ShapeName = 'Admin_1_states_provinces_lakes_shp'
+    if np.invert(globe):
+        ShapeName = 'admin_0_countries'
+        CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+
+        CountriesReader = shpreader.Reader(CountriesSHP)
+
+        USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+        NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+        
+    # Create the plots
+    fig = plt.figure(figsize = [12, 10])
+
+
+    # Flash Drought plot
+    ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+    # Set the flash drought title
+    ax.set_title('FAR Score for %s'%model, size = 18)
+
+    # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+    ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    if np.invert(globe):
+        # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+        ax.add_feature(cfeature.STATES)
+        ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+        ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    else:
+        # Ocean covers and "masks" data outside the U.S.
+        ax.coastlines(edgecolor = 'black', zorder = 3)
+        ax.add_feature(cfeature.BORDERS, facecolor = 'none', edgecolor = 'black', zorder = 3)
+
+    # Adjust the ticks
+    ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
+    ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
+
+    ax.set_yticklabels(LatLabel, fontsize = 18)
+    ax.set_xticklabels(LonLabel, fontsize = 18)
+
+    ax.xaxis.set_major_formatter(LonFormatter)
+    ax.yaxis.set_major_formatter(LatFormatter)
+
+    # Plot the flash drought data
+    cs = ax.pcolormesh(lon, lat, far_t, vmin = cmin, vmax = cmax,
+                       cmap = cmap, transform = data_proj, zorder = 1)
+
+    # Set the map extent to the U.S.
+    if np.invert(globe):
+        ax.set_extent([-130, -65, 23.5, 48.5])
+    else:
+        ax.set_extent([-179, 179, -65, 80])
+
+
+    # Set the colorbar size and location
+    if np.invert(globe):
+        cbax = fig.add_axes([0.925, 0.30, 0.020, 0.40])
+    else:
+        cbax = fig.add_axes([0.925, 0.32, 0.020, 0.36])
+    cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
+    cbar.ax.set_ylabel('FAR', fontsize = 18)
+
+    # Set the colorbar ticks
+    for i in cbar.ax.yaxis.get_ticklabels():
+        i.set_size(18)
+        
+        
+    # Save the figure
+    filename = 'far_%s_map.png'%(label)
+    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
+    plt.show(block = False)
+    
+    
+    
+# Function to calculate the threat score
+def display_pod_score(true, pred, lat, lon, time, model = 'narr', label = 'christian', globe = False, path = './Figures/'):
+    '''
+    Calculate and display the probability of detection (POD) in space and in time
+    
+    Inputs:
+    :param true: 3D array of true values
+    :param pred: 3D array of predicted values
+    :param lat: Gridded latitude values corresponding to true/pred
+    :param lon: Gridded longitude values corresponding to true/pred
+    :param time: The datetimes corresponding to each entry in true/pred
+    :param model: The name of the reanalysis model the data is based on
+    :param label: A label used to distinguish the experiment
+    :param globe: Boolean indicating whether the maps are of the globe (true) or CONUS (false)
+    :param path: Path from the current directory to the directory the maps will be saved to
+    '''
+    
+    
+    # Determine the hits, misses, and false alarms
+    hits = np.where((true == 1) & (pred == 1), 1, 0)
+    misses = np.where((true == 1) & (pred == 0), 1, 0)
+    false_alarms = np.where((true == 0) & (pred == 1), 1, 0)
+    
+    # Initialize variables
+    T, I, J = true.shape
+    
+    pod_s = np.ones((T)) * np.nan
+    
+    pod_t = np.ones((I, J)) * np.nan
+    
+    
+    # Calculate the spatial number of hits/misses/false alarms in space
+    hits_s = np.nansum(hits, axis = -1)
+    hits_s = np.nansum(hits_s, axis = -1)
+
+    misses_s = np.nansum(misses, axis = -1)
+    misses_s = np.nansum(misses_s, axis = -1)
+
+    false_alarms_s = np.nansum(false_alarms, axis = -1)
+    false_alarms_s = np.nansum(false_alarms_s, axis = -1)
+
+    # Calculate the POD score in space for each time stamp
+    pod_s = hits_s/(hits_s + misses_s)
+    
+    
+    
+    # Determine the equitable threat score in time
+    hits_t = np.nansum(hits, axis = 0)
+    misses_t = np.nansum(misses, axis = 0)
+    false_alarms_t = np.nansum(false_alarms, axis = 0)
+    
+    # Calculate the POD score in time for each grid point
+    pod_t = hits_t/(hits_t + misses_t)
+        
+        
+    # Plot the POD scores in time
+    fig, ax = plt.subplots(figsize = [12, 8])
+    
+    # Set the title
+    ax.set_title('Time Series of the POD for the %s'%(model), fontsize = 16)
+    
+    # Make the plots
+    ax.plot(time, pod_s, 'r-', linewidth = 2, label = 'True values')
+
+    
+    # Set the labels
+    ax.set_ylabel('POD', fontsize = 16)
+    ax.set_xlabel('Time', fontsize = 16)
+    
+    # Set the ticks
+    ax.xaxis.set_major_formatter(DateFormatter('%Y'))
+    
+    # Set the tick sizes
+    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+        i.set_size(16)
+        
+    # Save the figure
+    filename = 'pod_%s_time_series.png'%(label)
+    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
+    plt.show(block = False)
+    
+    
+    
+    # Plot the POD scores in space
+    
+    # Set colorbar information
+    cmin = 0; cmax = 1; cint = 0.05
+    clevs = np.arange(cmin, cmax + cint, cint)
+    nlevs = len(clevs)
+    
+    cname = 'Reds'
+    cmap  = plt.get_cmap(name = cname, lut = nlevs)
+    
+    # Lonitude and latitude tick information
+    if np.invert(globe):
+        lat_int = 10
+        lon_int = 20
+    else:
+        lat_int = 30
+        lon_int = 60
+    
+    LatLabel = np.arange(-90, 90, lat_int)
+    LonLabel = np.arange(-180, 180, lon_int)
+    
+    LonFormatter = cticker.LongitudeFormatter()
+    LatFormatter = cticker.LatitudeFormatter()
+    
+    # Projection information
+    data_proj = ccrs.PlateCarree()
+    fig_proj  = ccrs.PlateCarree()
+    
+    # Collect shapefile information for the U.S. and other countries
+    # ShapeName = 'Admin_1_states_provinces_lakes_shp'
+    if np.invert(globe):
+        ShapeName = 'admin_0_countries'
+        CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+
+        CountriesReader = shpreader.Reader(CountriesSHP)
+
+        USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+        NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+        
+    # Create the plots
+    fig = plt.figure(figsize = [12, 10])
+
+
+    # Flash Drought plot
+    ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+    # Set the flash drought title
+    ax.set_title('POD for %s'%model, size = 18)
+
+    # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+    ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    if np.invert(globe):
+        # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+        ax.add_feature(cfeature.STATES)
+        ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+        ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    else:
+        # Ocean covers and "masks" data outside the U.S.
+        ax.coastlines(edgecolor = 'black', zorder = 3)
+        ax.add_feature(cfeature.BORDERS, facecolor = 'none', edgecolor = 'black', zorder = 3)
+
+    # Adjust the ticks
+    ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
+    ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
+
+    ax.set_yticklabels(LatLabel, fontsize = 18)
+    ax.set_xticklabels(LonLabel, fontsize = 18)
+
+    ax.xaxis.set_major_formatter(LonFormatter)
+    ax.yaxis.set_major_formatter(LatFormatter)
+
+    # Plot the flash drought data
+    cs = ax.pcolormesh(lon, lat, pod_t, vmin = cmin, vmax = cmax,
+                       cmap = cmap, transform = data_proj, zorder = 1)
+
+    # Set the map extent to the U.S.
+    if np.invert(globe):
+        ax.set_extent([-130, -65, 23.5, 48.5])
+    else:
+        ax.set_extent([-179, 179, -65, 80])
+
+
+    # Set the colorbar size and location
+    if np.invert(globe):
+        cbax = fig.add_axes([0.925, 0.30, 0.020, 0.40])
+    else:
+        cbax = fig.add_axes([0.925, 0.32, 0.020, 0.36])
+    cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
+    cbar.ax.set_ylabel('Threat Score', fontsize = 18)
+
+    # Set the colorbar ticks
+    for i in cbar.ax.yaxis.get_ticklabels():
+        i.set_size(18)
+        
+        
+    # Save the figure
+    filename = 'pod_%s_map.png'%(label)
+    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
+    plt.show(block = False)
+        
+        
+    

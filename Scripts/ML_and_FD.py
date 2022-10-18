@@ -146,7 +146,7 @@ def create_ml_parser():
     parser.add_argument('--remove_nans', action='store_true', help='Replace NaNs with 0s. Must be done for sklearn models')
     
     parser.add_argument('--learning_curve', action='store_true', help="Plot the models' average learning curve as part of the results")
-    parser.add_argument('--threat_score', action='store_true', help='Plot threat scores as part of results')
+    parser.add_argument('--confusion_matrix_plots', action='store_true', help='Make several skill score plots based on a confusion matrix as part of results')
     parser.add_argument('--time_series', action='store_true', help='Plot the ML predicted time series as part of the results')
     parser.add_argument('--climatology_plot', action='store_true', help='Plot the ML predicted climatology as part of the results')
     parser.add_argument('--case_studies', action='store_true', help='Plot a set of case study maps (predicted FD for certain years) as part of the results')
@@ -184,7 +184,7 @@ def create_ml_parser():
     parser.add_argument('--svm_kernel', type=str, default='linear', help='Kernel type used to solve the SVMs.')
     
     # Ada Boosted tree
-    parser.add_argument('--ada_n_estimators', type=float, default = 50, help='Number of estimators in the Ada Boosted trees.')
+    parser.add_argument('--ada_n_estimators', type=int, default = 50, help='Number of estimators in the Ada Boosted trees.')
     parser.add_argument('--ada_learning_rate', type=float, default=1e-2, help='Learning rate for Ada Boosted trees')
     
     return parser
@@ -1483,12 +1483,18 @@ if __name__ == '__main__':
 
 
             # Plot the threat scores?
-            if args.threat_score:
-                plot('Plotting threat scores for the %s method...'%method)
+            if args.confusion_matrix_plots:
+                plot('Plotting confusion matrix skill scores for the %s method...'%method)
                 mask = load_mask(model = args.ra_model)
 
                 display_threat_score(fd, pred, ch_fd['lat'], ch_fd['lon'], dates, mask, 
                                      model = args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
+                
+                display_far_score(fd, pred, ch_fd['lat'], ch_fd['lon'], dates, 
+                                  model =  args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
+                
+                display_pod_score(fd, pred, ch_fd['lat'], ch_fd['lon'], dates, 
+                                  model =  args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
 
 
             # Plot the predicted climatology map?
