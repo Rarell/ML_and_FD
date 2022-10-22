@@ -1,11 +1,12 @@
---label=rf_experiment
+--label=ada_experiment
 --remove_nans
---ml_model=rf
---class_weight=40
---n_trees=250
+--ml_model=ada
+--class_weight=160
 --tree_criterion=gini
 --tree_depth=15
 --tree_max_features=sqrt
+--ada_n_estimators=100
+--ada_learning_rate=1e-4
 --metrics
 accuracy
 precision
@@ -14,7 +15,6 @@ mse
 mae
 auc
 tss
---feature_importance
 --roc_curve
 --confusion_matrix_plots
 --climatology_plot

@@ -25,6 +25,8 @@ Created on Sat Oct  2 17:52:45 2021
 #   1.3.0 - 1/13/2022 - Modified the ModelPredictions function to encorporate multiple regions.
 #   2.0.1 - 9/05/2022 - Major modifications to the code structure and experiment design. Each growing season is now a fold, regions are based on 5 degree x 5 
 #                       degree sections. sklearn section has been tested and is working.
+#   2.0.2 - 10/22/2022 - Added more confusion table skill metrics. Finished adding standard ML approaches (includes RF, SVMs, and Ada boosted trees). Other
+#                        minor corrections. Added predictions with test datasets only.
 #
 # Inputs:
 #   - Data files for FD indices and identified FD (.nc format)
@@ -417,9 +419,14 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
             e_test = metrics.accuracy_score(test_out, test_pred)
 
         elif metric == 'auc':
-            train_pred = model.decision_function(train_in.T)
-            valid_pred = model.decision_function(valid_in.T)
-            test_pred = model.decision_function(test_in.T)
+            if (args.ml_model.lower() == 'rf') | (args.ml_model.lower() == 'random_forest'):
+                train_pred = model.predict_proba(train_in.T)[:,1] if (model.predict_proba(train_in.T).shape[1] > 1) else 0
+                valid_pred = model.predict_proba(valid_in.T)[:,1] if (model.predict_proba(valid_in.T).shape[1] > 1) else 0
+                test_pred = model.predict_proba(test_in.T)[:,1] if (model.predict_proba(test_in.T).shape[1] > 1) else 0
+            else:
+                train_pred = model.decision_function(train_in.T)
+                valid_pred = model.decision_function(valid_in.T)
+                test_pred = model.decision_function(test_in.T)
             
             e_train = np.nan if only_zeros else metrics.roc_auc_score(train_out, train_pred)
             e_valid = np.nan if (np.nansum(valid_out) == 0) | (np.nansum(valid_out) == valid_out.size) else metrics.roc_auc_score(valid_out, valid_pred)
@@ -485,9 +492,14 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
         
     # Collect information for the ROC curve
     if args.roc_curve:
-        train_pred = model.decision_function(train_in.T)
-        valid_pred = model.decision_function(valid_in.T)
-        test_pred = model.decision_function(test_in.T)
+        if (args.ml_model.lower() == 'rf') | (args.ml_model.lower() == 'random_forest'):
+            train_pred = model.predict_proba(train_in.T)[:,1] if (model.predict_proba(train_in.T).shape[1] > 1) else np.zeros(train_out.size)
+            valid_pred = model.predict_proba(valid_in.T)[:,1] if (model.predict_proba(valid_in.T).shape[1] > 1) else np.zeros(valid_out.size)
+            test_pred = model.predict_proba(test_in.T)[:,1] if (model.predict_proba(test_in.T).shape[1] > 1) else np.zeros(test_out.size)
+        else:
+            train_pred = model.decision_function(train_in.T)
+            valid_pred = model.decision_function(valid_in.T)
+            test_pred = model.decision_function(test_in.T)
         
         thresh = np.arange(0, 2, 1e-4)
         thresh = np.round(thresh, 4)
@@ -632,6 +644,9 @@ def execute_all_exp(args):
     
     # List of FD identification methods
     methods = ['christian', 'nogeura', 'pendergrass', 'liu', 'otkin']
+    
+    # Save the original class weight
+    weight = args.class_weight
     
     # Determine the directory of the data
     dataset_dir = '%s/%s'%(args.dataset, args.ra_model)
@@ -823,6 +838,13 @@ def execute_all_exp(args):
                                                    [lat_lab[n], lat_lab[n]+5], [lon_lab[n], lon_lab[n]+5])
                 model_fname = '%s/%s/%s/%s'%(dataset_dir, args.ml_model, method, model_fbase)
                 
+                # If the training data has too few FD, bagging can easly find some subsets that have no FD, resulting in a class weight error.
+                # Ignore the class weights for this scenario
+                if (100*np.where(train_out == 1)[0].size/train_out.size) < 0.05:
+                    args.class_weight = None
+                else:
+                    args.class_weight = weight
+                
                 # Perform the experiment
                 # The ML model is saved in this step
                 results = execute_single_exp(args, train_in, valid_in, test_in, 
@@ -967,7 +989,7 @@ def execute_all_exp(args):
 # Function to conduct an experiment for 1 rotation and 1 ML model and 1 FD method (for all regions)
 def execute_exp(args):
     '''
-    Run multiple ML experiments for all regions and all rotations
+    Run multiple ML experiments for all regions and for some rotations to test the code and tune hyperparameters
     
     Inputs:
     :param args: Argparse arguments
@@ -977,7 +999,14 @@ def execute_exp(args):
     '''
     
     # List of FD identification methods
-    methods = ['christian']
+    method = ['otkin']
+    
+    methods = np.asarray(['christian', 'nogeura', 'pendergrass', 'liu', 'otkin'])
+    
+    method_ind = np.where(methods == method[0])[0]
+    
+    # Save the original class weight
+    weight = args.class_weight
     
     # Determine the directory of the data
     dataset_dir = '%s/%s'%(args.dataset, args.ra_model)
@@ -1115,7 +1144,7 @@ def execute_exp(args):
     # Begin looping and performing an experiment over all regions
     for n, (region_in, region_out) in enumerate(zip(data_in_split, data_out_split)):
         if n%10 == 0:
-                print('Training a %s for the %dth region with the %s method...'%(args.ml_model, n+1, methods[0]))
+                print('Training a %s for the %dth region with the %s method...'%(args.ml_model, n+1, methods[method_ind][0]))
           
         # Find where the current latitude and longitude values are
         ind = np.where( ((lat1d >= lat_lab[n]) & (lat1d <= lat_lab[n]+5)) & ((lon1d >= lon_lab[n]) & (lon1d <= lon_lab[n]+5)) )[0]
@@ -1155,15 +1184,21 @@ def execute_exp(args):
                 continue
             
             # Generate the model filename
-            model_fbase = generate_model_fname(args.ra_model, args.label, methods[0], rot, [lat_lab[n], lat_lab[n]+5], [lon_lab[n], lon_lab[n]+5])
-            model_fname = '%s/%s/%s/%s'%(dataset_dir, args.ml_model, methods[0], model_fbase)
+            model_fbase = generate_model_fname(args.ra_model, args.label, methods[method_ind][0], rot, [lat_lab[n], lat_lab[n]+5], [lon_lab[n], lon_lab[n]+5])
+            model_fname = '%s/%s/%s/%s'%(dataset_dir, args.ml_model, methods[method_ind][0], model_fbase)
             # print(model_fname)
             
+            # If the training data has too few FD, bagging can easly find some subsets that have no FD, resulting in a class weight error.
+            # Ignore the class weights for this scenario
+            if (100*np.where(train_out == 1)[0].size/train_out.size) < 0.05:
+                args.class_weight = None
+            else:
+                args.class_weight = weight
             
             # Perform the experiment
             # The ML model is saved in this step
             results = execute_single_exp(args, train_in, valid_in, test_in, 
-                                         train_out[0,:,:], valid_out[0,:,:], test_out[0,:,:], model_fname)
+                                         train_out[method_ind,:,:], valid_out[method_ind,:,:], test_out[method_ind,:,:], model_fname)
             
             # Collect the results for the rotation
             ptrain.append(results['train_predict'])
@@ -1196,7 +1231,7 @@ def execute_exp(args):
             
         # At the end of the experiments for each rotation, stack the reults into a single array (per variable) and average along the rotation axis
         if n%10 == 0:
-                print('Evaluating the %s for the %dth region with the %s method...'%(args.ml_model, n+1, methods[0]))
+                print('Evaluating the %s for the %dth region with the %s method...'%(args.ml_model, n+1, methods[method_ind][0]))
           
         pred_train[:,ind] = np.nanmean(np.stack(ptrain, axis = -1), axis = -1)
         pred_valid[:,ind] = np.nanmean(np.stack(pvalid, axis = -1), axis = -1)
@@ -1237,9 +1272,9 @@ def execute_exp(args):
             learn_curves_var[:,ind] = np.nanstd(np.stack(lc, axis = -1), axis = -1)
         
     # At the end of the experiments for each region, collect the results and save the results
-    print('Saving the results of %s for the %s method...'%(args.ml_model, methods[0]))
+    print('Saving the results of %s for the %s method...'%(args.ml_model, methods[method_ind][0]))
           
-    results_fbase = generate_results_fname(args.ra_model, args.label, methods[0], args.keras)
+    results_fbase = generate_results_fname(args.ra_model, args.label, methods[method_ind][0], args.keras)
     results_fname = '%s/%s'%(dataset_dir, results_fbase)
     print(results_fname)
     
@@ -1406,7 +1441,7 @@ if __name__ == '__main__':
         
     # Plot the feature importance?
     if args.feature_importance:
-        features = ['T', 'ET', r'\Delta ET', 'PET', r'\Delta PET', 'P', 'SM', r'\Delta SM']
+        features = [r'T', r'ET', r'$\Delta$ET', r'PET', r'$\Delta$PET', r'P', r'SM', r'$\Delta$SM']
         I, J, NFeature = results[0]['feature_importance'].shape
         
         # Plot a map of feature importance for each features
@@ -1443,7 +1478,7 @@ if __name__ == '__main__':
     gc.collect() # Clears deleted variables from memory 
 
     # Make predictions?
-    if args.climatology_plot | args.time_series | args.case_studies | args.threat_score:
+    if (args.climatology_plot | args.time_series | args.case_studies | args.confusion_matrix_plots):
         # Make a dataset to make predictions with
         print('Loading data')
         data = load_ml_data(args.input_data_fname, path = '%s/%s'%(args.dataset, args.ra_model))
@@ -1460,23 +1495,75 @@ if __name__ == '__main__':
         
         # Make the predictions and plot the results for each method
         for method in methods:
+            
+            # Make predictions for all folds across all rotations?
+            if os.path.exists("%s/%s_%s_predictions.pkl"%(dataset_dir, method, args.ml_model)):
+                # If the file exists, load the data rather than repeat intense computations
+                print('Loading predictions for %s method...'%method)
+                with open("%s/%s_%s_predictions.pkl"%(dataset_dir, method, args.ml_model), 'rb') as fp:
+                    pred = pickle.load(fp)
+                    pred_var = pickle.load(fp)
+                    
+            else:
+                # If the prediction files do not exist, make them
+                pred = np.ones((T * NFold, I, J)) * np.nan
+                pred_var = np.ones((T * NFold, I, J)) * np.nan
+                
 
-            pred = np.ones((T * NFold, I, J)) * np.nan
-            pred_var = np.ones((T * NFold, I, J)) * np.nan
+                print('Making predictions for the %s method...'%method)
+                # Make predictions based on one of the ML models
+                for n in range(NFold):
+                    print(n)
+                    pred[n*T:(n+1)*T,:,:], pred_var[n*T:(n+1)*T,:,:] = make_predictions(data[:,:,:,n], 
+                                                                                        evap['lat'], evap['lon'], 
+                                                                                        probabilities = False, threshold = 0.5, keras = False, 
+                                                                                        ml_model = args.ml_model, ra_model = args.ra_model, 
+                                                                                        method = method, rotations = rotations, label = args.label, 
+                                                                                        path = dataset_dir)
 
-            print('Making predictions for the %s method...'%method)
-            # Make predictions based on one of the ML models
-            for n in range(NFold):
-                print(n)
-                pred[n*T:(n+1)*T,:,:], pred_var[n*T:(n+1)*T,:,:] = make_predictions(data[:,:,:,n], 
-                                                                                    evap['lat'], evap['lon'], 
-                                                                                    probabilities = False, threshold = 0.5, keras = False, 
-                                                                                    ml_model = args.ml_model, ra_model = args.ra_model, 
-                                                                                    method = method, rotations = rotations, label = args.label, 
-                                                                                    path = dataset_dir)
+                # Save the predictions
+                with open("%s/%s_%s_predictions.pkl"%(dataset_dir, method, args.ml_model), "wb") as fp:
+                    pickle.dump(pred, fp)
+                    pickle.dump(pred_var, fp)
+                    
+                    
+                    
+                    
+            # Make predictions for only test datasets?
+            if os.path.exists("%s/%s_%s_predictions_test_set.pkl"%(dataset_dir, method, args.ml_model)):
+                # If the file exists, load the data rather than repeat intense computations
+                print('Loading test set predictions for %s method...'%method)
+                with open("%s/%s_%s_predictions_test_set.pkl"%(dataset_dir, method, args.ml_model), 'rb') as fp:
+                    pred_test = pickle.load(fp)
+                    pred_var_test = pickle.load(fp)
+                    
+            else:
+                # If the prediction files do not exist, make them
+                pred_test = np.ones((T * NFold, I, J)) * np.nan
+                pred_var_test = np.ones((T * NFold, I, J)) * np.nan
+                
+                # Make the test folds
+                test_folds = [int((np.arrange([ntrain_folds]) + 1 + rot) % Nfolds) for rot in rotations]
+
+                print('Making predictions for the %s method...'%method)
+                # Make predictions based on one of the ML models
+                for n in range(NFold):
+                    print(n)
+                    pred_test[n*T:(n+1)*T,:,:], pred_var_test[n*T:(n+1)*T,:,:] = make_predictions(data[:,:,:,n], 
+                                                                                                  evap['lat'], evap['lon'], 
+                                                                                                  probabilities = False, threshold = 0.5, keras = False, 
+                                                                                                  ml_model = args.ml_model, ra_model = args.ra_model, 
+                                                                                                  method = method, rotations = np.array([test_folds[n]]), 
+                                                                                                  label = args.label, path = dataset_dir)
+
+                # Save the predictions
+                with open("%s/%s_%s_predictions_test_set.pkl"%(dataset_dir, method, args.ml_model), "wb") as fp:
+                    pickle.dump(pred_test, fp)
+                    pickle.dump(pred_var_test, fp)
+                    
                 
             # Load in the true labels?
-            if args.time_series | args.case_studies | args.threat_score:
+            if (args.time_series | args.case_studies | args.confusion_matrix_plots):
                 print('Loading true labels for the %s method...'%method)
                 true_fd = load_nc('fd', '%s.%s.pentad.nc'%(method, args.ra_model), path = dataset_dir)
                 fd = true_fd['fd'][ind,:,:]
@@ -1487,6 +1574,7 @@ if __name__ == '__main__':
                 plot('Plotting confusion matrix skill scores for the %s method...'%method)
                 mask = load_mask(model = args.ra_model)
 
+                # Plot the threat scores with the full predictions
                 display_threat_score(fd, pred, ch_fd['lat'], ch_fd['lon'], dates, mask, 
                                      model = args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
                 
@@ -1495,6 +1583,17 @@ if __name__ == '__main__':
                 
                 display_pod_score(fd, pred, ch_fd['lat'], ch_fd['lon'], dates, 
                                   model =  args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
+                
+                
+                # Plot the threat scores with only the test predictions (to see how the model generalizes to data it has not seen)
+                display_threat_score(fd, pred_test, ch_fd['lat'], ch_fd['lon'], dates, mask, 
+                                     model = args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
+                
+                display_far_score(fd, pred_test, ch_fd['lat'], ch_fd['lon'], dates, 
+                                  model =  args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
+                
+                display_pod_score(fd, pred_test, ch_fd['lat'], ch_fd['lon'], dates, 
+                                  model =  args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
 
 
             # Plot the predicted climatology map?
@@ -1502,6 +1601,10 @@ if __name__ == '__main__':
                 print('Plotting the predicted climatology for the the %s method...'%method)
                 display_fd_climatology(pred, evap['lat'], evap['lon'], dates, 'Predicted FD for %s'%method, 
                                        model = '%s_%s'%(method, args.ra_model), path = dataset_dir, grow_season = True)
+                
+                # Plot the climatology map with only the test predictions (to see how the model generalizes to data it has not seen)
+                display_fd_climatology(pred_test, evap['lat'], evap['lon'], dates, 'Predicted FD for %s'%method, 
+                                       model = '%s_%s_test_set'%(method, args.ra_model), path = dataset_dir, grow_season = True)
 
 
             # Plot the predicted time series (with true labels)?
@@ -1512,9 +1615,13 @@ if __name__ == '__main__':
 
                 # Determine the areal coverage for the time series
                 tmp_pred = np.nansum(pred.reshape(T, I*J), axis = -1)*32*32
+                tmp_pred_test = np.nansum(pred_test.reshape(T, I*J), axis = -1)*32*32
 
                 pred_area = []
                 pred_area_var = []
+                
+                pred_area_test = []
+                pred_area_var_test = []
 
 
                 # Determine the true areal coverage
@@ -1531,12 +1638,18 @@ if __name__ == '__main__':
 
                     pred_area.append(np.nanmean(tmp_pred[ind]))
                     pred_area_var.append(np.nanstd(tmp_pred[ind]))
+                    
+                    pred_area_test.append(np.nanmean(tmp_pred_test[ind]))
+                    pred_area_var_test.append(np.nanstd(tmp_pred_test[ind]))
 
                     true_area.append(np.nanmean(tmp_true[ind]))
                     true_area_var.append(np.nanstd(tmp_true[ind]))
 
                 pred_area = np.array(pred_area)
                 pred_area_var = np.array(pred_area_var)
+                
+                pred_area_test = np.array(pred_area_test)
+                pred_area_var_test = np.array(pred_area_var_test)
 
                 true_area = np.array(true_area)
                 true_area_var = np.array(true_area_var)
@@ -1546,6 +1659,10 @@ if __name__ == '__main__':
                 print('Plotting the areal coverage of FD time series for the %s method...'%method)
                 display_time_series(true_area, pred_area, true_area_var, pred_area_var, dates[::43], 
                                     r'Areal Coverage (km^2)', args.ra_model, '%s_%s'%(args.label, method), path = dataset_dir)
+                
+                # Display the time series with only the test predictions (to see how the model generalizes to data it has not seen)
+                display_time_series(true_area, pred_area_test, true_area_var, pred_area_var_test, dates[::43], 
+                                    r'Areal Coverage (km^2)', args.ra_model, '%s_%s_test_set'%(args.label, method), path = dataset_dir)
 
             # Plot a set of case studies?
             if args.case_studies:
@@ -1559,6 +1676,11 @@ if __name__ == '__main__':
                 # Plot the case studies for the true labels
                 display_case_study_maps(fd, evap['lon'], evap['lat'], dates, args.case_study_years, 
                                         method = method, label = args.label, dataset = args.ra_model, 
+                                        globe = False, path = dataset_dir, grow_season = True)
+                
+                # Repeat the predicted case studes with predicted labels using test sets only (to see how the model generalizes to data it has not seen)
+                display_case_study_maps(pred_test, evap['lon'], evap['lat'], dates, args.case_study_years, 
+                                        method = method, label = '%s_test_set'%args.label, dataset = args.ra_model, 
                                         globe = False, path = dataset_dir, grow_season = True)
                 
                 

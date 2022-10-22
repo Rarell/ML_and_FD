@@ -362,10 +362,10 @@ def build_rf_model(args):
         args.tree_max_features = None 
         
     # Determine class weights
-    if args.class_weight != None:
+    if np.invert(args.class_weight == None):
         weights = {0:1, 1:args.class_weight}
     else:
-        weights = 'balanced'
+        weights = None
     
     # Create the model
     model = ensemble.RandomForestClassifier(n_estimators = args.n_trees, 

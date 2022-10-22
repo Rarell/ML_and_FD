@@ -19,7 +19,7 @@ mae
 auc
 tss
 --roc_curve
---threat_score
+--confusion_matrix_plots
 --climatology_plot
 --time_series
 --case_studies

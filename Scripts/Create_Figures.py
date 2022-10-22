@@ -371,7 +371,7 @@ def display_feature_importance(fimportance, fimportance_var, feature_names, meth
     ax.set_ylabel('Feature Importance', fontsize = 16)
     
     # Set the ticks
-    ax.set_xticks(ind + width*N/2-width/2)
+    ax.set_xticks(ind + 2*width)#-width/1)
     ax.set_xticklabels(feature_names)
     
     # Set the tick size
@@ -660,6 +660,7 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
 
     false_alarms_s = np.nansum(false_alarms, axis = -1)
     false_alarms_s = np.nansum(false_alarms_s, axis = -1)
+    
 
     # Calculate the total threat score in space for each time stamp
     ts_s = hits_s/(hits_s + misses_s + false_alarms_s)
@@ -941,7 +942,7 @@ def display_far(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     false_alarms_s = np.nansum(false_alarms_s, axis = -1)
 
     # Calculate the FAR score in space for each time stamp
-    ts_s = false_alarms_s/(hits_s + false_alarms_s)
+    far_s = false_alarms_s/(hits_s + false_alarms_s)
     
     
     # Determine the equitable threat score in time
@@ -1083,7 +1084,7 @@ def display_far(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     
     
 # Function to calculate the threat score
-def display_pod_score(true, pred, lat, lon, time, model = 'narr', label = 'christian', globe = False, path = './Figures/'):
+def display_pod(true, pred, lat, lon, time, model = 'narr', label = 'christian', globe = False, path = './Figures/'):
     '''
     Calculate and display the probability of detection (POD) in space and in time
     
@@ -1253,7 +1254,7 @@ def display_pod_score(true, pred, lat, lon, time, model = 'narr', label = 'chris
     else:
         cbax = fig.add_axes([0.925, 0.32, 0.020, 0.36])
     cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
-    cbar.ax.set_ylabel('Threat Score', fontsize = 18)
+    cbar.ax.set_ylabel('POD', fontsize = 18)
 
     # Set the colorbar ticks
     for i in cbar.ax.yaxis.get_ticklabels():
