@@ -375,7 +375,7 @@ def build_rf_model(args):
                                             bootstrap = args.feature_importance,
                                             oob_score = args.feature_importance,
                                             class_weight = weights,
-                                            verbose = args.verbose >= 1)
+                                            verbose = args.verbose >= 2)
                                             #n_jobs = )
     
     return model
@@ -409,7 +409,7 @@ def build_svm_model(args):
                               fit_intercept = args.svm_intercept,
                               intercept_scaling = args.svm_intercept_scale,
                               class_weight = weights,
-                              verbose = args.verbose >= 1,
+                              verbose = args.verbose >= 2,
                               max_iter = args.svm_max_iter)
         
     else:
@@ -417,7 +417,7 @@ def build_svm_model(args):
                         kernel = args.svm_kernel,
                         tol = args.svm_stopping_err,
                         class_weight = weights,
-                        verbose = args.verbose >= 1,
+                        verbose = args.verbose >= 2,
                         max_iter = args.svm_max_iter)
     
     return model

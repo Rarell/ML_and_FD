@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
-Created on Sat Oct  2 17:52:45 2021
+Created on Sat Oct 2 17:52:45 2021
 
 ##############################################################
 # File: ML_and_FD.py
@@ -19,7 +19,8 @@ Created on Sat Oct  2 17:52:45 2021
 # 
 #
 # Version History: 
-#   1.0.0 - 12/24/2021 - Initial reformatting of the script to use a 'version' setting (note the version number is not in the script name, so this is not a full version version control)
+#   1.0.0 - 12/24/2021 - Initial reformatting of the script to use a 'version' setting (note the version number is not in the script name, 
+#                        so this is not a full version version control)
 #   1.1.0 - 12/25/2021 - Implemented code to split the dataset into regions in the DetermineParameters and CreateSLModel functions
 #   1.2.0 - 12/30/2021 - Modified the main functions to write outputs to .txt file instead of output to the terminal (easier to save everything)
 #   1.3.0 - 1/13/2022 - Modified the ModelPredictions function to encorporate multiple regions.
@@ -27,33 +28,31 @@ Created on Sat Oct  2 17:52:45 2021
 #                       degree sections. sklearn section has been tested and is working.
 #   2.0.2 - 10/22/2022 - Added more confusion table skill metrics. Finished adding standard ML approaches (includes RF, SVMs, and Ada boosted trees). Other
 #                        minor corrections. Added predictions with test datasets only.
+#   3.0.0 - 11/16/2022 - Removed splitting of data into regions to converse memory. Restructured execute_exp (now main experiment function) to train 
+#                        1 rotation and 1 method at a time. execute_exp is now structured to work with the OU schooner supercomputer.
 #
 # Inputs:
 #   - Data files for FD indices and identified FD (.nc format)
 #
 # Outputs:
 #   - A number of figure showing the results of the SL algorithms
-#   - Several outputs (in the terminal) showing performance metrics for the SL algorithms
+#   - Several outputs (in the terminal) showing performance metrics for the ML algorithms
 #
 # To Do:
 #   - Main function
 #       - Add learning curve calculations and figures
-#       - Add mean ROC Curve calculations and maps
-#       - Add AUC maps
-#       - ADD Accuracy and potentially other maps
-#       - Add model architecture if appliclable
-#       - Add predictive climatology and years and associated errors
-#       - Add prediction time series
+#   - May look into residual curves (training and validation metric performance over different number of folds; 
+#                                    may be too computationally and temporally expensive)
+#   - May look into Ceteris-Paribus effect
 #   - Add argparse arguments for other ML models
 #   - Might try a more effective approach to parallel processing for increased computation speed
-#   - Add an if __name__ == __main__ section
 #   - Keras models have not been tested
 #
 # Bugs:
 #   - 
 #
 # Notes:
-#   - All Python libraries are the lateset versions of the release date.
+#   - See tf_environment.yml for a list of all packages and versions. netcdf4 and cartopy must be downloaded seperately.
 #   - This script assumes it is being running in the 'ML_and_FD_in_NARR' directory
 #   - Several of the comments for this program are based on the Spyder IDL, which can separate the code into different blocks of code, or 'cells'
 #
@@ -70,12 +69,10 @@ Created on Sat Oct  2 17:52:45 2021
 # Library imports
 import os, sys, warnings
 import gc
+import re
 import argparse
 import pickle
 import numpy as np
-import multiprocessing as mp
-# import pathos.multiprocessing as pmp
-from joblib import parallel_backend
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib import colorbar as mcolorbar
@@ -141,6 +138,7 @@ def create_ml_parser():
 
     # High-level experiment configuration
     parser.add_argument('--exp_type', type=str, default=None, help="Experiment type")
+    parser.add_argument('--method', type=str, default='christian', help='The FD identification method the ML model is being trained to recognize')
     
     parser.add_argument('--ra_model', type=str, default='narr', help='Reanalysis model the dataset(s) came from')
     parser.add_argument('--ml_model', type=str, default='rf', help='Type of ML model used to conduct experiment(s)')
@@ -154,6 +152,7 @@ def create_ml_parser():
     parser.add_argument('--case_studies', action='store_true', help='Plot a set of case study maps (predicted FD for certain years) as part of the results')
     parser.add_argument('--case_study_years', type=int, nargs='+', default=[1988, 2000, 2011, 2012, 2017, 2019], help='List of years to make case studies for')
     parser.add_argument('--globe', action='store_true', help='Plot global dataset (otherwise plot CONUS)')
+    parser.add_argument('--evaluate', action='store_true', help='Evaluate the ML model after having run it for all rotations and FD identification methods')
     
     
     # Specific experiment configuration
@@ -277,42 +276,34 @@ def split_data(data, ntrain_folds, rotation, normalize = False):
 ##############################################
 # Functions to generate file names
 
-def generate_model_fname(model, ml_model, method, rotation, lat_labels, lon_labels):
+def generate_model_fname(model, ml_model, method, rotation):
     '''
-    Generate a filename for a ML model to be saved to. Models are differentiated by lat/lon region, rotation, ML model, reanalysis model trained on, FD method
+    Generate a filename for a ML model to be saved to. Models are differentiated by rotation, ML model trained, reanalysis model trained on, 
+    and FD method trained to identify.
     
     Inputs:
     :param model: Reanalyses model the ML model is trained on
     :param ml_model: The ML model being saved
     :param method: The FD identification method used for labels
     :param rotation: Current rotation in the k-fold validation
-    :param lat_labels: List of latitudes that encompass the region
-    :param lon_labels: List of longitudes that encompass the region
+
     
     Outputs:
     :param fname: The filename the ML model will be saved to
     '''
     
     # Create the filename
-    #fname = '%s_%s_%s_%s_%s-%slat_%s_%slon'%(model, 
-    #                                               ml_model, 
-    #                                               method, 
-    #                                               rotation, 
-    #                                               lat_labels[0], lat_labels[1], 
-    #                                               lon_labels[0], lon_labels[1])
-    
-    fname = '%s_%s_%s_rot_%s_lat_%s-%s_lon_%s_%s'%(model, 
-                                                   ml_model, 
-                                                   method, 
-                                                   rotation, 
-                                                   lat_labels[0], lat_labels[1], 
-                                                   lon_labels[0], lon_labels[1])
+    fname = '%s_%s_%s_rot_%s'%(model, 
+                               ml_model, 
+                               method, 
+                               rotation)
     
     return fname
     
 def generate_results_fname(model, ml_model, method, keras):
     '''
-    Generate a filaname the results of a ML model will be saved to. Results are differentiated by reanalysis trained on, ML model, FD method
+    Generate a filename the results (merged over all rotations) of a ML model will be saved to. 
+    Results are differentiated by ML model trained, reanalysis model trained on, and FD method trained to identify.
     
     Inputs:
     :param model: Reanalyses model the ML model is trained on
@@ -325,7 +316,7 @@ def generate_results_fname(model, ml_model, method, keras):
     '''
     
     # Create the filename
-    fname = '%s_%s_%s_results'%(model, ml_model, method)
+    fname = '%s_%s_%s_merged_results'%(model, ml_model, method)
     
     if keras:
         return fname
@@ -338,7 +329,8 @@ def generate_results_fname(model, ml_model, method, keras):
 ##############################################
 
 # Functions to conduct a single experiment
-def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, model_fname):
+def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, data_in, data_out, rotation, 
+                        model_fname, evaluate_each_grid = False):
     '''
     Run a single ML experiment from the sklearn package and save the model
     
@@ -350,11 +342,29 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
     :param train_out: Output training dataset used to train the model
     :param valid_out: Output validation dataset to help validate the model
     :param test_out: Output testing dataset to test the model
+    :param data_in: Entire input dataset. Results predict for the entire dataset instead of the training set (to simplify the merging step)
+    :param data_out: Enitre output dataset. Results predict for the entire dataset instead of the training set (to simplify the merging step)
+    :param rotation: Current rotation in the k-fold validation
     :param model_fname: The filename to save the model to
+    :param evaluate_each_grid: Boolean indicating whether evaulation metrics should be examined for each grid point in the dataset
     
     Outputs:
     :param results: Dictionary results from the ML model, including predictions, performance metrics, and learning curves
     '''
+    
+    # Construct the base file name for the result
+    results_fbase = 'results_%s_%s_%s_rot_%s'%(args.ra_model, 
+                                               args.label, 
+                                               args.method, 
+                                               rotation)
+    
+    dataset_dir = '%s/%s'%(args.dataset, args.ra_model)
+    results_fname = '%s/%s/%s/%s'%(dataset_dir, args.ml_model, args.method, results_fbase)
+    
+    # If the results exist, skip this experiment
+    if os.path.exists('%s.pkl'%results_fname):
+        print('The model has already been trained and results gathered.')
+        return
     
     # sklearn models only accept 2D inputs and 1D outputs
     # Reshape data
@@ -369,38 +379,112 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
     valid_out = valid_out.reshape(Tt*IJ, order = 'F')
     test_out = test_out.reshape(Tt*IJ, order = 'F')
 
-    # Build the model
-    model = build_sklearn_model(args)
 
-    # Train the model
-    model.fit(train_in.T, train_out)
+    if os.path.exists('%s.pkl'%model_fname):
+        # If the modeel exists, there is no need to make and train it
+        try:
+            with open('%s.pkl'%model_fname, 'rb') as fn:
+                model = pickle.load(fn)
+        except pickle.UnpicklingError:
+            print('Could not load file: %s. Erasing and retraining it.'%model_fname)
+            os.remove('%s.pkl'%model_fname)
+            
+            # Build the model
+            model = build_sklearn_model(args)
+
+            # Train the model
+            model.fit(train_in.T, train_out)
+            
+            # Save the model
+            with open('%s.pkl'%model_fname, 'wb') as fn:
+                pickle.dump(model, fn)
+                
+    else:
+        # Build the model
+        model = build_sklearn_model(args)
+
+        # Train the model
+        model.fit(train_in.T, train_out)
+        
+        # Save the model
+        with open('%s.pkl'%model_fname, 'wb') as fn:
+            pickle.dump(model, fn)
     
+    # Evaluate the model
+    NV, T, IJ = data_in.shape
+    data_in = data_in.reshape(NV, T*IJ, order = 'F')
+    data_out = data_out.reshape(T*IJ, order = 'F')
+    
+    results = sklearn_evaluate_model(model, args, data_in, valid_in, test_in, data_out, valid_out, test_out, IJ, T, Tt)
+    
+    # Evaluate the model for each grid point?
+    if evaluate_each_grid:
+        
+        # Initialize the gridded metrics
+        eval_train_map = np.zeros((IJ, len(args.metrics))) * np.nan
+        eval_valid_map = np.zeros((IJ, len(args.metrics))) * np.nan
+        eval_test_map = np.zeros((IJ, len(args.metrics))) * np.nan
+        
+        data_in = data_in.reshape(NV, T, IJ, order = 'F')
+        valid_in = valid_in.reshape(NV, Tt, IJ, order = 'F')
+        test_in = test_in.reshape(NV, Tt, IJ, order = 'F')
+
+        data_out = data_out.reshape(T, IJ, order = 'F')
+        valid_out = valid_out.reshape(Tt, IJ, order = 'F')
+        test_out = test_out.reshape(Tt, IJ, order = 'F')
+        
+        # Perform the evaluation for each grid point
+        for ij in range(IJ):
+            if np.mod(ij/IJ*100, 10) == 0:
+                print('Currently %d through the spatial evaluation'%(int(ij/IJ*100)))
+            
+            if np.nansum(data_out[:,ij]) == 0:
+                continue
+            
+            r_tmp = sklearn_evaluate_model(model, args, data_in[:,:,ij], valid_in[:,:,ij], test_in[:,:,ij], 
+                                           data_out[:,ij], valid_out[:,ij], test_out[:,ij], None, T, Tt)
+            
+            # See if this clears any erased memory from running the function
+            gc.collect() # Clears deleted variables from memory 
+            
+            # Try reducing the size of map data by half to reduce the RAM memory
+            eval_train_map[ij,:] = np.float32(r_tmp['train_eval'])
+            eval_valid_map[ij,:] = np.float32(r_tmp['valid_eval'])
+            eval_test_map[ij,:] = np.float32(r_tmp['test_eval'])
+            
+            
+        results['eval_train_map'] = eval_train_map
+        results['eval_valid_map'] = eval_valid_map
+        results['eval_test_map'] = eval_test_map
+        
+    # Save the results
+    with open('%s.pkl'%results_fname, 'wb') as fn:
+        pickle.dump(results, fn)
+        
+    return results
+    
+def sklearn_evaluate_model(model, args, train_in, valid_in, test_in, train_out, valid_out, test_out, IJ, T, Tt):
+    '''
+    Evaluate an sklearn machine learning (ML) model. Assumes the validation and test datasets have the same temporal dimension.
+    
+    Inputs:
+    :param model: ML model being evaluated
+    :param args: Argparse arguments
+    :param train_in: Input training dataset used to train the model. Maybe the entire input dataset instead.
+    :param valid_in: Input validation dataset to help validate the model
+    :param test_in: Input testing dataset to test the model
+    :param train_out: Output training dataset used to train the model. Maybe the entire output dataset instead.
+    :param valid_out: Output validation dataset to help validate the model
+    :param test_out: Output testing dataset to test the model
+    :param IJ: Size of the total spatial dimension of the dataset
+    :param T, Tt: Size of the total time dimension for train and valid/test datasets respectively
+    
+    Outputs:
+    :param results: Dictionary results of evaluations for the ML model
+    '''
     
     # Collect model results
     results = {}
-    
-    # Model predictions
-    if (args.ml_model.lower() == 'svm') | (args.ml_model.lower() == 'support_vector_machine'):
-        # Note SVMs do not have a predict_proba option
-        results['train_predict'] = model.predict(train_in.T).reshape(T, IJ, order = 'F')
-        results['valid_predict'] = model.predict(valid_in.T).reshape(Tt, IJ, order = 'F')
-        results['test_predict'] = model.predict(test_in.T).reshape(Tt, IJ, order = 'F')
-        
-        # Check if the model learns to only predict 0s
-        only_zeros = np.nansum(results['train_predict']) == 0
-    else:
-        # Check if the model learns to only predict 0s
-        only_zeros = model.predict_proba(train_in.T).shape[1] <= 1
-        
-        if only_zeros:
-            results['train_predict'] = np.zeros((T, IJ))
-            results['valid_predict'] = np.zeros((Tt, IJ))
-            results['test_predict'] = np.zeros((Tt, IJ))
-
-        else:
-            results['train_predict'] = model.predict_proba(train_in.T)[:,1].reshape(T, IJ, order = 'F')
-            results['valid_predict'] = model.predict_proba(valid_in.T)[:,1].reshape(Tt, IJ, order = 'F')
-            results['test_predict'] = model.predict_proba(test_in.T)[:,1].reshape(Tt, IJ, order = 'F')
         
     # Model performance
 
@@ -408,10 +492,15 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
     eval_valid = []
     eval_test = []
 
+    # Predictions
+    train_pred = model.predict(train_in.T)
+    valid_pred = model.predict(valid_in.T)
+    test_pred = model.predict(test_in.T)
+    
+    only_zeros = (np.nansum(train_pred) == 0) | (np.nansum(train_out) == 0)
+    
+    # Perform the evaluations for each metric
     for metric in args.metrics:
-        train_pred = model.predict(train_in.T)
-        valid_pred = model.predict(valid_in.T)
-        test_pred = model.predict(test_in.T)
 
         if metric == 'accuracy':
             e_train = metrics.accuracy_score(train_out, train_pred)
@@ -420,17 +509,34 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
 
         elif metric == 'auc':
             if (args.ml_model.lower() == 'rf') | (args.ml_model.lower() == 'random_forest'):
-                train_pred = model.predict_proba(train_in.T)[:,1] if (model.predict_proba(train_in.T).shape[1] > 1) else 0
-                valid_pred = model.predict_proba(valid_in.T)[:,1] if (model.predict_proba(valid_in.T).shape[1] > 1) else 0
-                test_pred = model.predict_proba(test_in.T)[:,1] if (model.predict_proba(test_in.T).shape[1] > 1) else 0
+                train_pred_auc = model.predict_proba(train_in.T)
+                valid_pred_auc = model.predict_proba(valid_in.T)
+                test_pred_auc = model.predict_proba(test_in.T)
+                
+                # Test if the model predicts FD
+                if train_pred_auc.shape[1] > 1:
+                    train_pred_auc = train_pred_auc[:,1]
+                else:
+                    train_pred_auc = 0
+                    
+                if valid_pred_auc.shape[1] > 1:
+                    valid_pred_auc = valid_pred_auc[:,1]
+                else:
+                    valid_pred_auc = 0
+                    
+                if test_pred_auc.shape[1] > 1:
+                    test_pred_auc = test_pred_auc[:,1]
+                else:
+                    test_pred_auc = 0
+
             else:
-                train_pred = model.decision_function(train_in.T)
-                valid_pred = model.decision_function(valid_in.T)
-                test_pred = model.decision_function(test_in.T)
+                train_pred_auc = model.decision_function(train_in.T)
+                valid_pred_auc = model.decision_function(valid_in.T)
+                test_pred_auc = model.decision_function(test_in.T)
             
-            e_train = np.nan if only_zeros else metrics.roc_auc_score(train_out, train_pred)
-            e_valid = np.nan if (np.nansum(valid_out) == 0) | (np.nansum(valid_out) == valid_out.size) else metrics.roc_auc_score(valid_out, valid_pred)
-            e_test = np.nan if (np.nansum(test_out) == 0) | (np.nansum(test_out) == test_out.size) else metrics.roc_auc_score(test_out, test_pred)
+            e_train = np.nan if only_zeros else metrics.roc_auc_score(train_out, train_pred_auc)
+            e_valid = np.nan if (np.nansum(valid_out) == 0) | (np.nansum(valid_out) == valid_out.size) else metrics.roc_auc_score(valid_out, valid_pred_auc)
+            e_test = np.nan if (np.nansum(test_out) == 0) | (np.nansum(test_out) == test_out.size) else metrics.roc_auc_score(test_out, test_pred_auc)
 
         elif metric == 'precision':
             e_train = metrics.precision_score(train_out, train_pred)
@@ -490,16 +596,48 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
         eval_valid.append(e_valid)
         eval_test.append(e_test)
         
+    # Store the evaluation metrics    
+    results['train_eval'] = eval_train
+    results['valid_eval'] = eval_valid
+    results['test_eval'] = eval_test
+        
+    # IJ is None, a grid point by grid point evaluation is being done, and only the evaluation metrics are desired
+    if IJ == None:
+        return results
+    
+    # Model predictions
+    results['train_predict'] = train_pred.reshape(T, IJ, order = 'F')
+    results['valid_predict'] = valid_pred.reshape(Tt, IJ, order = 'F')
+    results['test_predict'] = test_pred.reshape(Tt, IJ, order = 'F')
+    
+        
     # Collect information for the ROC curve
     if args.roc_curve:
+        # Test if the model predicts FD
         if (args.ml_model.lower() == 'rf') | (args.ml_model.lower() == 'random_forest'):
-            train_pred = model.predict_proba(train_in.T)[:,1] if (model.predict_proba(train_in.T).shape[1] > 1) else np.zeros(train_out.size)
-            valid_pred = model.predict_proba(valid_in.T)[:,1] if (model.predict_proba(valid_in.T).shape[1] > 1) else np.zeros(valid_out.size)
-            test_pred = model.predict_proba(test_in.T)[:,1] if (model.predict_proba(test_in.T).shape[1] > 1) else np.zeros(test_out.size)
+            train_pred_roc = model.predict_proba(train_in.T)
+            valid_pred_roc = model.predict_proba(valid_in.T)
+            test_pred_roc = model.predict_proba(test_in.T)
+
+            if train_pred_roc.shape[1] > 1:
+                train_pred_roc = train_pred_roc[:,1]
+            else:
+                train_pred_roc = 0
+
+            if valid_pred_roc.shape[1] > 1:
+                valid_pred_roc = valid_pred_roc[:,1]
+            else:
+                valid_pred_roc = 0
+
+            if test_pred_roc.shape[1] > 1:
+                test_pred_roc = test_pred_roc[:,1]
+            else:
+                test_pred_roc = 0
+        
         else:
-            train_pred = model.decision_function(train_in.T)
-            valid_pred = model.decision_function(valid_in.T)
-            test_pred = model.decision_function(test_in.T)
+            train_pred_roc = model.decision_function(train_in.T)
+            valid_pred_roc = model.decision_function(valid_in.T)
+            test_pred_roc = model.decision_function(test_in.T)
         
         thresh = np.arange(0, 2, 1e-4)
         thresh = np.round(thresh, 4)
@@ -510,11 +648,11 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
         results['fpr_test'] = np.ones((thresh.size)) * np.nan
         results['tpr_test'] = np.ones((thresh.size)) * np.nan
         
-        fpr_train, tpr_train, thresh_train = metrics.roc_curve(train_out, train_pred)
+        fpr_train, tpr_train, thresh_train = metrics.roc_curve(train_out, train_pred_roc)
         
-        fpr_valid, tpr_valid, thresh_valid = metrics.roc_curve(valid_out, valid_pred)
+        fpr_valid, tpr_valid, thresh_valid = metrics.roc_curve(valid_out, valid_pred_roc)
         
-        fpr_test, tpr_test, thresh_test = metrics.roc_curve(test_out, test_pred)
+        fpr_test, tpr_test, thresh_test = metrics.roc_curve(test_out, test_pred_roc)
         
         # Note this step is needed to ensure the ROC curves have the same length across all rotations and regions
         for n, t in enumerate(thresh):
@@ -531,22 +669,13 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
             
             results['fpr_test'][n] = np.nanmean(fpr_test[ind_test])
             results['tpr_test'][n] = np.nanmean(tpr_test[ind_test])
-        
-            
-    results['train_eval'] = eval_train
-    results['valid_eval'] = eval_valid
-    results['test_eval'] = eval_test
 
     # Collect the feature importance
     if args.feature_importance:
         results['feature_importance'] = np.array(model.feature_importances_)
-    
-    # Save the model
-    with open('%s.pkl'%model_fname, 'wb') as fn:
-        pickle.dump(model, fn)
         
     return results
-    
+  
 
 def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, model_fname):
     '''
@@ -602,7 +731,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     
     
     
-def execute_single_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, model_fname):
+def execute_single_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, data_in, data_out, rotation, model_fname, evaluate_each_grid = False):
     '''
     Run a single ML experiment and save the model
     
@@ -614,7 +743,11 @@ def execute_single_exp(args, train_in, valid_in, test_in, train_out, valid_out, 
     :param train_out: Output training dataset used to train the model
     :param valid_out: Output validation dataset to help validate the model
     :param test_out: Output testing dataset to test the model
+    :param data_in: Entire input dataset. Results predict for the entire dataset instead of the training set (to simplify the merging step)
+    :param data_out: Enitre output dataset. Results predict for the entire dataset instead of the training set (to simplify the merging step)
+    :param rotation: Current rotation in the k-fold validation
     :param model_fname: The filename to save the model to
+    :param evaluate_each_grid: Boolean indicating whether evaulation metrics should be examined for each grid point in the dataset
     
     Outputs:
     :param results: Dictionary results from the ML model, including predictions, performance metrics, and learning curves
@@ -622,10 +755,12 @@ def execute_single_exp(args, train_in, valid_in, test_in, train_out, valid_out, 
     
     # Execute the experiment based on whether it is an sklearn model or NN
     if args.keras:
-        results = execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, model_fname)
+        results = execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, data_in, data_out, rotation,
+                                    model_fname)
         
     else:
-        results = execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, model_fname)
+        results = execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, data_in, data_out, rotation,
+                                      model_fname, evaluate_each_grid)
     
     return results
 
@@ -633,377 +768,23 @@ def execute_single_exp(args, train_in, valid_in, test_in, train_out, valid_out, 
 #%%
 ##############################################
 
-# Function to conduct all experiments for 1 ML model (for all rotations, methods, and regions)
-def execute_all_exp(args):
-    '''
-    Run multiple ML experiments for all regions and all rotations
-    
-    Inputs:
-    :param args: Argparse arguments
-    '''
-    
-    # List of FD identification methods
-    methods = ['christian', 'nogeura', 'pendergrass', 'liu', 'otkin']
-    
-    # Save the original class weight
-    weight = args.class_weight
-    
-    # Determine the directory of the data
-    dataset_dir = '%s/%s'%(args.dataset, args.ra_model)
-    
-    print('Loading data...')
-    
-    # Load the data
-    # Data is Nfeatures/Nmethods x time x space x fold
-    data_in = load_ml_data(args.input_data_fname, path = dataset_dir)
-    data_out = load_ml_data(args.output_data_fname, path = dataset_dir)
-    
-    # Remove NaNs?
-    if args.remove_nans:
-        data_in[np.isnan(data_in)] = 0
-        data_out[np.isnan(data_out)] = 0
-    
-    print('Input size (NVariables x time x space x NFolds):', data_in.shape)
-    print('Output size (NMethods x time x space x NFolds):', data_out.shape)
-    
-    # Make the rotations
-    NVar, T, IJ, Nfold  = data_in.shape
-    Nmethods = data_out.shape[0]
-    rotation = np.arange(Nfold)
-    
-    # Make the latitude/longitude labels for individual regions
-    lat_labels = np.arange(-90, 90+5, 5)
-    lon_labels = np.arange(-180, 180+5, 5)
-    
-    # Load and reshape lat/lon data
-    # Load lat and lon data
-    
-    # Load example data with subsetted lat/lon data
-    et = load_nc('evap', 'evaporation.%s.pentad.nc'%args.ra_model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
-    lat = et['lat']; lon = et['lon']
-    
-    # Correct the longitude?
-    if args.correct_lon:
-        print('Correcting longitude...')
-        for n in range(len(lon[:,0])):
-            ind = np.where(lon[n,:] > 0)[0]
-            lon[n,ind] = -1*lon[n,ind]
-            
-    # Reshape the latitude/longitude data
-    I, J = lat.shape
-    lat1d = lat.reshape(I*J, order = 'F')
-    lon1d = lon.reshape(I*J, order = 'F')
-    
-    I_lab = lat_labels.size
-    J_lab = lon_labels.size
-    
-    
-    # Split the data into regions.
-    print('Splitting the data into regions...')
-    
-    data_in_split = []
-    data_out_split = []
-    lat_lab = []
-    lon_lab = []
-    for i in range(I_lab-1):
-        for j in range(J_lab-1):
-            ind = np.where( ((lat1d >= lat_labels[i]) & (lat1d <= lat_labels[i+1])) & ((lon1d >= lon_labels[j]) & (lon1d <= lon_labels[j+1])) )[0]
-            
-            # Not all datasets are global; remove sets where there is no data
-            if len(ind) < 1: 
-                continue
-            
-            lat_lab.append(lat_labels[i])
-            lon_lab.append(lon_labels[j])
-            
-            data_in_split.append(data_in[:,:,ind,:])
-            data_out_split.append(data_out[:,:,ind,:])
-            
-    # Save the lat/lon labels used for future use (needed to load the models later on)
-    with open('%s/lat_lon_labels.pkl'%(dataset_dir), 'wb') as fn:
-        pickle.dump(lat_lab, fn)
-        pickle.dump(lon_lab, fn)
-        
-    print('There are %d regions.'%len(data_in_split))
-            
-    # Collect the lat/lon labels used in the regions
-    ind_lat = np.where( (lat_labels >= lat_lab[0]) & (lat_labels <= lat_lab[-1]) )[0]
-    ind_lon = np.where( (lon_labels >= lon_lab[0]) & (lon_labels <= lon_lab[-1]) )[0]
-    
-    lat_labels = lat_labels[ind_lat]
-    lon_labels = lon_labels[ind_lon]
-            
-    I_lab = lat_labels.size
-    J_lab = lon_labels.size
-    
-    # Loop over all FD methods to conduct the set of experiments for all of them
-    for method in range(Nmethods):
-        
-        results_fbase = generate_results_fname(args.ra_model, args.label, methods[method], args.keras)
-        results_fname = '%s/%s'%(dataset_dir, results_fbase)
-        
-        # Determine if this experiment has already been done
-        if os.path.exists(results_fname):
-            # Processed file does exist: continue
-            print("File %s already exists"%feature_fname)
-            continue
-        
-        # Initialize results
-        pred_train = np.ones((args.ntrain_folds*T, I*J)) * np.nan
-        pred_valid = np.ones((T, I*J)) * np.nan
-        pred_test = np.ones((T, I*J)) * np.nan
-        
-        pred_train_var = np.ones((args.ntrain_folds*T, I*J)) * np.nan
-        pred_valid_var = np.ones((T, I*J)) * np.nan
-        pred_test_var = np.ones((T, I*J)) * np.nan
-        
-        
-        eval_train = np.ones((I_lab*J_lab)) * np.nan
-        eval_valid = np.ones((I_lab*J_lab)) * np.nan
-        eval_test = np.ones((I_lab*J_lab)) * np.nan
-        
-        eval_train_var = np.ones((I_lab*J_lab)) * np.nan
-        eval_valid_var = np.ones((I_lab*J_lab)) * np.nan
-        eval_test_var = np.ones((I_lab*J_lab)) * np.nan
-        
-        
-        if args.roc_curve:
-            fpr_train = []
-            fpr_valid = []
-            fpr_test = []
-
-            fpr_train_var = []
-            fpr_valid_var = []
-            fpr_test_var = []
-
-            tpr_train = []
-            tpr_valid = []
-            tpr_test = []
-
-            tpr_train_var = []
-            tpr_valid_var = []
-            tpr_test_var = []
-        
-        
-        if args.feature_importance:
-            feature_import = np.ones((I_lab,J_lab,NVar)) * np.nan
-            feature_import_var = np.ones((I_lab,J_lab,NVar)) * np.nan
-
-        
-        if args.keras:
-            learn_curves = np.ones((T, I*J)) * np.nan
-            learn_curves_var = np.ones((T, I*J)) * np.nan
-        
-        # Begin looping and performing an experiment over all regions
-        for n, (region_in, region_out) in enumerate(zip(data_in_split, data_out_split)):
-            if n%10 == 0:
-                print('Training a %s for the %dth region with the %s method...'%(args.ml_model, n+1, methods[method]))
-            
-            # Find where the current latitude and longitude values are
-            ind = np.where( ((lat1d >= lat_lab[n]) & (lat1d <= lat_lab[n]+5)) & ((lon1d >= lon_lab[n]) & (lon1d <= lon_lab[n]+5)) )[0]
-            
-            # Initialize some lists
-            ptrain = []
-            pvalid = []
-            ptest = []
-            
-            etrain = []
-            evalid = []
-            etest = []
-            
-            lc = []
-            fi = []
-            
-            fpr_train_tmp = []
-            fpr_valid_tmp = []
-            fpr_test_tmp = []
-
-            tpr_train_tmp = []
-            tpr_valid_tmp = []
-            tpr_test_tmp = []
-            
-            # For each region, perform an experiment for each rotation; obtain a statistical sample
-            for rot in rotation:
-                
-                # Split the data into training, validation, and test sets
-                train_in, valid_in, test_in = split_data(region_in, args.ntrain_folds, rot, normalize = args.normalize)
-                train_out, valid_out, test_out = split_data(region_out, args.ntrain_folds, rot, normalize = False) # Note the label data is already binary
-                
-                if np.nansum(train_out == 1) == 0:
-                    print('No FD in the current training set.')
-                    continue
-                
-                # Generate the model filename
-                model_fbase = generate_model_fname(args.ra_model, args.label, methods[method], rot, 
-                                                   [lat_lab[n], lat_lab[n]+5], [lon_lab[n], lon_lab[n]+5])
-                model_fname = '%s/%s/%s/%s'%(dataset_dir, args.ml_model, method, model_fbase)
-                
-                # If the training data has too few FD, bagging can easly find some subsets that have no FD, resulting in a class weight error.
-                # Ignore the class weights for this scenario
-                if (100*np.where(train_out == 1)[0].size/train_out.size) < 0.05:
-                    args.class_weight = None
-                else:
-                    args.class_weight = weight
-                
-                # Perform the experiment
-                # The ML model is saved in this step
-                results = execute_single_exp(args, train_in, valid_in, test_in, 
-                                             train_out[method,:,:], valid_out[method,:,:], test_out[method,:,:], model_fname)
-                
-                # Collect the results for the rotation
-                ptrain.append(results['train_predict'])
-                pvalid.append(results['valid_predict'])
-                ptest.append(results['test_predict'])
-                
-                etrain.append(np.array(results['train_eval']))
-                evalid.append(np.array(results['valid_eval']))
-                etest.append(np.array(results['test_eval']))
-                
-                if args.roc_curve:
-                    fpr_train_tmp.append(results['fpr_train'])
-                    fpr_valid_tmp.append(results['fpr_valid'])
-                    fpr_test_tmp.append(results['fpr_test'])
-
-                    tpr_train_tmp.append(results['tpr_train'])
-                    tpr_valid_tmp.append(results['tpr_valid'])
-                    tpr_test_tmp.append(results['tpr_test'])
-                
-                if args.feature_importance:
-                    fi.append(results['feature_importance'])
-                
-                if args.keras:
-                    lc.append(results['history'])
-               
-            # Check if there was any learning
-            if len(ptrain) < 1:
-                print('No FD was found in that region; no ML models were trained.')
-                continue
-            
-            # At the end of the experiments for each rotation, stack the reults into a single array (per variable) and average along the rotation axis
-            if n%10 == 0:
-                print('Evaluating the %s for the %dth region with the %s method...'%(args.ml_model, n+1, method))
-          
-            pred_train[:,ind] = np.nanmean(np.stack(ptrain, axis = -1), axis = -1)
-            pred_valid[:,ind] = np.nanmean(np.stack(pvalid, axis = -1), axis = -1)
-            pred_test[:,ind] = np.nanmean(np.stack(ptest, axis = -1), axis = -1)
-            
-            pred_train_var[:,ind] = np.nanstd(np.stack(ptrain, axis = -1), axis = -1)
-            pred_valid_var[:,ind] = np.nanstd(np.stack(pvalid, axis = -1), axis = -1)
-            pred_test_var[:,ind] = np.nanstd(np.stack(ptest, axis = -1), axis = -1)
-            
-            eval_train[n] = np.nanmean(np.stack(etrain, axis = -1), axis = -1)
-            eval_valid[n] = np.nanmean(np.stack(evalid, axis = -1), axis = -1)
-            eval_test[n] = np.nanmean(np.stack(etest, axis = -1), axis = -1)
-            
-            eval_train_var[n] = np.nanstd(np.stack(etrain, axis = -1), axis = -1)
-            eval_valid_var[n] = np.nanstd(np.stack(evalid, axis = -1), axis = -1)
-            eval_test_var[n] = np.nanstd(np.stack(etest, axis = -1), axis = -1)
-            
-            if args.roc_curve:
-                fpr_train.append(np.nanmean(np.stack(fpr_train_tmp, axis = -1), axis = -1))
-                fpr_valid.append(np.nanmean(np.stack(fpr_valid_tmp, axis = -1), axis = -1))
-                fpr_test.append(np.nanmean(np.stack(fpr_test_tmp, axis = -1), axis = -1))
-
-                fpr_train_var.append(np.nanstd(np.stack(fpr_train_tmp, axis = -1), axis = -1))
-                fpr_valid_var.append(np.nanstd(np.stack(fpr_valid_tmp, axis = -1), axis = -1))
-                fpr_test_var.append(np.nanstd(np.stack(fpr_test_tmp, axis = -1), axis = -1))
-
-                tpr_train.append(np.nanmean(np.stack(tpr_train_tmp, axis = -1), axis = -1))
-                tpr_valid.append(np.nanmean(np.stack(tpr_valid_tmp, axis = -1), axis = -1))
-                tpr_test.append(np.nanmean(np.stack(tpr_test_tmp, axis = -1), axis = -1))
-
-                tpr_train_var.append(np.nanstd(np.stack(tpr_train_tmp, axis = -1), axis = -1))
-                tpr_valid_var.append(np.nanstd(np.stack(tpr_valid_tmp, axis = -1), axis = -1))
-                tpr_test_var.append(np.nanstd(np.stack(tpr_test_tmp, axis = -1), axis = -1))
-            
-            if args.feature_importance:
-                feature_import[ind_lat,ind_lon,:] = np.nanmean(np.stack(fi, axis = -1), axis = -1)
-                feature_import_var[ind_lat,ind_lon,:] = np.nanstd(np.stack(fi, axis = -1), axis = -1)
-            
-            if args.keras:
-                learn_curves[:,ind] = np.nanmean(np.stack(lc, axis = -1), axis = -1)
-                learn_curves_var[:,ind] = np.nanstd(np.stack(lc, axis = -1), axis = -1)
-            
-        # At the end of the experiments for each region, collect the results and save the results
-        print('Saving the results of the %s for the %s method...'%(args.ml_model, methods[method]))
-        
-        results = {}
-        
-        # Model predictions
-        results['train_predict'] = pred_train.reshape(args.ntrain_folds*T, I, J, order = 'F')
-        results['valid_predict'] = pred_valid.reshape(T, I, J, order = 'F')
-        results['test_predict'] = pred_test.reshape(T, I, J, order = 'F')
-        
-        results['train_predict_var'] = pred_train_var.reshape(args.ntrain_folds*T, I, J, order = 'F')
-        results['valid_predict_var'] = pred_valid_var.reshape(T, I, J, order = 'F')
-        results['test_predict_var'] = pred_test_var.reshape(T, I, J, order = 'F')
-        
-        # Model performance
-        results['train_eval'] = eval_train
-        results['valid_eval'] = eval_valid
-        results['test_eval'] = eval_test
-        
-        results['train_eval_var'] = eval_train_var
-        results['valid_eval_var'] = eval_valid_var
-        results['test_eval_var'] = eval_test_var
-        
-        # ROC curve (note this these are spatial means, and the mean variation in space)
-        if args.roc_curve:
-            results['fpr_train'] = np.nanmean(np.stack(fpr_train, axis = -1), axis = -1)
-            results['fpr_valid'] = np.nanmean(np.stack(fpr_valid, axis = -1), axis = -1)
-            results['fpr_test'] = np.nanmean(np.stack(fpr_test, axis = -1), axis = -1)
-
-            results['fpr_train_var'] = np.nanmean(np.stack(fpr_train_var, axis = -1), axis = -1)
-            results['fpr_valid_var'] = np.nanmean(np.stack(fpr_valid_var, axis = -1), axis = -1)
-            results['fpr_test_var'] = np.nanmean(np.stack(fpr_test_var, axis = -1), axis = -1)
-
-            results['tpr_train'] = np.nanmean(np.stack(tpr_train, axis = -1), axis = -1)
-            results['tpr_valid'] = np.nanmean(np.stack(tpr_valid, axis = -1), axis = -1)
-            results['tpr_test'] = np.nanmean(np.stack(tpr_test, axis = -1), axis = -1)
-
-            results['tpr_train_var'] = np.nanmean(np.stack(tpr_train_var, axis = -1), axis = -1)
-            results['tpr_valid_var'] = np.nanmean(np.stack(tpr_valid_var, axis = -1), axis = -1)
-            results['tpr_test_var'] = np.nanmean(np.stack(tpr_test_var, axis = -1), axis = -1)
-        
-        # Feature importance
-        if args.feature_importance:
-            results['feature_importance'] = feature_import
-            results['feature_importance_var'] = feature_import_var
-        
-        # Learning curves/model history
-        if args.keras:
-            results['history'] = learn_curves
-            results['history_var'] = learn_curves_var
-        
-        # Save the results
-        with open("%s"%(results_fname), "wb") as fp:
-            pickle.dump(results, fp)
-          
-    print('Done.')
-    
-
-
-#%%
-##############################################
-
 # Function to conduct an experiment for 1 rotation and 1 ML model and 1 FD method (for all regions)
-def execute_exp(args):
+def execute_exp(args, test = False):
     '''
-    Run multiple ML experiments for all regions and for some rotations to test the code and tune hyperparameters
+    Run the ML experiment
     
     Inputs:
     :param args: Argparse arguments
+    :param test: Boolean indicating if this is a test run; multiple rotations are runned and merged for testing and tuning hyperparameters
     
     Outputs:
     :param results: The results of the experiment
     '''
     
     # List of FD identification methods
-    method = ['otkin']
-    
     methods = np.asarray(['christian', 'nogeura', 'pendergrass', 'liu', 'otkin'])
     
-    method_ind = np.where(methods == method[0])[0]
+    method_ind = np.where(methods == args.method)[0]
     
     # Save the original class weight
     weight = args.class_weight
@@ -1027,20 +808,21 @@ def execute_exp(args):
     print('Input size (NVariables x time x space x NFolds):', data_in.shape)
     print('Output size (NMethods x time x space x NFolds):', data_out.shape)
     
+    
     # Make the rotations
-    NVar, T, IJ, Nfold  = data_in.shape
+    Nvar, T, IJ, Nfold  = data_in.shape
     Nmethods = data_out.shape[0]
     
-    # Make the latitude/longitude labels for individual regions
-    lat_labels = np.arange(-90, 90+5, 5)
-    lon_labels = np.arange(-180, 180+5, 5)
-    
-    # Load and reshape lat/lon data
-    # Load lat and lon data
+    # Create a version of the entire dataset without being split
+    data_in_whole = np.concatenate([data_in[:,:,:,fold] for fold in range(Nfold)], axis = 1)
+    data_out_whole = np.concatenate([data_out[:,:,:,fold] for fold in range(Nfold)], axis = 1)
     
     # Load example data with subsetted lat/lon data
     et = load_nc('evap', 'evaporation.%s.pentad.nc'%args.ra_model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
     lat = et['lat']; lon = et['lon']
+    
+    # Collect the spatial size of the data
+    I, J = lat.shape
     
     # Correct the longitude?
     if args.correct_lon:
@@ -1049,274 +831,327 @@ def execute_exp(args):
             ind = np.where(lon[n,:] > 0)[0]
             lon[n,ind] = -1*lon[n,ind]
             
-    # Reshape the latitude/longitude data
-    I, J = lat.shape
-    lat1d = lat.reshape(I*J, order = 'F')
-    lon1d = lon.reshape(I*J, order = 'F')
-    
-    I_lab = lat_labels.size
-    J_lab = lon_labels.size
-    
-    
-    # Split the data into regions.
-    print('Splitting the data into regions...')
-    
-    data_in_split = []
-    data_out_split = []
-    lat_lab = []
-    lon_lab = []
-    for i in range(I_lab-1):
-        for j in range(J_lab-1):
-            ind = np.where( ((lat1d >= lat_labels[i]) & (lat1d <= lat_labels[i+1])) & ((lon1d >= lon_labels[j]) & (lon1d <= lon_labels[j+1])) )[0]
-            
-            # Not all datasets are global; remove sets where there is no data
-            if len(ind) < 1: 
-                continue
-            
-            lat_lab.append(lat_labels[i])
-            lon_lab.append(lon_labels[j])
-            
-            data_in_split.append(data_in[:,:,ind,:])
-            data_out_split.append(data_out[:,:,ind,:])
-            
-    # Save the lat/lon labels used for future use (needed to load the models later on)
-    with open('%s/lat_lon_labels.pkl'%(dataset_dir), 'wb') as fn:
-        pickle.dump(lat_lab, fn)
-        pickle.dump(lon_lab, fn)
-          
-    print('There are %d regions.'%len(data_in_split))
-        
-        
-    # Collect the lat/lon labels used in the regions
-    ind_lat = np.where( (lat_labels >= lat_lab[0]) & (lat_labels <= lat_lab[-1]) )[0]
-    ind_lon = np.where( (lon_labels >= lon_lab[0]) & (lon_labels <= lon_lab[-1]) )[0]
-    
-    lat_labels = lat_labels[ind_lat]
-    lon_labels = lon_labels[ind_lon]
-            
-    I_lab = lat_labels.size
-    J_lab = lon_labels.size
     
 
-    # Initialize results
-    pred_train = np.ones((args.ntrain_folds*T, I*J)) * np.nan
-    pred_valid = np.ones((T, I*J)) * np.nan
-    pred_test = np.ones((T, I*J)) * np.nan
-    
-    pred_train_var = np.ones((args.ntrain_folds*T, I*J)) * np.nan
-    pred_valid_var = np.ones((T, I*J)) * np.nan
-    pred_test_var = np.ones((T, I*J)) * np.nan
-    
-    
-    eval_train = np.ones((I_lab,J_lab,len(args.metrics))) * np.nan
-    eval_valid = np.ones((I_lab,J_lab,len(args.metrics))) * np.nan
-    eval_test = np.ones((I_lab,J_lab,len(args.metrics))) * np.nan
-    
-    eval_train_var = np.ones((I_lab,J_lab,len(args.metrics))) * np.nan
-    eval_valid_var = np.ones((I_lab,J_lab,len(args.metrics))) * np.nan
-    eval_test_var = np.ones((I_lab,J_lab,len(args.metrics))) * np.nan
-    
-    if args.roc_curve:
-        fpr_train = []
-        fpr_valid = []
-        fpr_test = []
-        
-        fpr_train_var = []
-        fpr_valid_var = []
-        fpr_test_var = []
-        
-        tpr_train = []
-        tpr_valid = []
-        tpr_test = []
-        
-        tpr_train_var = []
-        tpr_valid_var = []
-        tpr_test_var = []
-    
-    if args.feature_importance:
-        feature_import = np.ones((I_lab,J_lab,NVar)) * np.nan
-        feature_import_var = np.ones((I_lab,J_lab,NVar)) * np.nan
-    
-    if args.keras:
-        learn_curves = np.ones((T, I*J)) * np.nan
-        learn_curves_var = np.ones((T, I*J)) * np.nan
-    
-    # Begin looping and performing an experiment over all regions
-    for n, (region_in, region_out) in enumerate(zip(data_in_split, data_out_split)):
-        if n%10 == 0:
-                print('Training a %s for the %dth region with the %s method...'%(args.ml_model, n+1, methods[method_ind][0]))
-          
-        # Find where the current latitude and longitude values are
-        ind = np.where( ((lat1d >= lat_lab[n]) & (lat1d <= lat_lab[n]+5)) & ((lon1d >= lon_lab[n]) & (lon1d <= lon_lab[n]+5)) )[0]
-        
-        ind_lat = np.where(lat_labels == lat_lab[n])[0]
-        ind_lon = np.where(lon_labels == lon_lab[n])[0]
-        
-        # Initialize some lists
-        ptrain = []
-        pvalid = []
-        ptest = []
-        
-        etrain = []
-        evalid = []
-        etest = []
-        
-        lc = []
-        fi = []
-        
-        fpr_train_tmp = []
-        fpr_valid_tmp = []
-        fpr_test_tmp = []
-        
-        tpr_train_tmp = []
-        tpr_valid_tmp = []
-        tpr_test_tmp = []
-        
-        # For each region, perform an experiment for several rotations; obtain a statistical sample
+    # If this is a test run, train for multiple rotations
+    if test:
         for rot in args.rotation:
-            
+
             # Split the data into training, validation, and test sets
-            train_in, valid_in, test_in = split_data(region_in, args.ntrain_folds, rot, normalize = args.normalize)
-            train_out, valid_out, test_out = split_data(region_out, args.ntrain_folds, rot, normalize = False) # Note the label data is already binary
-            
-            if np.nansum(train_out == 1) == 0:
-                # print('No FD in the current training set.')
-                continue
-            
+            train_in, valid_in, test_in = split_data(data_in, args.ntrain_folds, rot, normalize = args.normalize)
+            train_out, valid_out, test_out = split_data(data_out, args.ntrain_folds, rot, normalize = False) # Note the label data is already binary
+
             # Generate the model filename
-            model_fbase = generate_model_fname(args.ra_model, args.label, methods[method_ind][0], rot, [lat_lab[n], lat_lab[n]+5], [lon_lab[n], lon_lab[n]+5])
-            model_fname = '%s/%s/%s/%s'%(dataset_dir, args.ml_model, methods[method_ind][0], model_fbase)
+            model_fbase = generate_model_fname(args.ra_model, args.label, args.method, rot)
+            model_fname = '%s/%s/%s/%s'%(dataset_dir, args.ml_model, args.method, model_fbase)
             # print(model_fname)
-            
+
             # If the training data has too few FD, bagging can easly find some subsets that have no FD, resulting in a class weight error.
             # Ignore the class weights for this scenario
             if (100*np.where(train_out == 1)[0].size/train_out.size) < 0.05:
                 args.class_weight = None
             else:
                 args.class_weight = weight
-            
+
             # Perform the experiment
             # The ML model is saved in this step
-            results = execute_single_exp(args, train_in, valid_in, test_in, 
-                                         train_out[method_ind,:,:], valid_out[method_ind,:,:], test_out[method_ind,:,:], model_fname)
-            
-            # Collect the results for the rotation
-            ptrain.append(results['train_predict'])
-            pvalid.append(results['valid_predict'])
-            ptest.append(results['test_predict'])
-            
-            etrain.append(results['train_eval'])
-            evalid.append(results['valid_eval'])
-            etest.append(results['test_eval'])
-            
-            if args.roc_curve:
-                fpr_train_tmp.append(results['fpr_train'])
-                fpr_valid_tmp.append(results['fpr_valid'])
-                fpr_test_tmp.append(results['fpr_test'])
-                
-                tpr_train_tmp.append(results['tpr_train'])
-                tpr_valid_tmp.append(results['tpr_valid'])
-                tpr_test_tmp.append(results['tpr_test'])
-            
-            if args.feature_importance:
-                fi.append(results['feature_importance'])
-            
-            if args.keras:
-                lc.append(results['history'])
-            
-        # Check if there was any learning
-        if len(ptrain) < 1:
-            # print('No FD was found in that region; no ML models were trained.')
-            continue
-            
-        # At the end of the experiments for each rotation, stack the reults into a single array (per variable) and average along the rotation axis
-        if n%10 == 0:
-                print('Evaluating the %s for the %dth region with the %s method...'%(args.ml_model, n+1, methods[method_ind][0]))
-          
-        pred_train[:,ind] = np.nanmean(np.stack(ptrain, axis = -1), axis = -1)
-        pred_valid[:,ind] = np.nanmean(np.stack(pvalid, axis = -1), axis = -1)
-        pred_test[:,ind] = np.nanmean(np.stack(ptest, axis = -1), axis = -1)
+            execute_single_exp(args, train_in, valid_in, test_in, 
+                               train_out[method_ind,:,:], valid_out[method_ind,:,:], test_out[method_ind,:,:], 
+                               data_in_whole, data_out_whole[method_ind,:,:], rot,
+                               model_fname, evaluate_each_grid = True)
+    
+    # Otherwise, train for 1 rotation at a time
+    else:
+        # Split the data into training, validation, and test sets
+        train_in, valid_in, test_in = split_data(data_in, args.ntrain_folds, args.rotation, normalize = args.normalize)
+        train_out, valid_out, test_out = split_data(data_out, args.ntrain_folds, args.rotation, normalize = False) # Note the label data is already binary
+
+        # Generate the model filename
+        model_fbase = generate_model_fname(args.ra_model, args.label, args.method, args.rotation[0])
+        model_fname = '%s/%s/%s/%s'%(dataset_dir, args.ml_model, args.method, model_fbase)
+        # print(model_fname)
         
-        eval_train[ind_lat,ind_lon,:] = np.nanmean(np.stack(etrain, axis = -1), axis = -1)
-        eval_valid[ind_lat,ind_lon,:] = np.nanmean(np.stack(evalid, axis = -1), axis = -1)
-        eval_test[ind_lat,ind_lon,:] = np.nanmean(np.stack(etest, axis = -1), axis = -1)
+        # Leave if the experiment has already been completed
+        if os.path.exists(model_fname):
+            print('File already exists/experiment has already been performed')
+            return
+
+        # If the training data has too few FD, bagging can easly find some subsets that have no FD, resulting in a class weight error.
+        # Ignore the class weights for this scenario
+        if (100*np.where(train_out == 1)[0].size/train_out.size) < 0.05:
+            args.class_weight = None
+        else:
+            args.class_weight = weight
+
+        # Perform the experiment
+        # The ML model is saved in this step
+        results = execute_single_exp(args, train_in, valid_in, test_in, 
+                                     train_out[method_ind,:,:], valid_out[method_ind,:,:], test_out[method_ind,:,:], 
+                                     data_in_whole, data_out_whole[method_ind,:,:], args.rotation[0],
+                                     model_fname, evaluate_each_grid = True)
+
+    # If this is a test run, merge the results over test rotations (otherwise, this is done separately in the main function, after all rotations are trained)
+    if test:
+        print('Merging the results of %s for the %s method...'%(args.ml_model, args.method))
+        results = merge_results(args, args.method, lat, lon, Nfold, Nvar, T, I, J)
         
-        eval_train_var[ind_lat,ind_lon,:] = np.nanstd(np.stack(etrain, axis = -1), axis = -1)
-        eval_valid_var[ind_lat,ind_lon,:] = np.nanstd(np.stack(evalid, axis = -1), axis = -1)
-        eval_test_var[ind_lat,ind_lon,:] = np.nanstd(np.stack(etest, axis = -1), axis = -1)
+    print('Done.')
+    return 
+
+
+def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
+    '''
+    Merge the results and predictions of a ML model across all rotations
+    
+    Inputs:
+    :param args: Argparse arguments
+    :param method: The FD identification method the ML model was trained to recognize
+    :param lat: Gridded latitude values corresponding to the full dataset
+    :param lon: Gridded longitude values corresponding to the full dataset
+    :param NFolds: Total number of folds in the full dataset
+    :param NVar: Number of variables used to train the ML model
+    :param T, I, J: Size of the time (for 1 fold), horizontal, and width dimensions respectively
+    '''
+    
+    # Construct the base file name for each result
+    model_fbase = 'results_%s_%s_%s_rot_'%(args.ra_model, 
+                                           args.label, 
+                                           method)
+    
+    dataset_dir = '%s/%s/%s/%s'%(args.dataset, args.ra_model, args.ml_model, method)
+    dataset_dir_hub = '%s/%s'%(args.dataset, args.ra_model)
+    model_fname = '%s/%s'%(dataset_dir, model_fbase)
+    
+    # Collect the files for all rotations
+    files = ['%s/%s'%(dataset_dir,f) for f in os.listdir(dataset_dir) if re.match(r'%s.+.pkl'%(model_fbase), f)]
+    files.sort()
+    
+    print(files)
+    
+    Nrot = len(files)
+    
+    # Initialize results
+    pred_train = np.ones((NFolds*T, I*J)) * np.nan
+    pred_valid = np.ones((NFolds*T, I*J)) * np.nan
+    pred_test = np.ones((NFolds*T, I*J)) * np.nan
+    
+    eval_train = np.ones((len(args.metrics))) * np.nan
+    eval_valid = np.ones((len(args.metrics))) * np.nan
+    eval_test = np.ones((len(args.metrics))) * np.nan
+    
+    eval_train_var = np.ones((len(args.metrics))) * np.nan
+    eval_valid_var = np.ones((len(args.metrics))) * np.nan
+    eval_test_var = np.ones((len(args.metrics))) * np.nan
+    
+    eval_train_map = np.ones((I,J,len(args.metrics))) * np.nan
+    eval_valid_map = np.ones((I,J,len(args.metrics))) * np.nan
+    eval_test_map = np.ones((I,J,len(args.metrics))) * np.nan
+    
+    eval_train_var_map = np.ones((I,J,len(args.metrics))) * np.nan
+    eval_valid_var_map = np.ones((I,J,len(args.metrics))) * np.nan
+    eval_test_var_map = np.ones((I,J,len(args.metrics))) * np.nan
+    
+    if args.feature_importance:
+        feature_import = np.ones((NVar)) * np.nan
+        feature_import_var = np.ones((NVar)) * np.nan
+    
+    if args.keras:
+        learn_curves = np.ones((T, I*J)) * np.nan
+        learn_curves_var = np.ones((T, I*J)) * np.nan
+    
+    # Initialize some lists
+    ptrain = []
+    
+    etrain = []
+    evalid = []
+    etest = []
+    
+    etrain_map = []
+    evalid_map = []
+    etest_map = []
+
+    lc = []
+    fi = []
+
+    fpr_train_tmp = []
+    fpr_valid_tmp = []
+    fpr_test_tmp = []
+
+    tpr_train_tmp = []
+    tpr_valid_tmp = []
+    tpr_test_tmp = []
+    
+    
+    # Collect the results for each rotation
+    for rot, f in enumerate(files):
+        with open(f, 'rb') as fn:
+            result = pickle.load(fn)
         
+        val_folds = int((np.array([args.ntrain_folds]) + rot) % NFolds)
+        test_folds = int((np.array([args.ntrain_folds]) + 1 + rot) % NFolds)
+
+        
+        # "train" set is for the entire dataset; this gets averaged together in the merged results
+        # Valid and test predictions get "stacked" together in temporal order (each rotation should only predict 1 fold for validation and test each)
+        ptrain.append(result['train_predict'])
+        pred_valid[val_folds*T:(val_folds+1)*T,:] = result['valid_predict']
+        pred_test[test_folds*T:(test_folds+1)*T,:] = result['test_predict']
+        
+        etrain.append(result['train_eval'])
+        evalid.append(result['valid_eval'])
+        etest.append(result['test_eval'])
+        
+        etrain_map.append(result['eval_train_map'])
+        evalid_map.append(result['eval_valid_map'])
+        etest_map.append(result['eval_test_map'])
+
         if args.roc_curve:
-            fpr_train.append(np.nanmean(np.stack(fpr_train_tmp, axis = -1), axis = -1))
-            fpr_valid.append(np.nanmean(np.stack(fpr_valid_tmp, axis = -1), axis = -1))
-            fpr_test.append(np.nanmean(np.stack(fpr_test_tmp, axis = -1), axis = -1))
-            
-            fpr_train_var.append(np.nanstd(np.stack(fpr_train_tmp, axis = -1), axis = -1))
-            fpr_valid_var.append(np.nanstd(np.stack(fpr_valid_tmp, axis = -1), axis = -1))
-            fpr_test_var.append(np.nanstd(np.stack(fpr_test_tmp, axis = -1), axis = -1))
-            
-            tpr_train.append(np.nanmean(np.stack(tpr_train_tmp, axis = -1), axis = -1))
-            tpr_valid.append(np.nanmean(np.stack(tpr_valid_tmp, axis = -1), axis = -1))
-            tpr_test.append(np.nanmean(np.stack(tpr_test_tmp, axis = -1), axis = -1))
-            
-            tpr_train_var.append(np.nanstd(np.stack(tpr_train_tmp, axis = -1), axis = -1))
-            tpr_valid_var.append(np.nanstd(np.stack(tpr_valid_tmp, axis = -1), axis = -1))
-            tpr_test_var.append(np.nanstd(np.stack(tpr_test_tmp, axis = -1), axis = -1))
-            
-        
+            fpr_train_tmp.append(result['fpr_train'])
+            fpr_valid_tmp.append(result['fpr_valid'])
+            fpr_test_tmp.append(result['fpr_test'])
+
+            tpr_train_tmp.append(result['tpr_train'])
+            tpr_valid_tmp.append(result['tpr_valid'])
+            tpr_test_tmp.append(result['tpr_test'])
+
         if args.feature_importance:
-            feature_import[ind_lat,ind_lon,:] = np.nanmean(np.stack(fi, axis = -1), axis = -1)
-            feature_import_var[ind_lat,ind_lon,:] = np.nanstd(np.stack(fi, axis = -1), axis = -1)
-        
+            fi.append(result['feature_importance'])
+
         if args.keras:
-            learn_curves[:,ind] = np.nanmean(np.stack(lc, axis = -1), axis = -1)
-            learn_curves_var[:,ind] = np.nanstd(np.stack(lc, axis = -1), axis = -1)
+            lc.append(result['history'])
+            
+    # Merge the results
+    pred_train = np.round(np.nanmean(np.stack(ptrain, axis = -1), axis = -1), 0) # The round restores the average back to binary 1 or 0; 
+    pred_valid = np.round(pred_valid, 0)                                         # average < 0.5 means majority of rotations did not identify FD
+    pred_test = np.round(pred_test, 0)
+
+    eval_train = np.nanmean(np.stack(etrain, axis = -1), axis = -1)
+    eval_valid = np.nanmean(np.stack(evalid, axis = -1), axis = -1)
+    eval_test = np.nanmean(np.stack(etest, axis = -1), axis = -1)
+
+    eval_train_var = np.nanstd(np.stack(etrain, axis = -1), axis = -1)
+    eval_valid_var = np.nanstd(np.stack(evalid, axis = -1), axis = -1)
+    eval_test_var = np.nanstd(np.stack(etest, axis = -1), axis = -1)
+    
+    eval_train_map = np.nanmean(np.stack(etrain_map, axis = -1), axis = -1)
+    eval_valid_map = np.nanmean(np.stack(evalid_map, axis = -1), axis = -1)
+    eval_test_map = np.nanmean(np.stack(etest_map, axis = -1), axis = -1)
+
+    eval_train_var_map = np.nanstd(np.stack(etrain_map, axis = -1), axis = -1)
+    eval_valid_var_map = np.nanstd(np.stack(evalid_map, axis = -1), axis = -1)
+    eval_test_var_map = np.nanstd(np.stack(etest_map, axis = -1), axis = -1)    
+
+    if args.roc_curve:
+        fpr_train = np.nanmean(np.stack(fpr_train_tmp, axis = -1), axis = -1)
+        fpr_valid = np.nanmean(np.stack(fpr_valid_tmp, axis = -1), axis = -1)
+        fpr_test = np.nanmean(np.stack(fpr_test_tmp, axis = -1), axis = -1)
+
+        fpr_train_var = np.nanstd(np.stack(fpr_train_tmp, axis = -1), axis = -1)
+        fpr_valid_var = np.nanstd(np.stack(fpr_valid_tmp, axis = -1), axis = -1)
+        fpr_test_var = np.nanstd(np.stack(fpr_test_tmp, axis = -1), axis = -1)
+
+        tpr_train = np.nanmean(np.stack(tpr_train_tmp, axis = -1), axis = -1)
+        tpr_valid = np.nanmean(np.stack(tpr_valid_tmp, axis = -1), axis = -1)
+        tpr_test = np.nanmean(np.stack(tpr_test_tmp, axis = -1), axis = -1)
+
+        tpr_train_var = np.nanstd(np.stack(tpr_train_tmp, axis = -1), axis = -1)
+        tpr_valid_var = np.nanstd(np.stack(tpr_valid_tmp, axis = -1), axis = -1)
+        tpr_test_var = np.nanstd(np.stack(tpr_test_tmp, axis = -1), axis = -1)
+
+
+    if args.feature_importance:
+        feature_import = np.nanmean(np.stack(fi, axis = -1), axis = -1)
+        feature_import_var = np.nanstd(np.stack(fi, axis = -1), axis = -1)
+
+    if args.keras:
+        learn_curves[:,ind] = np.nanmean(np.stack(lc, axis = -1), axis = -1)
+        learn_curves_var[:,ind] = np.nanstd(np.stack(lc, axis = -1), axis = -1)
         
-    # At the end of the experiments for each region, collect the results and save the results
-    print('Saving the results of %s for the %s method...'%(args.ml_model, methods[method_ind][0]))
-          
-    results_fbase = generate_results_fname(args.ra_model, args.label, methods[method_ind][0], args.keras)
-    results_fname = '%s/%s'%(dataset_dir, results_fbase)
+        
+    # Create a small plot of model performance across rotations for each metric
+    rotations = np.arange(Nrot)
+    for m, metric in enumerate(args.metrics):
+        met_train = [e[m] for e in etrain]
+        met_val = [e[m] for e in evalid]
+        met_test = [e[m] for e in etest]
+        
+        fig, ax = plt.subplots(figsize = [12, 8])
+        
+        # Set the title
+        ax.set_title('%s %s for each rotation for the %s'%(args.ml_model, metric, args.ra_model), fontsize = 16)
+
+        # Make the plots
+        ax.plot(rotations, met_train, color = 'r', linestyle = '-', linewidth = 1.5, marker = 'o', label = 'Training set')
+        ax.plot(rotations, met_val, color = 'darkgreen', linestyle = '-', linewidth = 1.5, marker = 'o', label = 'Validation set')
+        ax.plot(rotations, met_test, color = 'b', linestyle = '-', linewidth = 1.5, marker = 'o', label = 'Test set')
+
+        # Make a legend
+        ax.legend(loc = 'upper right', fontsize = 16)
+
+        # Set the labels
+        ax.set_ylabel(metric, fontsize = 16)
+        ax.set_xlabel('Rotation', fontsize = 16)
+
+
+        # Set the tick sizes
+        for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+            i.set_size(16)
+
+        # Save the figure
+        filename = '%s_%s_metric_performance_across_rotations.png'%(args.label, metric)
+        plt.savefig('%s/%s'%(dataset_dir_hub, filename), bbox_inches = 'tight')
+        plt.show(block = False)
+        
+            
+    # Generate the name of the overall results file        
+    results_fbase = generate_results_fname(args.ra_model, args.label, args.method, args.keras)
+    results_fname = '%s/%s'%(dataset_dir_hub, results_fbase)
     print(results_fname)
     
     results = {}
+    # Model coordinates
+    results['lat'] = lat; results['lon'] = lon
     
     # Model predictions
-    results['train_predict'] = pred_train.reshape(args.ntrain_folds*T, I, J, order = 'F')
-    results['valid_predict'] = pred_valid.reshape(T, I, J, order = 'F')
-    results['test_predict'] = pred_test.reshape(T, I, J, order = 'F')
+    results['all_predict'] = pred_train.reshape(NFolds*T, I, J, order = 'F')
+    results['valid_predict'] = pred_valid.reshape(NFolds*T, I, J, order = 'F')
+    results['test_predict'] = pred_test.reshape(NFolds*T, I, J, order = 'F')
     
-    results['train_predict_var'] = pred_train_var.reshape(args.ntrain_folds*T, I, J, order = 'F')
-    results['valid_predict_var'] = pred_valid_var.reshape(T, I, J, order = 'F')
-    results['test_predict_var'] = pred_test_var.reshape(T, I, J, order = 'F')
-    
-    # Model performance
-    results['train_eval'] = eval_train
+    # Overall model performance
+    results['all_eval'] = eval_train
     results['valid_eval'] = eval_valid
     results['test_eval'] = eval_test
     
-    results['train_eval_var'] = eval_train_var
+    results['all_eval_var'] = eval_train_var
     results['valid_eval_var'] = eval_valid_var
     results['test_eval_var'] = eval_test_var
     
-    results['eval_lon'], results['eval_lat'] = np.meshgrid(lon_labels, lat_labels)
+    # Model performance over each individual grid point
+    results['all_eval_map'] = eval_train_map.reshape(I, J, len(args.metrics), order = 'F')
+    results['valid_eval_map'] = eval_valid_map.reshape(I, J, len(args.metrics), order = 'F')
+    results['test_eval_map'] = eval_test_map.reshape(I, J, len(args.metrics), order = 'F')
     
-    # ROC curve (note this these are spatial means, and the mean variation in space)
+    results['all_eval_var_map'] = eval_train_var_map.reshape(I, J, len(args.metrics), order = 'F')
+    results['valid_eval_var_map'] = eval_valid_var_map.reshape(I, J, len(args.metrics), order = 'F')
+    results['test_eval_var_map'] = eval_test_var_map.reshape(I, J, len(args.metrics), order = 'F')
+    
+    # ROC curve
     if args.roc_curve:
-        results['fpr_train'] = np.nanmean(np.stack(fpr_train, axis = -1), axis = -1)
-        results['fpr_valid'] = np.nanmean(np.stack(fpr_valid, axis = -1), axis = -1)
-        results['fpr_test'] = np.nanmean(np.stack(fpr_test, axis = -1), axis = -1)
+        results['fpr_all'] = fpr_train
+        results['fpr_valid'] = fpr_valid
+        results['fpr_test'] = fpr_test
         
-        results['fpr_train_var'] = np.nanmean(np.stack(fpr_train_var, axis = -1), axis = -1)
-        results['fpr_valid_var'] = np.nanmean(np.stack(fpr_valid_var, axis = -1), axis = -1)
-        results['fpr_test_var'] = np.nanmean(np.stack(fpr_test_var, axis = -1), axis = -1)
+        results['fpr_all_var'] = fpr_train_var
+        results['fpr_valid_var'] = fpr_valid_var
+        results['fpr_test_var'] = fpr_test_var
         
-        results['tpr_train'] = np.nanmean(np.stack(tpr_train, axis = -1), axis = -1)
-        results['tpr_valid'] = np.nanmean(np.stack(tpr_valid, axis = -1), axis = -1)
-        results['tpr_test'] = np.nanmean(np.stack(tpr_test, axis = -1), axis = -1)
+        results['tpr_all'] = tpr_train
+        results['tpr_valid'] = tpr_valid
+        results['tpr_test'] = tpr_test
         
-        results['tpr_train_var'] = np.nanmean(np.stack(tpr_train_var, axis = -1), axis = -1)
-        results['tpr_valid_var'] = np.nanmean(np.stack(tpr_valid_var, axis = -1), axis = -1)
-        results['tpr_test_var'] = np.nanmean(np.stack(tpr_test_var, axis = -1), axis = -1)
+        results['tpr_all_var'] = tpr_train_var
+        results['tpr_valid_var'] = tpr_valid_var
+        results['tpr_test_var'] = tpr_test_var
     
     # Feature importance
     if args.feature_importance:
@@ -1331,15 +1166,12 @@ def execute_exp(args):
     # Save the results
     with open("%s"%(results_fname), "wb") as fp:
         pickle.dump(results, fp)
-          
-        
-    print('Done.')
+    
     return results
 
 
 
-
-#%%
+#%
 ##############################################
 if __name__ == '__main__':
     # Parse and check incoming arguments
@@ -1348,344 +1180,314 @@ if __name__ == '__main__':
     
     # Execute the experiments?
     if np.invert(args.nogo):
-        print('Performing experiments...')
-        execute_all_exp(args)
+        print('Performing experiment...')
+        execute_exp(args)
     
-    # Begin visualizing model performance
-    methods = ['christian', 'nogeura', 'pendergrass', 'liu', 'otkin']
-    
-    # Get the directory of the dataset
-    dataset_dir = '%s/%s'%(args.dataset, args.model)
-    
-    print('Loading results...')
-    results = []
-    
-    for method in methods:
-        results_fname = generate_results_fname(args.ra_model, args.label, method, args.keras)
-    
-        # Load in all the datasets for all methods
-        with open('%s/%s'%(dataset_dir, results_fname), 'rb') as fn:
-            results.append(pickle.load(fn))
-    
-    # Note here that results[0] = christian; results[1] = nogeura; results[2] = pendergrass; rsults[3] = liue; results[4] = otkin
-    
-    # Obtain the latitude and longitude for metrics
-    lat = results[0]['eval_lat']; lon = results[0]['eval_lon']
+    # Perform model evaluations instead? (This is done after all rotations for all methods are run)
+    if args.evaluate:
+        print('Initializing some variables...')
+        methods = ['christian', 'nogeura', 'pendergrass', 'liu', 'otkin']
+        
+        # Get the directory of the dataset
+        dataset_dir = '%s/%s'%(args.dataset, args.ra_model)
 
+        # Load the data
+        # Data is Nfeatures/Nmethods x time x space x fold
+        data_in = load_ml_data(args.input_data_fname, path = dataset_dir)
 
-    # Plot the results of the metrics
-    print('Plotting results...')
-    for met, metric in enumerate(args.metrics):
-        # Collect the metrics
-        metrics_train = [results[m]['train_eval'][:,:,met] for m in range(len(methods))]
-        metrics_valid = [results[m]['valid_eval'][:,:,met] for m in range(len(methods))]
-        metrics_test = [results[m]['test_eval'][:,:,met] for m in range(len(methods))]
+        # Make the rotations
+        Nvar, T, IJ, Nfolds = data_in.shape
         
-        if (metric == 'mse') | (metric == 'mae'):
-            cmin = 0; cmax = 0.5; cint = 0.05
-        else:
-            cmin = 0; cmax = 1; cint = 0.1
-    
-        # Plot the metric
-        display_metric_map(metrics_train, lat, lon, methods, 
-                           metric, cmin, cmax, cint, args.ra_model, 
-                           args.label, dataset = 'train', reverse = False, globe = args.globe, path = dataset_dir)
-        
-        display_metric_map(metrics_valid, lat, lon, methods, 
-                           metric, cmin, cmax, cint, args.ra_model, 
-                           args.label, dataset = 'valid', reverse = False, globe = args.globe, path = dataset_dir)
-        
-        display_metric_map(metrics_test, lat, lon, methods, 
-                           metric, cmin, cmax, cint, args.ra_model, 
-                           args.label, dataset = 'test', reverse = False, globe = args.globe, path = dataset_dir)
-        
-        # Remove variables at the end to clear space
-        del metric_train, metric_valid, metric_test
-    
-    
-    # Plot the ROC curves?
-    if args.roc_curve:
-        # Collect the ROC curve informations
-        print('Making ROC curves...')
-        tpr_train = [results[m]['tpr_train'] for m in range(len(methods))]
-        tpr_valid = [results[m]['tpr_valid'] for m in range(len(methods))]
-        tpr_test = [results[m]['tpr_test'] for m in range(len(methods))]
-        
-        tpr_var_train = [results[m]['tpr_train_var'] for m in range(len(methods))]
-        tpr_var_valid = [results[m]['tpr_valid_var'] for m in range(len(methods))]
-        tpr_var_test = [results[m]['tpr_test_var'] for m in range(len(methods))]
-        
-        fpr_train = [results[m]['fpr_train'] for m in range(len(methods))]
-        fpr_valid = [results[m]['fpr_valid'] for m in range(len(methods))]
-        fpr_test = [results[m]['fpr_test'] for m in range(len(methods))]
-        
-        fpr_var_train = [results[m]['fpr_train_var'] for m in range(len(methods))]
-        fpr_var_valid = [results[m]['fpr_valid_var'] for m in range(len(methods))]
-        fpr_var_test = [results[m]['fpr_test_var'] for m in range(len(methods))]
-        
-        # Plot the ROC curves
-        display_roc_curves(tpr_train, fpr_train, tpr_var_train, fpr_var_train, 
-                           methods, args.ra_model, args.label, dataset = 'train', path = dataset_dir)
-        
-        display_roc_curves(tpr_valid, fpr_valid, tpr_var_valid, fpr_var_valid, 
-                           methods, args.ra_model, args.label, dataset = 'valid', path = dataset_dir)
-        
-        display_roc_curves(tpr_test, fpr_test, tpr_var_test, fpr_var_test, 
-                           methods, args.ra_model, args.label, dataset = 'test', path = dataset_dir)
-        
-        # Remove variables at the end to clear space
-        del tpr_train, tpr_valid, tpr_test, tpr_train_var, tpr_valid_var, tpr_test_var
-        del fpr_train, fpr_valid, fpr_test, fpr_train_var, fpr_valid_var, fpr_test_var
-        
-        
-        
-    # Plot the feature importance?
-    if args.feature_importance:
-        features = [r'T', r'ET', r'$\Delta$ET', r'PET', r'$\Delta$PET', r'P', r'SM', r'$\Delta$SM']
-        I, J, NFeature = results[0]['feature_importance'].shape
-        
-        # Plot a map of feature importance for each features
-        print('Making feature importance maps...')
-        for n_feature in range(NFeature):
-            fi = [results[m]['feature_importance'][:,:,n_feature] for m in range(len(methods))]
-            fi_var = [results[m]['feature_importance_var'][:,:,n_feature] for m in range(len(methods))]
-            
-            display_metric_map(fi, lat, lon, methods, 
-                               features[n_feature], 0, 1, 0.05, args.ra_model, 
-                               args.label, dataset = 'feature_importance', reverse = False, globe = args.globe, path = dataset_dir)
-            
-            display_metric_map(fi_var, lat, lon, methods, 
-                               features[n_feature], 0, 1, 0.05, args.ra_model, 
-                               args.label, dataset = 'feature_importance_variation', reverse = False, globe = args.globe, path = dataset_dir)
-            
-        # Average the feature importance in space
-        fi = [np.nanmean(results[m]['feature_importance'].reshape(I*J, NFeature)) for m in range(len(methods))]
-        fi_var = [np.nanmean(results[m]['feature_importance_var'].reshape(I*J, NFeature)) for m in range(len(methods))]
-        
-        # Create a barplot of the overall feature variation
-        print('Making overall feature importance barplot...')
-        display_feature_importance(fi, fi_var, features, methods, args.ra_model, args.label, path = dataset_dir)
-        
-        # Remove variables at the end to clear space
-        del fi, fi_var
-        
-        
-    # Plot the learning curve?
+        # Load example data with subsetted lat/lon data
+        et = load_nc('evap', 'evaporation.%s.pentad.nc'%args.ra_model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
+        lat = et['lat']; lon = et['lon']
 
-    
-    # Since some of these files are large, remove them from the namespace to ensure conserve memory
-    del results, lat, lon
-    gc.collect() # Clears deleted variables from memory 
-
-    # Make predictions?
-    if (args.climatology_plot | args.time_series | args.case_studies | args.confusion_matrix_plots):
-        # Make a dataset to make predictions with
-        print('Loading data')
-        data = load_ml_data(args.input_data_fname, path = '%s/%s'%(args.dataset, args.ra_model))
-        evap = load_nc('evap', 'evaporation.%s.pentad.nc'%args.ra_model, sm = False, path = dataset_dir)
-
-        ind = np.where( (evap['month'] >= 4) & (evap['month'] <= 10) )[0]
-        dates = evap['ymd'][ind]
+        # Collect the spatial size of the data
+        I, J = lat.shape
         
-        I, J = evap['lat'].shape
+        print('Merging results results...')
+        results = []
 
-        NVar, T, IJ, NFold = data.shape
-        
-        rotations = np.arange(NFold)
-        
-        # Make the predictions and plot the results for each method
         for method in methods:
+            result_method = merge_results(args, lat, lon, Nfolds, Nvar, T, I, J)
             
-            # Make predictions for all folds across all rotations?
-            if os.path.exists("%s/%s_%s_predictions.pkl"%(dataset_dir, method, args.ml_model)):
-                # If the file exists, load the data rather than repeat intense computations
-                print('Loading predictions for %s method...'%method)
-                with open("%s/%s_%s_predictions.pkl"%(dataset_dir, method, args.ml_model), 'rb') as fp:
-                    pred = pickle.load(fp)
-                    pred_var = pickle.load(fp)
-                    
+            results.append(result_method)
+
+        # Note here that results[0] = christian; results[1] = nogeura; results[2] = pendergrass; rsults[3] = liue; results[4] = otkin
+
+        # Obtain the latitude and longitude for metrics
+        lat = results[0]['lat']; lon = results[0]['lon']
+        
+        # remove a large variable to clear space
+        del result_method
+        gc.collect() # Clears deleted variables from memory 
+
+
+        # Plot the results of the metrics
+        print('Plotting results...')
+        for met, metric in enumerate(args.metrics):
+            # Collect the metrics
+            metrics_all = [results[m]['all_eval_map'][:,:,met] for m in range(len(methods))]
+            metrics_valid = [results[m]['valid_eval_map'][:,:,met] for m in range(len(methods))]
+            metrics_test = [results[m]['test_eval_map'][:,:,met] for m in range(len(methods))]
+
+            if (metric == 'mse') | (metric == 'mae'):
+                cmin = 0; cmax = 0.5; cint = 0.05
             else:
-                # If the prediction files do not exist, make them
-                pred = np.ones((T * NFold, I, J)) * np.nan
-                pred_var = np.ones((T * NFold, I, J)) * np.nan
+                cmin = 0; cmax = 1; cint = 0.1
+
+            # Plot the metric
+            display_metric_map(metrics_all, lat, lon, methods, 
+                               metric, cmin, cmax, cint, args.ra_model, 
+                               args.label, dataset = 'all', reverse = False, globe = args.globe, path = dataset_dir)
+
+            display_metric_map(metrics_valid, lat, lon, methods, 
+                               metric, cmin, cmax, cint, args.ra_model, 
+                               args.label, dataset = 'valid', reverse = False, globe = args.globe, path = dataset_dir)
+
+            display_metric_map(metrics_test, lat, lon, methods, 
+                               metric, cmin, cmax, cint, args.ra_model, 
+                               args.label, dataset = 'test', reverse = False, globe = args.globe, path = dataset_dir)
+
+            # Remove variables at the end to clear space
+            del metric_all, metric_valid, metric_test
+            gc.collect() # Clears deleted variables from memory 
+
+
+        # Plot the ROC curves?
+        if args.roc_curve:
+            # Collect the ROC curve informations
+            print('Making ROC curves...')
+            tpr_all = [results[m]['tpr_all'] for m in range(len(methods))]
+            tpr_valid = [results[m]['tpr_valid'] for m in range(len(methods))]
+            tpr_test = [results[m]['tpr_test'] for m in range(len(methods))]
+
+            tpr_var_all = [results[m]['tpr_all_var'] for m in range(len(methods))]
+            tpr_var_valid = [results[m]['tpr_valid_var'] for m in range(len(methods))]
+            tpr_var_test = [results[m]['tpr_test_var'] for m in range(len(methods))]
+
+            fpr_all = [results[m]['fpr_all'] for m in range(len(methods))]
+            fpr_valid = [results[m]['fpr_valid'] for m in range(len(methods))]
+            fpr_test = [results[m]['fpr_test'] for m in range(len(methods))]
+
+            fpr_var_all = [results[m]['fpr_all_var'] for m in range(len(methods))]
+            fpr_var_valid = [results[m]['fpr_valid_var'] for m in range(len(methods))]
+            fpr_var_test = [results[m]['fpr_test_var'] for m in range(len(methods))]
+
+            # Plot the ROC curves
+            display_roc_curves(tpr_all, fpr_all, tpr_var_all, fpr_var_all, 
+                               methods, args.ra_model, args.label, dataset = 'all', path = dataset_dir)
+
+            display_roc_curves(tpr_valid, fpr_valid, tpr_var_valid, fpr_var_valid, 
+                               methods, args.ra_model, args.label, dataset = 'valid', path = dataset_dir)
+
+            display_roc_curves(tpr_test, fpr_test, tpr_var_test, fpr_var_test, 
+                               methods, args.ra_model, args.label, dataset = 'test', path = dataset_dir)
+
+            # Remove variables at the end to clear space
+            del tpr_all, tpr_valid, tpr_test, tpr_all_var, tpr_valid_var, tpr_test_var
+            del fpr_all, fpr_valid, fpr_test, fpr_all_var, fpr_valid_var, fpr_test_var
+            gc.collect() # Clears deleted variables from memory 
+
+
+
+        # Plot the feature importance?
+        if args.feature_importance:
+            features = [r'T', r'ET', r'$\Delta$ET', r'PET', r'$\Delta$PET', r'P', r'SM', r'$\Delta$SM']
+            NFeature = results[0]['feature_importance'].shape[0]
+
+            fi = [results[m]['feature_importance'] for m in range(len(methods))]
+            fi_var = [results[m]['feature_importance_var'] for m in range(len(methods))]
+
+            # Create a barplot of the overall feature variation
+            print('Making overall feature importance barplot...')
+            display_feature_importance(fi, fi_var, features, methods, args.ra_model, args.label, path = dataset_dir)
+
+            # Remove variables at the end to clear space
+            del fi, fi_var
+            gc.collect() # Clears deleted variables from memory 
+
+
+        # Plot the learning curve?
+
+
+        # Make predictions?
+        if (args.climatology_plot | args.time_series | args.case_studies | args.confusion_matrix_plots):
+
+            # Make the predictions and plot the results for each method
+            for m, method in enumerate(methods):
                 
+                pred_all = results[m]['all_predict']
+                pred_valid = results[m]['valid_predict']
+                pred_test = results[m]['test_predict']
 
-                print('Making predictions for the %s method...'%method)
-                # Make predictions based on one of the ML models
-                for n in range(NFold):
-                    print(n)
-                    pred[n*T:(n+1)*T,:,:], pred_var[n*T:(n+1)*T,:,:] = make_predictions(data[:,:,:,n], 
-                                                                                        evap['lat'], evap['lon'], 
-                                                                                        probabilities = False, threshold = 0.5, keras = False, 
-                                                                                        ml_model = args.ml_model, ra_model = args.ra_model, 
-                                                                                        method = method, rotations = rotations, label = args.label, 
-                                                                                        path = dataset_dir)
 
-                # Save the predictions
-                with open("%s/%s_%s_predictions.pkl"%(dataset_dir, method, args.ml_model), "wb") as fp:
-                    pickle.dump(pred, fp)
-                    pickle.dump(pred_var, fp)
-                    
-                    
-                    
-                    
-            # Make predictions for only test datasets?
-            if os.path.exists("%s/%s_%s_predictions_test_set.pkl"%(dataset_dir, method, args.ml_model)):
-                # If the file exists, load the data rather than repeat intense computations
-                print('Loading test set predictions for %s method...'%method)
-                with open("%s/%s_%s_predictions_test_set.pkl"%(dataset_dir, method, args.ml_model), 'rb') as fp:
-                    pred_test = pickle.load(fp)
-                    pred_var_test = pickle.load(fp)
-                    
-            else:
-                # If the prediction files do not exist, make them
-                pred_test = np.ones((T * NFold, I, J)) * np.nan
-                pred_var_test = np.ones((T * NFold, I, J)) * np.nan
-                
-                # Make the test folds
-                test_folds = [int((np.arrange([ntrain_folds]) + 1 + rot) % Nfolds) for rot in rotations]
-
-                print('Making predictions for the %s method...'%method)
-                # Make predictions based on one of the ML models
-                for n in range(NFold):
-                    print(n)
-                    pred_test[n*T:(n+1)*T,:,:], pred_var_test[n*T:(n+1)*T,:,:] = make_predictions(data[:,:,:,n], 
-                                                                                                  evap['lat'], evap['lon'], 
-                                                                                                  probabilities = False, threshold = 0.5, keras = False, 
-                                                                                                  ml_model = args.ml_model, ra_model = args.ra_model, 
-                                                                                                  method = method, rotations = np.array([test_folds[n]]), 
-                                                                                                  label = args.label, path = dataset_dir)
-
-                # Save the predictions
-                with open("%s/%s_%s_predictions_test_set.pkl"%(dataset_dir, method, args.ml_model), "wb") as fp:
-                    pickle.dump(pred_test, fp)
-                    pickle.dump(pred_var_test, fp)
-                    
-                
-            # Load in the true labels?
-            if (args.time_series | args.case_studies | args.confusion_matrix_plots):
+                # Load in the true labels
                 print('Loading true labels for the %s method...'%method)
                 true_fd = load_nc('fd', '%s.%s.pentad.nc'%(method, args.ra_model), path = dataset_dir)
+
+                ind = np.where( (true_fd['month'] >= 4) & (true_fd['month'] <= 10) )[0]
                 fd = true_fd['fd'][ind,:,:]
 
-
-            # Plot the threat scores?
-            if args.confusion_matrix_plots:
-                plot('Plotting confusion matrix skill scores for the %s method...'%method)
-                mask = load_mask(model = args.ra_model)
-
-                # Plot the threat scores with the full predictions
-                display_threat_score(fd, pred, ch_fd['lat'], ch_fd['lon'], dates, mask, 
-                                     model = args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
-                
-                display_far_score(fd, pred, ch_fd['lat'], ch_fd['lon'], dates, 
-                                  model =  args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
-                
-                display_pod_score(fd, pred, ch_fd['lat'], ch_fd['lon'], dates, 
-                                  model =  args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
-                
-                
-                # Plot the threat scores with only the test predictions (to see how the model generalizes to data it has not seen)
-                display_threat_score(fd, pred_test, ch_fd['lat'], ch_fd['lon'], dates, mask, 
-                                     model = args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
-                
-                display_far_score(fd, pred_test, ch_fd['lat'], ch_fd['lon'], dates, 
-                                  model =  args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
-                
-                display_pod_score(fd, pred_test, ch_fd['lat'], ch_fd['lon'], dates, 
-                                  model =  args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
+                dates = true_fd['ymd'][ind]
 
 
-            # Plot the predicted climatology map?
-            if args.climatology_plot:
-                print('Plotting the predicted climatology for the the %s method...'%method)
-                display_fd_climatology(pred, evap['lat'], evap['lon'], dates, 'Predicted FD for %s'%method, 
-                                       model = '%s_%s'%(method, args.ra_model), path = dataset_dir, grow_season = True)
-                
-                # Plot the climatology map with only the test predictions (to see how the model generalizes to data it has not seen)
-                display_fd_climatology(pred_test, evap['lat'], evap['lon'], dates, 'Predicted FD for %s'%method, 
-                                       model = '%s_%s_test_set'%(method, args.ra_model), path = dataset_dir, grow_season = True)
+                # Plot the threat scores?
+                if args.confusion_matrix_plots:
+                    plot('Plotting confusion matrix skill scores for the %s method...'%method)
+                    mask = load_mask(model = args.ra_model)
+
+                    # Plot the threat scores with the full predictions
+                    display_threat_score(fd, pred, true_fd['lat'], true_fd['lon'], dates, mask, 
+                                         model = args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
+
+                    display_far_score(fd, pred, true_fd['lat'], true_fd['lon'], dates, 
+                                      model =  args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
+
+                    display_pod_score(fd, pred, true_fd['lat'], true_fd['lon'], dates, 
+                                      model =  args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
 
 
-            # Plot the predicted time series (with true labels)?
-            if args.time_series:
-                print('Calculating areal coverage for the %s method...'%method)
-                # Examine predicted time series
-                T, I, J = pred.shape
-
-                # Determine the areal coverage for the time series
-                tmp_pred = np.nansum(pred.reshape(T, I*J), axis = -1)*32*32
-                tmp_pred_test = np.nansum(pred_test.reshape(T, I*J), axis = -1)*32*32
-
-                pred_area = []
-                pred_area_var = []
-                
-                pred_area_test = []
-                pred_area_var_test = []
-
-
-                # Determine the true areal coverage
-                tmp_true = np.nansum(fd.reshape(T, I*J), axis = -1)*32*32
-
-                true_area = []
-                true_area_var = []
-
-                years = np.array([date.year for date in dates])
-
-                # Determine the annual mean/std areal coverage of FD
-                for year in np.unique(years):
-                    ind = np.where(year == years)[0]
-
-                    pred_area.append(np.nanmean(tmp_pred[ind]))
-                    pred_area_var.append(np.nanstd(tmp_pred[ind]))
                     
-                    pred_area_test.append(np.nanmean(tmp_pred_test[ind]))
-                    pred_area_var_test.append(np.nanstd(tmp_pred_test[ind]))
+                    # Plot the threat scores with only the validation predictions (to see how the model generalizes to data it has not seen)
+                    display_threat_score(fd, pred_valid, true_fd['lat'], true_fd['lon'], dates, mask, 
+                                         model = args.ra_model, label = '%s_%s_valid_set'%(args.label, method), globe = args.globe, path = dataset_dir)
 
-                    true_area.append(np.nanmean(tmp_true[ind]))
-                    true_area_var.append(np.nanstd(tmp_true[ind]))
+                    display_far_score(fd, pred_valid, true_fd['lat'], true_fd['lon'], dates, 
+                                      model =  args.ra_model, label = '%s_%s_valid_set'%(args.label, method), globe = args.globe, path = dataset_dir)
 
-                pred_area = np.array(pred_area)
-                pred_area_var = np.array(pred_area_var)
-                
-                pred_area_test = np.array(pred_area_test)
-                pred_area_var_test = np.array(pred_area_var_test)
+                    display_pod_score(fd, pred_valid, true_fd['lat'], true_fd['lon'], dates, 
+                                      model =  args.ra_model, label = '%s_%s_valid_set'%(args.label, method), globe = args.globe, path = dataset_dir)
+                    
+                    
+                    
+                    # Plot the threat scores with only the test predictions (to see how the model generalizes to data it has not seen)
+                    display_threat_score(fd, pred_test, true_fd['lat'], true_fd['lon'], dates, mask, 
+                                         model = args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
 
-                true_area = np.array(true_area)
-                true_area_var = np.array(true_area_var)
+                    display_far_score(fd, pred_test, true_fd['lat'], true_fd['lon'], dates, 
+                                      model =  args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
+
+                    display_pod_score(fd, pred_test, true_fd['lat'], true_fd['lon'], dates, 
+                                      model =  args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
 
 
-                # Display the time series
-                print('Plotting the areal coverage of FD time series for the %s method...'%method)
-                display_time_series(true_area, pred_area, true_area_var, pred_area_var, dates[::43], 
-                                    r'Areal Coverage (km^2)', args.ra_model, '%s_%s'%(args.label, method), path = dataset_dir)
-                
-                # Display the time series with only the test predictions (to see how the model generalizes to data it has not seen)
-                display_time_series(true_area, pred_area_test, true_area_var, pred_area_var_test, dates[::43], 
-                                    r'Areal Coverage (km^2)', args.ra_model, '%s_%s_test_set'%(args.label, method), path = dataset_dir)
+                # Plot the predicted climatology map?
+                if args.climatology_plot:
+                    print('Plotting the predicted climatology for the the %s method...'%method)
+                    display_fd_climatology(pred, true_fd['lat'], true_fd['lon'], dates, 'Predicted FD for %s'%method, 
+                                           model = '%s_%s'%(method, args.ra_model), path = dataset_dir, grow_season = True)
 
-            # Plot a set of case studies?
-            if args.case_studies:
-                print('Plotting case studies for the %s method...'%method)
+                    
+                    # Plot the climatology map with only the validation predictions (to see how the model generalizes to data it has not seen)
+                    display_fd_climatology(pred_valid, true_fd['lat'], true_fd['lon'], dates, 'Predicted FD for %s'%method, 
+                                           model = '%s_%s_valid_set'%(method, args.ra_model), path = dataset_dir, grow_season = True)
+                    
+                    
+                    # Plot the climatology map with only the test predictions (to see how the model generalizes to data it has not seen)
+                    display_fd_climatology(pred_test, true_fd['lat'], true_fd['lon'], dates, 'Predicted FD for %s'%method, 
+                                           model = '%s_%s_test_set'%(method, args.ra_model), path = dataset_dir, grow_season = True)
 
-                # Plot the case studies for the predicted labels
-                display_case_study_maps(pred, evap['lon'], evap['lat'], dates, args.case_study_years, 
-                                        method = method, label = args.label, dataset = args.ra_model, 
-                                        globe = False, path = dataset_dir, grow_season = True)
 
-                # Plot the case studies for the true labels
-                display_case_study_maps(fd, evap['lon'], evap['lat'], dates, args.case_study_years, 
-                                        method = method, label = args.label, dataset = args.ra_model, 
-                                        globe = False, path = dataset_dir, grow_season = True)
-                
-                # Repeat the predicted case studes with predicted labels using test sets only (to see how the model generalizes to data it has not seen)
-                display_case_study_maps(pred_test, evap['lon'], evap['lat'], dates, args.case_study_years, 
-                                        method = method, label = '%s_test_set'%args.label, dataset = args.ra_model, 
-                                        globe = False, path = dataset_dir, grow_season = True)
-                
-                
-                
-            
+                # Plot the predicted time series (with true labels)?
+                if args.time_series:
+                    print('Calculating areal coverage for the %s method...'%method)
+                    # Examine predicted time series
+                    T, I, J = pred.shape
+
+                    # Determine the areal coverage for the time series
+                    tmp_pred = np.nansum(pred.reshape(T, I*J), axis = -1)*32*32
+                    tmp_pred_valid = np.nansum(pred_valid.reshape(T, I*J), axis = -1)*32*32
+                    tmp_pred_test = np.nansum(pred_test.reshape(T, I*J), axis = -1)*32*32
+
+                    pred_area = []
+                    pred_area_var = []
+
+                    pred_area_valid = []
+                    pred_area_var_valid = []
+                    
+                    pred_area_test = []
+                    pred_area_var_test = []
+
+
+                    # Determine the true areal coverage
+                    tmp_true = np.nansum(fd.reshape(T, I*J), axis = -1)*32*32
+
+                    true_area = []
+                    true_area_var = []
+
+                    years = np.array([date.year for date in dates])
+
+                    # Determine the annual mean/std areal coverage of FD
+                    for year in np.unique(years):
+                        ind = np.where(year == years)[0]
+
+                        pred_area.append(np.nanmean(tmp_pred[ind]))
+                        pred_area_var.append(np.nanstd(tmp_pred[ind]))
+
+                        pred_area_valid.append(np.nanmean(tmp_pred_valid[ind]))
+                        pred_area_var_valid.append(np.nanstd(tmp_pred_valid[ind]))
+                        
+                        pred_area_test.append(np.nanmean(tmp_pred_test[ind]))
+                        pred_area_var_test.append(np.nanstd(tmp_pred_test[ind]))
+
+                        true_area.append(np.nanmean(tmp_true[ind]))
+                        true_area_var.append(np.nanstd(tmp_true[ind]))
+
+                    pred_area = np.array(pred_area)
+                    pred_area_var = np.array(pred_area_var)
+
+                    pred_area_valid = np.array(pred_area_valid)
+                    pred_area_var_valid = np.array(pred_area_var_valid)
+                    
+                    pred_area_test = np.array(pred_area_test)
+                    pred_area_var_test = np.array(pred_area_var_test)
+
+                    true_area = np.array(true_area)
+                    true_area_var = np.array(true_area_var)
+
+
+                    # Display the time series
+                    print('Plotting the areal coverage of FD time series for the %s method...'%method)
+                    display_time_series(true_area, pred_area, true_area_var, pred_area_var, dates[::43], 
+                                        r'Areal Coverage (km^2)', args.ra_model, '%s_%s'%(args.label, method), path = dataset_dir)
+
+                    # Display the time series with only the validation predictions (to see how the model generalizes to data it has not seen)
+                    display_time_series(true_area, pred_area_valid, true_area_var, pred_area_var_valid, dates[::43], 
+                                        r'Areal Coverage (km^2)', args.ra_model, '%s_%s_valid_set'%(args.label, method), path = dataset_dir)
+                    
+                    # Display the time series with only the test predictions (to see how the model generalizes to data it has not seen)
+                    display_time_series(true_area, pred_area_test, true_area_var, pred_area_var_test, dates[::43], 
+                                        r'Areal Coverage (km^2)', args.ra_model, '%s_%s_test_set'%(args.label, method), path = dataset_dir)
+
+                # Plot a set of case studies?
+                if args.case_studies:
+                    print('Plotting case studies for the %s method...'%method)
+
+                    # Plot the case studies for the predicted labels
+                    display_case_study_maps(pred, true_fd['lon'], true_fd['lat'], dates, args.case_study_years, 
+                                            method = method, label = args.label, dataset = args.ra_model, 
+                                            globe = False, path = dataset_dir, grow_season = True)
+
+                    # Plot the case studies for the true labels
+                    display_case_study_maps(fd, true_fd['lon'], true_fd['lat'], dates, args.case_study_years, 
+                                            method = method, label = args.label, dataset = args.ra_model, 
+                                            globe = False, path = dataset_dir, grow_season = True)
+
+                    
+                    # Repeat the predicted case studes with predicted labels using validation sets (to see how the model generalizes to data it has not seen)
+                    display_case_study_maps(pred_valid, true_fd['lon'], true_fd['lat'], dates, args.case_study_years, 
+                                            method = method, label = '%s_test_set'%args.label, dataset = args.ra_model, 
+                                            globe = False, path = dataset_dir, grow_season = True)
+                    
+                    # Repeat the predicted case studes with predicted labels using test sets only (to see how the model generalizes to data it has not seen)
+                    display_case_study_maps(pred_test, true_fd['lon'], true_fd['lat'], dates, args.case_study_years, 
+                                            method = method, label = '%s_test_set'%args.label, dataset = args.ra_model, 
+                                            globe = False, path = dataset_dir, grow_season = True)
+
+
+
+
     print('Done')        
                     
 

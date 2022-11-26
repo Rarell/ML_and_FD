@@ -4,9 +4,9 @@
 --class_weight=40
 --svm_regularizer=l2
 --svm_regularizer_value=1e-4
---svm_loss=squared_loss
+--svm_loss=squared_hinge
 --svm_kernel=linear
---svm_stopping_err=1e-10
+--svm_stopping_err=1e-6
 --svm_max_iter=1000
 --svm_intercept
 --svm_intercept_scale=1

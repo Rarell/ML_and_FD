@@ -1,10 +1,10 @@
 --label=rf_experiment
 --remove_nans
 --ml_model=rf
---class_weight=40
---n_trees=250
+--class_weight=25
+--n_trees=150
 --tree_criterion=gini
---tree_depth=15
+--tree_depth=10
 --tree_max_features=sqrt
 --metrics
 accuracy
