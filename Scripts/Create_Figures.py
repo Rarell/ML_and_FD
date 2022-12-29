@@ -441,6 +441,57 @@ def display_time_series(data_true, data_pred, data_true_var, data_pred_var, time
     filename = '%s_%s_time_series.png'%(var_name, label)
     plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
     plt.show(block = False)
+    
+    
+
+#%%
+##############################################
+
+# Function to display the learning curves
+def display_learning_curve(lc, lc_var, metric_names, plot_var, model, label, path = './Figures'):
+    '''
+    Display the learning curve that is stored in fname
+    
+    :param lc: Ditionary of learning curves (each entry in the list is one metric)
+    :param lc_var: Ditionary of variation of learning curves (each entry in the list is one metric)
+    :param metric_names: The name of the metric whose learning curve is being plotted
+    :param plot_var: Boolean indicating whether to plot the variation in the learning cerves
+    :param model: The name of the reanalysis model the data is based on
+    :param label: A label used to distinguish the experiment
+    :param path: Path from the current directory to the directory the maps will be saved to
+    '''
+    
+    for n, metric in enumerate(metric_names):
+        # Create the plot
+        fig, ax = plt.subplots(figsize = [12, 8])
+    
+        # Set the title
+        ax.set_title('Learning curve of the %s for the %s'%(metric, model), fontsize = 16)
+    
+        # Display the loss
+        ax.plot(lc['%s'%metric], 'b-', label = 'Training')
+        ax.plot(lc['val_%s'%metric], 'r--', label = 'Validation')
+        
+        if plot_var:
+            ax.fill_between(range(len(lc['%s'%metric])), lc['%s'%metric]-lc_var['%s'%metric], lc['%s'%metric]+lc_var['%s'%metric], 
+                            alpha = 0.5, edgecolor = 'b', facecolor = 'r')
+            ax.fill_between(range(len(lc['val_%s'%metric])), lc['val_%s'%metric]-lc_var['val_%s'%metric], lc['val_%s'%metric]+lc_var['val_%s'%metric], 
+                            alpha = 0.5, edgecolor = 'b', facecolor = 'r')
+        
+        ax.legend(fontsize = 16)
+        
+        # Set the labels
+        ax.set_ylabel(metric, fontsize = 16)
+        ax.set_xlabel('Epochs', fontsize = 16)
+        
+        # Set the tick sizes
+        for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+            i.set_size(16)
+    
+        # Save the figure
+        filename = '%s_%s_%s_learning_curve.png'%(model, label, metric)
+        plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
+        plt.show(block = False)
 
 
 
@@ -449,7 +500,7 @@ def display_time_series(data_true, data_pred, data_true_var, data_pred_var, time
 
 # Function to display a set of case study maps
 def display_case_study_maps(data, lon, lat, time, year_list, method, label, dataset = 'narr', 
-                            globe = False, path = './Figures', grow_season = False, years = None, months = None):
+                            globe = False, path = './Figures', grow_season = False, pred_type = 'true', years = None, months = None):
     '''
     Create a set of case study maps for a given set of years
     
@@ -607,7 +658,7 @@ def display_case_study_maps(data, lon, lat, time, year_list, method, label, data
         
 
         # Save the figure
-        plt.savefig('%s/%s_%s_%s_case_study_%s.png'%(path,label,method,year,dataset), bbox_inches = 'tight')
+        plt.savefig('%s/%s_%s_%s_case_study_%s_%s.png'%(path,label,method,year, pred_type, dataset), bbox_inches = 'tight')
         plt.show(block = False)
         
     
