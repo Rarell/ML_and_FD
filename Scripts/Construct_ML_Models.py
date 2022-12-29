@@ -14,10 +14,7 @@ Current ML models include:
 - 
 
 TODO:
-- Ensure there are no function name conflicts with other scripts
 - Fill out the build_model() function
-- Add RFs
-- Add SVMs
 - Add NNs:
     ANNs
     CNNs
@@ -43,6 +40,8 @@ from joblib import parallel_backend
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib import colorbar as mcolorbar
+import tensorflow as tf
+from tensorflow import keras
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import cartopy.mpl.ticker as cticker
@@ -62,6 +61,12 @@ from sklearn import neural_network
 from sklearn import ensemble
 from sklearn import svm
 from sklearn import metrics
+
+# Tensorflow 2.x way of doing things
+from tensorflow.keras.layers import InputLayer, Dense, Dropout, Reshape, Masking, Flatten, RepeatVector
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, SpatialDropout2D, Concatenate
+from tensorflow.keras.layers import SimpleRNN, LSTM, GRU
+from tensorflow.keras.models import Sequential, Model
 
 
 #%%
@@ -88,12 +93,19 @@ def build_sklearn_model(args):
     return model
 
 
-def build_keras_model():
+def build_keras_model(args, shape = None):
     '''
     Build a ML model (a nueral network) from the keras package
     '''
     
-    model = 10
+    if (args.ml_model.lower() == 'ann') | (args.ml_model.lower() == 'artificial_neural_network'):
+        model = build_ann_model(args, shape)
+        
+    elif (args.ml_model.lower() == 'cnn') | (args.ml_model.lower() == 'convolutional_neural_network') | (args.ml_model.lower() == 'u-network') | (args.ml_model.lower() == 'autoencoder'):
+        model = build_cnn_model(args, shape)
+        
+    elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
+        model = build_rnn_model(args, shape)
     
     return model
 
@@ -155,194 +167,12 @@ def load_single_model(fname, keras):
     
     # If a keras model is being loaded, use the build-in load function. Else load a pickle file
     if keras:
-        pass ##### Commands to load a Keras model go here
+        model = keras.models.load_model(fname)
     else:
         with open('%s.pkl'%fname, 'rb') as fn:
             model = pickle.load(fn)
             
     return model
-
-
-def load_all_models(keras, ml_model, model, method, rotation = 0, path = './Data/narr/christian_models'):
-    '''
-    Load all ML models associated with a single FD method and a single dataset
-    
-    Inputs:
-    :param keras: A boolean indicating whether a keras ML model is being loaded
-    :param ml_model: The name of the ML model being loaded
-    :param ra_model: The name of the reanalysis model used to train the ML model
-    :param method: The name of the FD identification method the ML model learned
-    :param rotations: List of rotations over which to load the data
-    :param path: Path to the ML models that will be loaded
-    
-    Outputs:
-    :param models: A list of all machine learning models loaded for a single FD identification method and trained on a single reanalysis
-    '''
-    
-    # Initialize the models
-    models = []
-    
-    # Load lat/lon labels
-    with open('%s/lat_lon_labels.pkl'%(path), 'rb') as fn:
-        lat_labels = pickle.load(fn)
-        lon_labels = pickle.load(fn)
-    
-    I = len(lat_labels)
-    J = len(lon_labels)
-    
-    # Load all models for each combination of lat and lon labels
-    for n in range(len(lat_labels)):
-            
-        # Generate the model filename
-        model_fbase = generate_model_fname_build(model, ml_model, method, rotation, [lat_lab[n], lat_lab[n]+5], [lon_lab[n], lon_lab[n]+5])
-        model_fname = '%s/%s/%s/%s'%(path, ml_model, method, model_fbase)
-        print(model_fname)
-        
-        model = load_single_model(model_fname, keras)
-        
-        models.append(model)
-    
-            
-    return models
-
-# Function to make predictions for all models in a rotation (and average them together/take the standard deviation)
-def make_predictions(data, lat, lon, probabilities, threshold, keras, ml_model, ra_model, 
-                     method, rotations, label, path = './Data/narr/christian_models'):
-    '''
-    Function designed make predictions of FD for a full dataset for a given ML model. Predictions are the average over all rotations and the standard deviation.
-    
-    Inputs:
-    :param data: Data used to make FD predictions. Must be in a NVar x time x space format
-    :param lat: The latitude coordinates corresponding to data
-    :param lon: The longitude coordinates corresponding to data
-    :param probabilities: Boolean indicating whether to use return the average probabilistic predictions (true), or average yes/no predictions (false)
-    :param theshold: The probability threshold above which FD is said to occur
-    :param keras: A boolean indicating whether a keras ML model is being used
-    :param ml_model: The name of the ML model being used
-    :param ra_model: The name of the reanalysis model used to train the ML model
-    :param method: The name of the FD identification method the ML model learned
-    :param rotations: List of rotations over which to load the data
-    :param label: The experiment label of the ML models
-    :param path: Path to the ML models that will be loaded
-    
-    Outputs:
-    :param pred: The mean FD predictions of FD
-    :param pred_var: The variation in FD probability predictions across all rotations
-    '''
-    
-        
-    # Reshape lat and lon into 1D arrays
-    print('Initializing some values')
-    I, J = lat.shape
-    lat1d = lat.reshape(I*J, order = 'F')
-    lon1d = lon.reshape(I*J, order = 'F')
-    
-    # Load in lat/lon labels
-    lat_labels = np.arange(-90, 90+5, 5)
-    lon_labels = np.arange(-180, 180+5, 5)
-    
-    I_lab = len(lat_labels)
-    J_lab = len(lon_labels)
-    
-    # Remove NaNs?
-    if np.invert(keras):
-        data[np.isnan(data)] = -995
-    
-    # Initialize the prediction variables
-    NVar, T, IJ = data.shape
-    
-    # data_reshaped = data.reshape(NVar, T, I*J, order = 'F')
-    
-    pred = np.ones((T, I*J)) * np.nan
-    pred_var = np.ones((T, I*J)) * np.nan
-    
-    # Split the dataset into regions
-    print('Splitting data into regions')
-    data_split = []
-    lat_lab = []
-    lon_lab = []
-    for i in range(I_lab-1):
-        for j in range(J_lab-1):
-            ind = np.where( ((lat1d >= lat_labels[i]) & (lat1d <= lat_labels[i+1])) & ((lon1d >= lon_labels[j]) & (lon1d <= lon_labels[j+1])) )[0]
-            
-            # Not all datasets are global; remove sets where there is no data
-            if len(ind) < 1: 
-                continue
-                
-            lat_lab.append(lat_labels[i])
-            lon_lab.append(lon_labels[j])
-            
-            data_split.append(data[:,:,ind])
-            
-    print('There are %d regions.'%len(data_split))
-            
-            
-    # Begin making predictions
-    print('Loading models and making predictions')
-    for n in range(len(data_split)):
-        ind = np.where( ((lat1d >= lat_lab[n]) & (lat1d <= lat_lab[n]+5)) & ((lon1d >= lon_lab[n]) & (lon1d <= lon_lab[n]+5)) )[0]
-        
-        pred_tmp = []
-        for rot in rotations:
-            # Generate the model filename
-            model_fbase = generate_model_fname_build(ra_model, label, method, rot, [lat_lab[n], lat_lab[n]+5], [lon_lab[n], lon_lab[n]+5])
-            model_fname = '%s/%s/%s/%s/%s'%(path, ra_model, ml_model, method, model_fbase)
-            if keras:
-                test_name = model_fname
-            else:
-                test_fname = '%s.pkl'%model_fname
-
-
-            # Check if model exists (it will not if there are no land points)
-            if np.invert(os.path.exists(test_fname)):
-                continue
-            
-            model = load_single_model(model_fname, keras)
-            
-            # Code to make prediction depends on whether a keras model is used
-            if keras:
-                pred_tmp.append(model.predict(data_split[n]))
-            else:
-                NVar, T, IJ_tmp = data_split[n].shape
-                
-                tmp_data = data_split[n].reshape(NVar, T*IJ_tmp, order = 'F')
-                if (ml_model.lower() == 'svm') | (ml_model.lower() == 'support_vector_machine'):
-                    # Note SVMs do not have a predict_proba option
-                    tmp = model.predict(tmp_data.T)
-                    pred_tmp.append(tmp.reshape(T, IJ_tmp, order = 'F'))
-                
-                else:
-                    tmp = model.predict_proba(tmp_data.T)
-
-                    # Check if the model only predicts 0s
-                    only_zeros = tmp.shape[1] <= 1
-                    if only_zeros:
-                        pred_tmp.append(np.zeros((T,len(ind))))
-                    else:
-                        pred_tmp.append(tmp[:,1].reshape(T, IJ_tmp, order = 'F'))
-                    
-        # For sea values, pred_tmp will be empty. Continue to the next region if this happens
-        if len(pred_tmp) < 1:
-            continue
-                    
-        # Take the average of the probabilistic predictions across all rotations
-        pred[:,ind] = np.nanmean(np.stack(pred_tmp, axis = -1), axis = -1)
-
-        # Take the standard deviation of the probabilistic predictions across all rotations
-        pred_var[:,ind] = np.nanstd(np.stack(pred_tmp, axis = -1), axis = -1)
-            
-    # Turn the mean probabilistic predictions into true/false?
-    if np.invert(probabilities):
-        pred = np.where(pred >= threshold, 1, pred)
-        pred = np.where(pred < threshold, 0, pred) # Performing this twice preserves NaN values as not available
-        
-    # Turn the predictions into 3D data
-    pred = pred.reshape(T, I, J, order = 'F')
-    pred_var = pred_var.reshape(T, I, J, order = 'F')
-    
-    return pred, pred_var
-                    
-
 
 
 #%%
@@ -423,6 +253,10 @@ def build_svm_model(args):
     return model
 
 
+
+
+
+
 #%%
 ##############################################
 
@@ -453,3 +287,672 @@ def build_adaboost_model(args):
                                         learning_rate = args.ada_learning_rate)
     
     return model
+
+
+
+
+
+#%%
+##############################################
+
+# Function to make a ANN model
+def build_ann_model(args, shape):
+    '''
+    Construct an artificial neural network (ANN) model using keras
+    
+    :Inputs:
+    :param args: Argparse arguments
+    :param shape: The shape of the training data (size/n_examples x map shape x n_variables)
+    '''
+    
+                    
+    # Define any possible regularization
+    if args.L1_regularization is not None:
+        regularizer = keras.regularizers.l1(args.L1_regularization)
+    elif args.L2_regularization is not None:
+        regularizer = keras.regularizers.l2(args.L2_regularization)
+    else:
+        regularizer = None # Define the regularizar for the model, but set to 0 to not use it
+                    
+    # Create the model
+    model = Sequential()
+    
+    # Add the input layer
+    model.add(InputLayer(input_shape = (shape[1],)))
+    
+    # Add a dropout layer to the input?
+    if np.invert(args.dropout == None):
+        model.add(Dropout(rate = args.dropout, name = 'input_dropout'))
+           
+    # Add the hidden layers
+    for n, unit in enumerate(args.units):
+        model.add(Dense(unit, use_bias = True, name = 'hidden%02d'%(n+1), activation = args.activation[n],
+                       kernel_regularizer = regularizer))
+                    
+        # Add dropout layers?
+        if np.invert(args.dropout == None):
+            model.add(Dropout(rate = args.dropout, name = 'hidden%02d_input'%(n+1)))
+    
+    # Add a reshape layer so sample weights can work
+    #model.add(Reshape((shape[1]*shape[2], args.units[-1]), name = 'Output_reshape'))
+    
+    # Add the output layer
+    model.add(Dense(units = 3, use_bias = True, name = 'Output', activation = args.output_activation))
+    
+    
+    # Define the optimizer
+    opt = keras.optimizers.Adam(learning_rate = args.lrate, beta_1 = 0.9, beta_2 = 0.999,
+                                epsilon = None, decay = 0.0, amsgrad = False)
+    
+    # Build the model and define the loss function
+    mode = 'temporal' if (args.class_weight != None) else None
+    
+    model.compile(loss = args.loss, optimizer = opt, 
+                  metrics = ['categorical_accuracy', tf.keras.metrics.Precision(name = 'precision'), 
+                             tf.keras.metrics.Recall(name = 'recall'), tf.keras.metrics.AUC(name = 'auc')], sample_weight_mode = mode)
+    
+    return model
+
+
+
+#%%
+##############################################
+
+# Function to make a Convolutional U-net model
+def build_cnn_model(args, shape):
+    '''
+    Build a convolutional N-net either sequentially (without skip connections) or non-sequentially (with skip connections)
+    
+    :Inputs:
+    :param args: Argparse arguments
+    :param shape: The shape of the training data (size/n_examples x map shape x n_variables)
+    '''
+    
+    # Create a dictionary of the arguments for convience
+    arg_dict = {'sequential': args.sequential,
+                'map_size': shape,
+                'nfilters': args.nfilters,
+                'kernel_size': args.kernel_size,
+                'strides': args.strides,
+                'pool_size_horizontal': args.pool_size_horizontal,
+                'pool_size_vertical': args.pool_size_vertical,
+                'activation': args.activation,
+                'output_activation': args.output_activation,
+                'loss': args.loss,
+                'dropout': args.dropout,
+                'L1_regularizer': args.L1_regularization,
+                'L2_regularizer': args.L2_regularization,
+                'lrate': args.lrate,
+                'metrics': ['categorical_accuracy', tf.keras.metrics.Precision(name = 'precision'), 
+                            tf.keras.metrics.Recall(name = 'recall'), tf.keras.metrics.AUC(name = 'auc')],
+                'class_weight': args.class_weight}
+    
+    return sequential_cnn(arg_dict) if args.sequential else model_cnn(arg_dict)
+
+
+def sequential_cnn(args):
+    '''
+    Build a sequential convolutional U-style autoencoder (does not have skip connections)
+    
+    :param args: Dictionary of parameters for the model. Dictionary must contain:
+                     map_size: Size of input data
+                     nfilters: List of the number of filters in each CNN layer
+                     kernel_size: List of kernel size of each CNN layer
+                     strides: List of the number of strides of each CNN layer
+                     pool_size: List of the stride for pooling/upscale size for each CNN layer (1 = no pooling/upscaling)
+                     activation: Activation function/Nonlinearity for each CNN layers
+                     output_activation: Activation function/Nonlinearity for the output layer
+                     loss: Loss function being minimized
+                     dropout: Dropout probability for dropout layers
+                     lambda_l1: Lambda_1 parameter for L1 regularization
+                     lambda_l2: Lambda_2 parameter for L2 regularization
+                     lrate: Learning rate for the model
+                     metrics: List of metrics to calculate for each epoch and for evaluations
+    '''
+    # Define the regularizer
+    if args['L2_regularizer'] is not None:
+        kernel_regularizer = tf.keras.regularizers.l2(args['L2_regularizer'])
+    elif args['L1_regularizer'] is not None:
+        kernel_regularizer = tf.keras.regularizers.l1(args['L1_regularizer'])
+    else:
+        kernel_regularizer = None
+    
+    # Create the model
+    model = Sequential()
+    
+    # Add the input layer
+    model.add(InputLayer(input_shape = (args['map_size'][1], args['map_size'][2], args['map_size'][3]), name = 'Input'))
+    
+    # Build the encode side
+    for n, (nf, k, s, psh, psv) in enumerate(zip(args['nfilters'], 
+                                                 args['kernel_size'], 
+                                                 args['strides'], 
+                                                 args['pool_size_horizontal'], 
+                                                 args['pool_size_vertical'])):
+        model.add(Conv2D(kernel_size = k,
+                         filters = nf, 
+                         strides = s,
+                         activation = args['activation'][n],
+                         padding = 'same',
+                         use_bias = True,
+                         kernel_initializer = 'random_uniform',
+                         bias_initializer = 'zeros',
+                         kernel_regularizer = kernel_regularizer,
+                         name = 'CDown%d'%(n+1)))
+        
+        # Add dropout?
+        if args['dropout'] is not None:
+            model.add(SpatialDropout2D(rate = args['dropout'], name = 'Spatial_Dropout_Down%d'%(n+1)))
+            
+        # Downscale?
+        if (psh > 1) | (psv > 1):
+            model.add(MaxPooling2D(pool_size = (psv, psh),
+                                   strides = (psv, psh),
+                                   name = 'MAX%d'%(n+1)))
+            
+            
+    # Build the decoder side
+    for n, (nf, k, s, ush, usv) in enumerate(zip(reversed(args['nfilters']), 
+                                                 reversed(args['kernel_size']), 
+                                                 reversed(args['strides']), 
+                                                 reversed(args['pool_size_horizontal']), 
+                                                 reversed(args['pool_size_vertical']))):
+
+        # Upsample?
+        if (ush > 1) | (usv > 1):
+            model.add(UpSampling2D(size = (usv, ush), 
+                                   name = 'UpSample%d'%(n+1)))
+
+
+        model.add(Conv2D(kernel_size = k,
+                         filters = nf, 
+                         strides = s,
+                         activation = args['activation'][n],
+                         padding = 'same',
+                         use_bias = True,
+                         kernel_initializer = 'random_uniform',
+                         bias_initializer = 'zeros',
+                         kernel_regularizer = kernel_regularizer,
+                         name = 'CUp%d'%(n+1)))
+
+        # Add dropout?
+        if args['dropout'] is not None:
+            model.add(SpatialDropout2D(rate = args['dropout'], name = 'Spatial_Dropout_Up%d'%(n+1)))
+
+    # Add the output layer
+    model.add(Conv2D(kernel_size = 1,
+                     filters = 3, 
+                     strides = 1,
+                     activation = args['activation'][-1],
+                     use_bias = True,
+                     kernel_initializer = 'random_uniform',
+                     bias_initializer = 'zeros',
+                     kernel_regularizer = kernel_regularizer,
+                     name = 'Output_CNN'))
+    
+    # This last reshape and dense layer allows the use of sample weights (data shape must be < 3D)
+    model.add(Reshape((args['map_size'][1]*args['map_size'][2], 3), name = 'Output_reshape'))
+    
+    # Add the output layer
+    model.add(Dense(units = 3, use_bias = True, name = 'Output', activation = args['output_activation']))
+
+    # Define the optimizer
+    opt = tf.keras.optimizers.Adam(learning_rate = args['lrate'], beta_1 = 0.9, beta_2 = 0.999,
+                                   epsilon = None, decay = 0.0, amsgrad = False)
+
+    # Build the model and define the loss function
+    mode = 'temporal' if (args['class_weight'] != None) else None
+    
+    # Compile the model
+    model.compile(loss = args['loss'], optimizer = opt, metrics = args['metrics'], sample_weight_mode = mode)
+    
+    return model
+    
+def model_cnn(args):
+    '''
+    Build a non-sequential convolutional u-et with skip connections right before each pool/right after each upsample
+    
+    :param args: Dictionary of parameters for the model. Dictionary must contain:
+                     image_size: Size of input data
+                     nclasses: Number of classes to be predicted
+                     nfilters: List of the number of filters in each CNN layer
+                     kernel_size: List of kernel size of each CNN layer
+                     strides: List of the number of strides of each CNN layer
+                     pool_size: List of the stride for pooling/upscale size for each CNN layer (1 = no pooling/upscaling)
+                     activation: Activation function/Nonlinearity for each CNN layers
+                     output_activation: Activation function/Nonlinearity for the output layer
+                     loss: Loss function being minimized
+                     dropout: Dropout probability for dropout layers
+                     lambda_l1: Lambda_1 parameter for L1 regularization
+                     lambda_l2: Lambda_2 parameter for L2 regularization
+                     lrate: Learning rate for the model
+                     metrics: List of metrics to calculate for each epoch and for evaluations
+    '''
+    # Define the regularizer
+    if args['L2_regularizer'] is not None:
+        kernel_regularizer = tf.keras.regularizers.l2(args['L2_regularizer'])
+    elif args['L1_regularizer'] is not None:
+        kernel_regularizer = tf.keras.regularizers.l1(args['L1_regularizer'])
+    else:
+        kernel_regularizer = None
+    
+    
+    # Define the input tensor
+    input_tensor = Input(shape = (args['map_size'][1], args['map_size'][2], args['map_size'][3]), name = 'Input')
+    tensor = input_tensor
+    
+    # Define an empty list to be used for skip connections
+    skip_connections = []
+    
+    # Build the encoder side
+    for n, (nf, k, s, psh, psv) in enumerate(zip(args['nfilters'], 
+                                                 args['kernel_size'], 
+                                                 args['strides'], 
+                                                 args['pool_size_horizontal'], 
+                                                 args['pool_size_vertical'])):
+        tensor = Conv2D(kernel_size = k,
+                        filters = nf, 
+                        strides = s,
+                        activation = args['activation'][n],
+                        padding = 'same',
+                        use_bias = True,
+                        kernel_initializer = 'random_uniform',
+                        bias_initializer = 'zeros',
+                        kernel_regularizer = kernel_regularizer,
+                        name = 'CDown%d'%(n+1))(tensor)
+        
+        # Add dropout?
+        if args['dropout'] is not None:
+            tensor = SpatialDropout2D(rate = args['dropout'], name = 'Spatial_Dropout_Down%d'%(n+1))(tensor)
+            
+        # Downscale?
+        if (psh > 1) | (psv > 1):
+            # Skip connections will be placed right before downscaling/right after upscaling
+            skip_connections.append(tensor)
+            
+            tensor = MaxPooling2D(pool_size = (psv, psh), 
+                                  strides = (psv, psh),
+                                  name = 'MAX%d'%(n+1))(tensor)
+            
+            
+    # Build the decoder side
+    for n, (nf, k, s, ush, usv) in enumerate(zip(reversed(args['nfilters']), 
+                                                 reversed(args['kernel_size']), 
+                                                 reversed(args['strides']), 
+                                                 reversed(args['pool_size_horizontal']), 
+                                                 reversed(args['pool_size_vertical']))):
+        # Upsample?
+        if (ush > 1) | (usv > 1):
+            tensor = UpSampling2D(size = (usv, ush), 
+                                  name = 'UpSample%d'%(n+1))(tensor)
+
+            # Attach skip connection
+            tensor = Concatenate()([tensor, skip_connections.pop()])
+
+        tensor = Conv2D(kernel_size = k,
+                        filters = nf, 
+                        strides = s,
+                        activation = args['activation'][n],
+                        padding = 'same',
+                        use_bias = True,
+                        kernel_initializer = 'random_uniform',
+                        bias_initializer = 'zeros',
+                        kernel_regularizer = kernel_regularizer,
+                        name = 'CUp%d'%(n+1))(tensor)
+
+        # Add dropout?
+        if args['dropout'] is not None:
+            tensor = SpatialDropout2D(rate = args['dropout'], name = 'Spatial_Dropout_Up%d'%(n+1))(tensor)
+
+    # Add the output layer
+    tensor = Conv2D(kernel_size = 1,
+                    filters = 3, 
+                    strides = 1,
+                    activation = args['activation'][-1],
+                    use_bias = True,
+                    kernel_initializer = 'random_uniform',
+                    bias_initializer = 'zeros',
+                    kernel_regularizer = kernel_regularizer,
+                    name = 'Output_Convolution')(tensor)
+    
+    # This last reshape and dense layer allows the use of sample weights (data shape must be < 3D)
+    tensor = Reshape((args['map_size'][1]*args['map_size'][2], 3), name = 'Output_reshape')(tensor)
+    
+    # Add the output layer
+    output_tensor = Dense(units = 3, use_bias = True, #bias_initializer = keras.initializers.Constant(-5.0682), # Number comes from  np.log(# pos obs/# total obs)
+                          name = 'Output', activation = args['output_activation'])(tensor)
+
+    # Create the model
+    model = Model(inputs = input_tensor, outputs = output_tensor)
+
+    # Define the optimizer
+    opt = tf.keras.optimizers.Adam(learning_rate = args['lrate'], beta_1 = 0.9, beta_2 = 0.999,
+                                   epsilon = None, decay = 0.0, amsgrad = False)
+
+    # Build the model and define the loss function
+    mode = 'temporal' if (args['class_weight'] != None) else None
+    
+    # Compile the model
+    model.compile(loss = args['loss'], optimizer = opt, metrics = args['metrics'], sample_weight_mode = mode)
+    
+    return model
+
+
+def build_rnn_model(args, shape):
+    '''
+    Construct an recurrent neural network (RNN) model using keras
+    
+    :Inputs:
+    :param args: Argparse arguments
+    :param shape: The shape of the training data (time x map shape/N samples x n_variables)
+    '''
+    # Define the regularizer
+    if args.L1_regularization is not None:
+        regularizer = keras.regularizers.l1(args.L1_regularization)
+    elif args.L2_regularization is not None:
+        regularizer = keras.regularizers.l2(args.L2_regularization)
+    else:
+        regularizer = None # Define the regularizar for the model, but set to 0 to not use it
+        
+    # Create the model
+    model = Sequential()
+
+    # Add the embedding layer layer
+    model.add(InputLayer(input_shape = (None, shape[2]), name = 'Input'))
+              
+    # Add recurrent layers
+    for n, (unit, activation, model_type) in enumerate(zip(args.rnn_units, args.rnn_activation, args.rnn_model)):
+        if model_type == 'GRU': # The local bash run did seem to acknowledge the literal 'is' here
+            model.add(GRU(unit,
+                          activation = activation,
+                          use_bias = True,
+                          return_sequences = True,
+                          kernel_initializer = 'random_uniform',
+                          bias_initializer = 'random_uniform',
+                          kernel_regularizer = regularizer,
+                          dropout = args.dropout,
+                          name = 'GRU_layer%d'%(n+1)))
+
+        elif model_type == 'LSTM':
+            model.add(LSTM(unit,
+                           activation = activation,
+                           use_bias = True,
+                           return_sequences = True,
+                           kernel_initializer = 'random_uniform',
+                           bias_initializer = 'random_uniform',
+                           kernel_regularizer = regularizer,
+                           dropout = args.dropout,
+                           name = 'LSTM_layer%d'%(n+1)))
+
+        else:
+            model.add(SimpleRNN(unit,
+                                activation = activation,
+                                use_bias = True,
+                                return_sequences = True,
+                                kernel_initializer = 'random_uniform',
+                                bias_initializer = 'random_uniform',
+                                kernel_regularizer = regularizer,
+                                dropout = args.dropout,
+                                name = 'sRNN_layer%d'%(n+1)))
+    
+    # Add dense layers
+    for n, unit in enumerate(args.units):
+        model.add(Dense(unit, 
+                        use_bias = True,
+                        kernel_initializer = 'random_uniform',
+                        bias_initializer = 'zeros',
+                        activation = args.activation[n],
+                        name = 'D%d'%(n+1), 
+                        kernel_regularizer = regularizer))
+        
+        # Add dropout?
+        if args.dropout is not None:
+            model.add(Dropout(rate = args.dropout, name = 'D%d_dropout'%(n+1)))
+            
+    # Add the output layer
+    # Activation for the output layer must be softmax
+    model.add(Dense(3, 
+                    use_bias = True, 
+                    activation = args.output_activation, 
+                    kernel_initializer = 'random_uniform',
+                    bias_initializer = 'zeros',
+                    name = 'Output'))
+    
+    # Define the optimizer
+    opt = tf.keras.optimizers.Adam(learning_rate = args.lrate, beta_1 = 0.9, beta_2 = 0.999,
+                                   epsilon = None, decay = 0.0, amsgrad = False)
+    
+    # Build the model and define the loss function
+    mode = 'temporal' if (args.class_weight != None) else None
+    
+    model.compile(loss = args.loss, optimizer = opt, 
+                  metrics = ['categorical_accuracy', tf.keras.metrics.Precision(name = 'precision'), 
+                             tf.keras.metrics.Recall(name = 'recall'), tf.keras.metrics.AUC(name = 'auc')], sample_weight_mode = mode)
+    
+    return model
+
+############
+# A TF custom loss function, modifying the cross entropy loss to 1/N*sum(alpha*(1 - p)**gamma * y * log(p))
+# Code was obtained from, and information on the focal loss can be found at, 
+# https://www.dlology.com/blog/multi-class-classification-with-focal-loss-for-imbalanced-datasets/
+def focal_loss(gamma=2, alpha=4):
+
+    gamma = float(gamma)
+    alpha = float(alpha)
+
+    def focal_loss_fixed(y_true, y_pred):
+        """Focal loss for multi-classification
+        FL(p_t)=-alpha(1-p_t)^{gamma}ln(p_t)
+        Notice: y_pred is probability after softmax
+        gradient is d(Fl)/d(p_t) not d(Fl)/d(x) as described in the paper
+        d(Fl)/d(p_t) * [p_t(1-p_t)] = d(Fl)/d(x)
+        Focal Loss for Dense Object Detection
+        https://arxiv.org/abs/1708.02002
+
+        Arguments:
+            y_true {tensor} -- ground truth labels, shape of [batch_size, num_cls]
+            y_pred {tensor} -- model's output, shape of [batch_size, num_cls]
+
+        Keyword Arguments:
+            gamma {float} -- (default: {2.0})
+            alpha {float} -- (default: {4.0})
+
+        Returns:
+            [tensor] -- loss.
+        """
+        epsilon = 1e-9
+        y_true = tf.convert_to_tensor(y_true, tf.float32)
+        y_pred = tf.convert_to_tensor(y_pred, tf.float32)
+
+        model_out = tf.add(y_pred, epsilon)
+        ce = tf.multiply(y_true, -tf.math.log(model_out))
+        weight = tf.multiply(y_true, tf.math.pow(tf.subtract(1., model_out), gamma))
+        fl = tf.multiply(alpha, tf.multiply(weight, ce))
+        reduced_fl = tf.reduce_max(fl, axis=1)
+        return tf.reduce_mean(reduced_fl)
+    return focal_loss_fixed
+
+
+
+###### Some outdated functions that no longer with the current version of the experiments
+
+#def load_all_models(keras, ml_model, model, method, rotation = 0, path = './Data/narr/christian_models'):
+#    '''
+#    Load all ML models associated with a single FD method and a single dataset
+#    
+#    Inputs:
+#    :param keras: A boolean indicating whether a keras ML model is being loaded
+#    :param ml_model: The name of the ML model being loaded
+#    :param ra_model: The name of the reanalysis model used to train the ML model
+#    :param method: The name of the FD identification method the ML model learned
+#    :param rotations: List of rotations over which to load the data
+#    :param path: Path to the ML models that will be loaded
+#    
+#    Outputs:
+#    :param models: A list of all machine learning models loaded for a single FD identification method and trained on a single reanalysis
+#    '''
+#    
+#    # Initialize the models
+#    models = []
+#    
+#    # Load lat/lon labels
+#    with open('%s/lat_lon_labels.pkl'%(path), 'rb') as fn:
+#        lat_labels = pickle.load(fn)
+#        lon_labels = pickle.load(fn)
+#    
+#    I = len(lat_labels)
+#    J = len(lon_labels)
+#    
+#    # Load all models for each combination of lat and lon labels
+#    for n in range(len(lat_labels)):
+#            
+#        # Generate the model filename
+#        model_fbase = generate_model_fname_build(model, ml_model, method, rotation, [lat_lab[n], lat_lab[n]+5], [lon_lab[n], lon_lab[n]+5])
+#        model_fname = '%s/%s/%s/%s'%(path, ml_model, method, model_fbase)
+#        print(model_fname)
+#        
+#        model = load_single_model(model_fname, keras)
+#        
+#        models.append(model)
+#    
+#            
+#    return models
+#
+## Function to make predictions for all models in a rotation (and average them together/take the standard deviation)
+#def make_predictions(data, lat, lon, probabilities, threshold, keras, ml_model, ra_model, 
+#                     method, rotations, label, path = './Data/narr/christian_models'):
+#    '''
+#    Function designed make predictions of FD for a full dataset for a given ML model. Predictions are the average over all rotations and the standard deviation.
+#    
+#    Inputs:
+#    :param data: Data used to make FD predictions. Must be in a NVar x time x space format
+#    :param lat: The latitude coordinates corresponding to data
+#    :param lon: The longitude coordinates corresponding to data
+#    :param probabilities: Boolean indicating whether to use return the average probabilistic predictions (true), or average yes/no predictions (false)
+#    :param theshold: The probability threshold above which FD is said to occur
+#    :param keras: A boolean indicating whether a keras ML model is being used
+#    :param ml_model: The name of the ML model being used
+#    :param ra_model: The name of the reanalysis model used to train the ML model
+#    :param method: The name of the FD identification method the ML model learned
+#    :param rotations: List of rotations over which to load the data
+#    :param label: The experiment label of the ML models
+#    :param path: Path to the ML models that will be loaded
+#    
+#    Outputs:
+#    :param pred: The mean FD predictions of FD
+#    :param pred_var: The variation in FD probability predictions across all rotations
+#    '''
+#    
+#        
+#    # Reshape lat and lon into 1D arrays
+#    print('Initializing some values')
+#    I, J = lat.shape
+#    lat1d = lat.reshape(I*J, order = 'F')
+#    lon1d = lon.reshape(I*J, order = 'F')
+#    
+#    # Load in lat/lon labels
+#    lat_labels = np.arange(-90, 90+5, 5)
+#    lon_labels = np.arange(-180, 180+5, 5)
+#    
+#    I_lab = len(lat_labels)
+#    J_lab = len(lon_labels)
+#    
+#    # Remove NaNs?
+#    if np.invert(keras):
+#        data[np.isnan(data)] = -995
+#    
+#    # Initialize the prediction variables
+#    NVar, T, IJ = data.shape
+#    
+#    # data_reshaped = data.reshape(NVar, T, I*J, order = 'F')
+#    
+#    pred = np.ones((T, I*J)) * np.nan
+#    pred_var = np.ones((T, I*J)) * np.nan
+#    
+#    # Split the dataset into regions
+#    print('Splitting data into regions')
+#    data_split = []
+#    lat_lab = []
+#    lon_lab = []
+#    for i in range(I_lab-1):
+#        for j in range(J_lab-1):
+#            ind = np.where( ((lat1d >= lat_labels[i]) & (lat1d <= lat_labels[i+1])) & ((lon1d >= lon_labels[j]) & (lon1d <= lon_labels[j+1])) )[0]
+#            
+#            # Not all datasets are global; remove sets where there is no data
+#            if len(ind) < 1: 
+#                continue
+#                
+#            lat_lab.append(lat_labels[i])
+#            lon_lab.append(lon_labels[j])
+#            
+#            data_split.append(data[:,:,ind])
+#            
+#    print('There are %d regions.'%len(data_split))
+#            
+#            
+#    # Begin making predictions
+#    print('Loading models and making predictions')
+#    for n in range(len(data_split)):
+#        ind = np.where( ((lat1d >= lat_lab[n]) & (lat1d <= lat_lab[n]+5)) & ((lon1d >= lon_lab[n]) & (lon1d <= lon_lab[n]+5)) )[0]
+#        
+#        pred_tmp = []
+#        for rot in rotations:
+#            # Generate the model filename
+#            model_fbase = generate_model_fname_build(ra_model, label, method, rot, [lat_lab[n], lat_lab[n]+5], [lon_lab[n], lon_lab[n]+5])
+#            model_fname = '%s/%s/%s/%s/%s'%(path, ra_model, ml_model, method, model_fbase)
+#            if keras:
+#                test_name = model_fname
+#            else:
+#                test_fname = '%s.pkl'%model_fname
+#
+#
+#            # Check if model exists (it will not if there are no land points)
+#            if np.invert(os.path.exists(test_fname)):
+#                continue
+#            
+#            model = load_single_model(model_fname, keras)
+#            
+#            # Code to make prediction depends on whether a keras model is used
+#            if keras:
+#                pred_tmp.append(model.predict(data_split[n]))
+#            else:
+#                NVar, T, IJ_tmp = data_split[n].shape
+#                
+#                tmp_data = data_split[n].reshape(NVar, T*IJ_tmp, order = 'F')
+#                if (ml_model.lower() == 'svm') | (ml_model.lower() == 'support_vector_machine'):
+#                    # Note SVMs do not have a predict_proba option
+#                    tmp = model.predict(tmp_data.T)
+#                    pred_tmp.append(tmp.reshape(T, IJ_tmp, order = 'F'))
+#                
+#                else:
+#                    tmp = model.predict_proba(tmp_data.T)
+#
+#                    # Check if the model only predicts 0s
+#                    only_zeros = tmp.shape[1] <= 1
+#                    if only_zeros:
+#                        pred_tmp.append(np.zeros((T,len(ind))))
+#                    else:
+#                        pred_tmp.append(tmp[:,1].reshape(T, IJ_tmp, order = 'F'))
+#                    
+#        # For sea values, pred_tmp will be empty. Continue to the next region if this happens
+#        if len(pred_tmp) < 1:
+#            continue
+#                    
+#        # Take the average of the probabilistic predictions across all rotations
+#        pred[:,ind] = np.nanmean(np.stack(pred_tmp, axis = -1), axis = -1)
+#
+#        # Take the standard deviation of the probabilistic predictions across all rotations
+#        pred_var[:,ind] = np.nanstd(np.stack(pred_tmp, axis = -1), axis = -1)
+#            
+#    # Turn the mean probabilistic predictions into true/false?
+#    if np.invert(probabilities):
+#        pred = np.where(pred >= threshold, 1, pred)
+#        pred = np.where(pred < threshold, 0, pred) # Performing this twice preserves NaN values as not available
+#        
+#    # Turn the predictions into 3D data
+#    pred = pred.reshape(T, I, J, order = 'F')
+#    pred_var = pred_var.reshape(T, I, J, order = 'F')
+#    
+#    return pred, pred_var
+
+

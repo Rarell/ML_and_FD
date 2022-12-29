@@ -221,7 +221,8 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', path = '
     
     # Save the figure
     filename = '%s_%s_flash_drought_climatology.png'%(model, method)
-    plt.savefig('%s/%s'%(path, filename))
+    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
+    plt.show(block = False)
     
 
 #%%

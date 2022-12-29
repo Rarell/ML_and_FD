@@ -30,6 +30,7 @@ Created on Sat Oct 2 17:52:45 2021
 #                        minor corrections. Added predictions with test datasets only.
 #   3.0.0 - 11/16/2022 - Removed splitting of data into regions to converse memory. Restructured execute_exp (now main experiment function) to train 
 #                        1 rotation and 1 method at a time. execute_exp is now structured to work with the OU schooner supercomputer.
+#   3.1.0 - 12/28/2022 - Added Keras models and evaluation to the the code, and ANN, CNN, and RNNs to Construct_ML_Models.py. Other improvements and fixes.
 #
 # Inputs:
 #   - Data files for FD indices and identified FD (.nc format)
@@ -45,8 +46,7 @@ Created on Sat Oct 2 17:52:45 2021
 #                                    may be too computationally and temporally expensive)
 #   - May look into Ceteris-Paribus effect
 #   - Add argparse arguments for other ML models
-#   - Might try a more effective approach to parallel processing for increased computation speed
-#   - Keras models have not been tested
+#   - Add XAI for keras models
 #
 # Bugs:
 #   - 
@@ -60,7 +60,7 @@ Created on Sat Oct 2 17:52:45 2021
 
 """
 
-##### Build_model and analyze_results scripts
+#####
             
     
 #%%
@@ -76,6 +76,8 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib import colorbar as mcolorbar
+import tensorflow as tf
+from tensorflow import keras
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import cartopy.mpl.ticker as cticker
@@ -89,12 +91,20 @@ from datetime import datetime, timedelta
 from matplotlib import patches
 from matplotlib.lines import Line2D
 from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+from sklearn.utils import class_weight
+from sklearn.preprocessing import StandardScaler
 
 from sklearn import tree
 from sklearn import neural_network
 from sklearn import ensemble
 from sklearn import svm
 from sklearn import metrics
+
+# Tensorflow 2.x way of doing things
+from tensorflow.keras.layers import InputLayer, Dense, Dropout, Reshape, Masking, Flatten, RepeatVector
+from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, SpatialDropout2D, Concatenate
+from tensorflow.keras.layers import SimpleRNN, LSTM, GRU
+from tensorflow.keras.models import Sequential, Model
 
 # Import custom scripts
 from Raw_Data_Processing import *
@@ -155,6 +165,26 @@ def create_ml_parser():
     parser.add_argument('--evaluate', action='store_true', help='Evaluate the ML model after having run it for all rotations and FD identification methods')
     
     
+    # General Neural Network parameters
+    parser.add_argument('--min_delta', type=float, default=0.0, help="Minimum delta for early termination")
+    parser.add_argument('--patience', type=int, default=100, help="Patience for early termination")
+    parser.add_argument('--epochs', type=int, default=100, help='Training epochs')
+    parser.add_argument('--lrate', type=float, default=0.00001, help="Learning rate")
+    parser.add_argument('--loss', type=str, default='binary_crossentropy', help = 'Loss being minimized by model')
+    parser.add_argument('--focal_parameters', type=float, nargs=2, default=[2, 4], help = 'Parameters for the focal loss function (gamma is first value, alpha is the second)')
+    parser.add_argument('--batch', type=int, default=43, help="Training set batch size")
+    parser.add_argument('--activation', type=str, nargs='+', default=['sigmoid', 'tanh'], help='Activation function(s) for each layer in the NNs')
+    parser.add_argument('--output_activation', type=str, default = 'sigmoid', help='Activation function for the NN output layer')
+    parser.add_argument('--multiprocess', action='store_true', help='Use multiple processing in training the deep model')
+    
+    
+    # Nueral Network Regularization parameters
+    parser.add_argument('--dropout', type=float, default=None, help='Dropout rate')
+    parser.add_argument('--L1_regularization', '--l1', type=float, default=None, help='L1 regularization factor')
+    parser.add_argument('--L2_regularization', '--l2', type=float, default=None, help='L2 regularization factor (only active if no L2)')
+    
+    
+    
     # Specific experiment configuration
     parser.add_argument('--ntrain_folds', type=int, default=3, help='Number of training folds')
     parser.add_argument('--rotation', type=int, nargs='+', default=[0, 1], help='Rotation in the k-fold validation. Only used for conducting a single experiment.')
@@ -187,6 +217,23 @@ def create_ml_parser():
     # Ada Boosted tree
     parser.add_argument('--ada_n_estimators', type=int, default = 50, help='Number of estimators in the Ada Boosted trees.')
     parser.add_argument('--ada_learning_rate', type=float, default=1e-2, help='Learning rate for Ada Boosted trees')
+    
+    # Artificial Neural Network
+    parser.add_argument('--units', nargs='+', type=int, default=[200, 100, 50, 25, 10, 5], help='Number of hidden units per layer (sequence of ints)')
+    
+    # Convolutional U-Net 
+    parser.add_argument('--sequential', action='store_true', help = 'Build a sequential U-net (has no skip connections)')
+    parser.add_argument('--nfilters', nargs='+', type=int, default = [20,20,20], help = 'Number of filters in each convolutional per layer (sequence of ints) for the encoder (reverse order for the decoder)')
+    parser.add_argument('--kernel_size', nargs='+', type=int, default = [3,3,3], help = 'CNN kernel size per layer (sequence of ints) for the encoder (reverse order for the decoder)')
+    parser.add_argument('--strides', nargs='+', type=int, default = [1,1,1], help = 'CNN strides per layer (sequence of ints) for the encoder (reverse order for the decoder)')
+    parser.add_argument('--pool_size_horizontal', nargs='+', type=int, default=[2,2,2], help='Horizontal max pooling size per CNN layer (1=None) for the encoder (reverse order for the UpSample decoder)')
+    parser.add_argument('--pool_size_vertical', nargs='+', type=int, default=[2,2,2], help='vertical max pooling size per CNN layer (1=None) for the encoder (reverse order for the UpSample decoder)')
+    
+    # Recurrent Neural Network
+    parser.add_argument('--rnn_units', nargs='+', type=int, default = [10, 10], help = 'Number of hidden units in the RNN layers, per layer (sequence of ints)')
+    parser.add_argument('--rnn_model', nargs='+', type=str, default = ['GRU', 'GRU'], help = 'Type of recurrent layer it use RNN per layer (sequence of strings)')
+    parser.add_argument('--rnn_activation', nargs='+', type=str, default = ['tanh', 'tanh'], help = 'Activation function to use in the RNN per layer (sequence of strings)')
+    
     
     return parser
 
@@ -239,14 +286,14 @@ def split_data(data, ntrain_folds, rotation, normalize = False):
     data_norm = data
     
     # Normalize the data?
-    if normalize:
-        for n in range(Nfolds):
-            # Note the training set is T (K), ET, PET, P, and soil moisture, which are all, theoretically > 0
-            max_value = np.nanmax(data[n,:,:,:])
-            #min_value = np.nanmin(data)
-            #mean_value = np.nanmean(data)
-            
-            data_norm[n,:,:,:] = data_norm[n,:,:,:]/max_value
+    #if normalize:
+    #    for n in range(N):
+    #        # Note the training set is T (K), ET, PET, P, and soil moisture, which are all, theoretically > 0
+    #        max_value = np.nanmax(data[n,:,:,:])
+    #        #min_value = np.nanmin(data)
+    #        #mean_value = np.nanmean(data)
+    #        
+    #        data_norm[n,:,:,:] = data_norm[n,:,:,:]/max_value
             
     # Determine the training, validation, and test folds
     train_folds = (np.arange(ntrain_folds) + rotation) % Nfolds
@@ -300,7 +347,7 @@ def generate_model_fname(model, ml_model, method, rotation):
     
     return fname
     
-def generate_results_fname(model, ml_model, method, keras):
+def generate_results_fname(model, ml_model, method):
     '''
     Generate a filename the results (merged over all rotations) of a ML model will be saved to. 
     Results are differentiated by ML model trained, reanalysis model trained on, and FD method trained to identify.
@@ -318,10 +365,7 @@ def generate_results_fname(model, ml_model, method, keras):
     # Create the filename
     fname = '%s_%s_%s_merged_results'%(model, ml_model, method)
     
-    if keras:
-        return fname
-    else:
-        return '%s.pkl'%fname
+    return '%s.pkl'%fname
     
     
     
@@ -677,7 +721,8 @@ def sklearn_evaluate_model(model, args, train_in, valid_in, test_in, train_out, 
     return results
   
 
-def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, model_fname):
+def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, data_in, data_out, rotation, 
+                      model_fname, evaluate_each_grid = False):
     '''
     Run a single ML experiment from the sklearn package and save the model
     
@@ -689,42 +734,509 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     :param train_out: Output training dataset used to train the model
     :param valid_out: Output validation dataset to help validate the model
     :param test_out: Output testing dataset to test the model
+    :param data_in: Entire input dataset. Results predict for the entire dataset instead of the training set (to simplify the merging step)
+    :param data_out: Enitre output dataset. Results predict for the entire dataset instead of the training set (to simplify the merging step)
+    :param rotation: Current rotation in the k-fold validation
     :param model_fname: The filename to save the model to
+    :param evaluate_each_grid: Boolean indicating whether evaulation metrics should be examined for each grid point in the dataset
     
     Outputs:
     :param results: Dictionary results from the ML model, including predictions, performance metrics, and learning curves
     '''
     
-    # Build the model
-    model = build_keras_model(train_in, valid_in, args)
-        
-    # Train the model
-    model.train()
+    # Construct the base file name for the result
+    results_fbase = 'results_%s_%s_%s_rot_%s'%(args.ra_model, 
+                                               args.label, 
+                                               args.method, 
+                                               rotation)
     
+    dataset_dir = '%s/%s'%(args.dataset, args.ra_model)
+    results_fname = '%s/%s/%s/%s'%(dataset_dir, args.ml_model, args.method, results_fbase)
+    
+    # If the results exist, skip this experiment
+    if os.path.exists('%s.pkl'%results_fname):
+        print('The model has already been trained and results gathered.')
+        return
+    
+    # Reshape data
+    T, I, J, NV = train_in.shape
+    Tt, I, J, NV = valid_in.shape
+    
+    # Normalize data?
+    if args.normalize:
+        for i in range(I):
+            if np.mod(i, 10) == 0: 
+                print('%4.2f percent through normalization...'%(i/I*100))
+            for j in range(J):
+                    
+                scaler_train = StandardScaler()
+                scaler_valid = StandardScaler()
+                scaler_test = StandardScaler()
+                scaler_whole = StandardScaler()
+                    
+                train_in[:,i,j,:] = scaler_train.fit_transform(train_in[:,i,j,:])
+                valid_in[:,i,j,:] = scaler_valid.fit_transform(valid_in[:,i,j,:])
+                test_in[:,i,j,:] = scaler_test.fit_transform(test_in[:,i,j,:])
+
+                data_in[:,i,j,:] = scaler_whole.fit_transform(data_in[:,i,j,:])
+    
+    
+    # output data is read in shapes of (1, T, I, J). Remove the 1.
+    train_out = np.squeeze(train_out)
+    valid_out = np.squeeze(valid_out)
+    test_out = np.squeeze(test_out)
+    
+    
+    # Reshape output data for training
+    train_out = train_out.reshape(T, I*J, order = 'F')
+    valid_out = valid_out.reshape(Tt, I*J, order = 'F')
+    test_out = test_out.reshape(Tt, I*J, order = 'F')
+    
+    # Record the loss
+    loss = args.loss
+    
+    # Rearrange data for ANNs so that all time steps and grid points are examples
+    if (args.ml_model.lower() == 'ann') | (args.ml_model.lower() == 'artificial_neural_network'):
+        train_in = train_in.reshape(T*I*J, NV, order = 'F')
+        valid_in = valid_in.reshape(Tt*I*J, NV, order = 'F')
+        test_in = test_in.reshape(Tt*I*J, NV, order = 'F')
+
+        train_out = train_out.reshape(T*I*J, order = 'F')
+        valid_out = valid_out.reshape(Tt*I*J, order = 'F')
+        test_out = test_out.reshape(Tt*I*J, order = 'F')
+
+
+    elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
+        train_in = train_in.reshape(T, I*J, NV, order = 'F')
+        valid_in = valid_in.reshape(Tt, I*J, NV, order = 'F')
+        test_in = test_in.reshape(Tt, I*J, NV, order = 'F')
+
+        # For RNNs, move the time axis (first) to the second, so that it is trained along the time axis, and each grid is an example
+        train_in = np.moveaxis(train_in, 0, 1)
+        valid_in = np.moveaxis(valid_in, 0, 1)
+        test_in = np.moveaxis(test_in, 0, 1)
+
+        train_out = np.moveaxis(train_out, 0, 1)
+        valid_out = np.moveaxis(valid_out, 0, 1)
+        test_out = np.moveaxis(test_out, 0, 1)
+
+    if loss == 'focal':
+        args.loss = focal_loss(gamma = args.focal_parameters[0], alpha = args.focal_parameters[1])
+
+        
+    if os.path.exists('%s/'%model_fname):
+        # Make any custom objects?
+        if loss == 'focal':
+            custom_objects = {'focal_loss_fixed': args.loss}
+        else:
+            custom_objects = None
+        
+        # If the modeel exists, there is no need to make and train it
+        model = keras.models.load_model(model_fname, custom_objects = custom_objects)
+                
+    else:
+        
+        # Build the model
+        model = build_keras_model(args, shape = train_in.shape)
+
+        # Callbacks
+        early_stopping_cb = keras.callbacks.EarlyStopping(patience=args.patience,
+                                                          restore_best_weights=True,
+                                                          min_delta=args.min_delta)
+        
+        # Set up sample weights for the neural network
+        weights = np.ones((train_out.shape[:]))
+        
+        # Set locations with sea values (data_out == -1) to have weights of 0 (no impact
+        weights = np.where(train_out == 2, 0, weights)
+
+        
+        # Determine class weights
+        if args.class_weight != None:
+            
+            # Set weights where there is flash drought
+            weights = np.where(train_out == 1, args.class_weight, weights)
+            
+            # Randomly set 90% of the datapoints where there is no flash drought to 0 (evens the scale of FD to no FD events
+            #weights = weights.flatten()
+            #no_fd_ind = np.where(train_out.flatten() == 0)[0]
+            #rand_choice = np.random.choice(no_fd_ind, size = int(np.round(no_fd_ind.size*0.90)), replace = False)
+            #weights[rand_choice] = 0
+            #weights = weights.reshape(T, I*J)
+            
+            class_weights = {0:1, 1:args.class_weight, 2:0}
+
+        # Reshape gives weights the same shape as the model output
+        weight_shape = []
+        for ws in train_out.shape:
+            weight_shape.append(ws)
+            
+        weight_shape.append(1)
+        
+        weights = weights.reshape(weight_shape, order = 'F')
+            
+            #if (loss == 'categorical_crossentropy') | (loss == 'focal'):
+            #    tmp_train_out = tmp_train_out.reshape(T*I*J, 3, order = 'F')
+            #    tmp_valid_out = tmp_valid_out.reshape(Tt*I*J, 3, order = 'F')
+            #else:
+            #    tmp_train_out = tmp_train_out.reshape(T*I*J, order = 'F')
+            #    tmp_valid_out = tmp_valid_out.reshape(Tt*I*J, order = 'F')
+
+        
+        if loss == 'binary_crossentropy':
+            # Invert the binary labels for binary cross entropy; should force the model to balance between normalizing the inputs and putting 0s in the weights
+            tmp_train_out = 1 - train_out
+            tmp_valid_out = 1 - valid_out
+            
+        elif (loss == 'categorical_crossentropy') | (loss == 'focal'):
+            # For the focal and categorical_crossentropy losses, there needs to be a dimension of 2 at the end (data is one-hot encoded along this axis).
+            # Else only FD probability = 1 is predicted
+            train_shape = []
+            valid_shape = []
+            for (ts, vs) in zip(train_out.shape, valid_out.shape):
+                train_shape.append(ts)
+                valid_shape.append(vs)
+                
+            train_shape.append(3)
+            valid_shape.append(3)
+                
+            tmp_train_out = np.zeros((train_shape))
+            tmp_valid_out = np.zeros((valid_shape))
+            
+            tmp_train_out[train_out == 0, 0] = 1
+            tmp_train_out[train_out == 1, 1] = 1
+            
+            tmp_valid_out[valid_out == 0,0] = 1
+            tmp_valid_out[valid_out == 1,1] = 1
+        else:
+            tmp_train_out = train_out
+            tmp_valid_out = valid_out
+
+        print(tmp_train_out.shape)
+        print(tmp_valid_out.shape)
+        
+        
+        #print(np.nansum(train_out == 1)/train_out.size, np.log(np.nansum(train_out == 1)/train_out.size))
+        # Train the model
+        history = model.fit(x = np.array(train_in), y = np.array(tmp_train_out),
+                            batch_size=args.batch, shuffle = False, 
+                            epochs = args.epochs, verbose = args.verbose>=2,
+                            validation_data = (np.array(valid_in), np.array(tmp_valid_out)), 
+                            callbacks = [early_stopping_cb],
+                            use_multiprocessing = args.multiprocess,
+                            sample_weight = weights)
+        
+        
+        # Report if verbosity is turned on
+        if args.verbose >= 1:
+            print(model.summary())
+            keras.utils.plot_model(model, 
+                                   to_file = '%s_plot.png'%model_fname, 
+                                   show_shapes = True, show_layer_names = True)
+        
+        
+        # Save the model
+        model.save('%s'%(model_fname))
+    
+    # Evaluate the model
+    Ttot, I, J, NV = data_in.shape
+    data_out = np.squeeze(data_out)
+    
+    # Remove the 2 values to prevent errors
+    train_out = np.where(train_out == 2, 0, train_out)
+    valid_out = np.where(valid_out == 2, 0, valid_out)
+    test_out = np.where(test_out == 2, 0, test_out)
+
+    data_out = np.where(data_out == 2, 0, data_out)
+    
+    # Rearrange data for ANNs so that all time steps and grid points are examples
+    if (args.ml_model.lower() == 'ann') | (args.ml_model.lower() == 'artificial_neural_network'):
+        data_in = data_in.reshape(Ttot*I*J, NV, order = 'F')
+        data_out = data_out.reshape(Ttot*I*J, order = 'F')
+        
+        print(data_in.shape)
+        print(valid_in.shape)
+        print(test_in.shape)
+
+    # For RNNs, the data is fed in as space x time
+    elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
+        data_in = data_in.reshape(Ttot, I*J, NV, order = 'F')
+        data_out = data_out.reshape(Ttot, I*J, order = 'F')
+        
+        data_in = np.moveaxis(data_in, 0, 1)
+        data_out = np.moveaxis(data_out, 0, 1)
+    
+    results = keras_evaluate_model(model, args, data_in, valid_in, test_in, data_out, valid_out, test_out, loss)
+    
+    # Note this can cause an error if the model is loaded instead of trained, since history would not exist
+    # (Currently not known how to retain the training history from the loaded model stage)
+    results['history'] = history.history
+    
+    # Reshape the 2D data back into 3D
+    if (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
+        results['train_predict'] = results['train_predict'].reshape(I, J, Ttot, order = 'F')
+        results['valid_predict'] = results['valid_predict'].reshape(I, J, Tt, order = 'F')
+        results['test_predict'] = results['test_predict'].reshape(I, J, Tt, order = 'F')
+        
+        # For RNNs, the time axis needs to be moved back to the first axis for consistency with other models
+        results['train_predict'] = np.moveaxis(results['train_predict'], 2, 0)
+        results['valid_predict'] = np.moveaxis(results['valid_predict'], 2, 0)
+        results['test_predict'] = np.moveaxis(results['test_predict'], 2, 0)
+    else:
+        results['train_predict'] = results['train_predict'].reshape(Ttot, I ,J, order = 'F')
+        results['valid_predict'] = results['valid_predict'].reshape(Tt, I ,J, order = 'F')
+        results['test_predict'] = results['test_predict'].reshape(Tt, I ,J, order = 'F')
+    
+    # Evaluate the model for each grid point?
+    if evaluate_each_grid:
+        
+        # Reshape output data back into 3D for mapping evaluation
+        if (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
+            train_out = np.squeeze(train_out.reshape(I, J, T, order = 'F'))
+            valid_out = np.squeeze(valid_out.reshape(I, J, Tt,  order = 'F'))
+            test_out = np.squeeze(test_out.reshape(I, J, Tt, order = 'F'))
+            
+            data_out = data_out.reshape(I, J, Ttot, order = 'F')
+            
+            # For RNNs, the time axis needs to be moved back to the first axis for consistency with other models
+            train_out = np.moveaxis(train_out, 2, 0)
+            valid_out = np.moveaxis(valid_out, 2, 0)
+            test_out = np.moveaxis(test_out, 2, 0)
+            
+            data_out = np.moveaxis(data_out, 2, 0)
+        else:
+            train_out = np.squeeze(train_out.reshape(T, I, J, order = 'F'))
+            valid_out = np.squeeze(valid_out.reshape(Tt, I, J,  order = 'F'))
+            test_out = np.squeeze(test_out.reshape(Tt, I, J, order = 'F'))
+            
+            data_out = data_out.reshape(Ttot, I, J, order = 'F')
+        
+        # Initialize the gridded metrics
+        eval_train_map = np.zeros((I, J, len(args.metrics))) * np.nan
+        eval_valid_map = np.zeros((I, J, len(args.metrics))) * np.nan
+        eval_test_map = np.zeros((I, J, len(args.metrics))) * np.nan
+        
+        # Perform the evaluation for each grid point
+        for i in range(I):
+            if np.mod(i/I*100, 10) == 0:
+                    print('Currently %d through the spatial evaluation'%(int(i/I*100)))
+            for j in range(J):
+                if np.nansum(data_out[:,i,j]) == 0:
+                    continue
+
+                r_tmp = keras_evaluate_model(model, args, results['train_predict'][:,i,j], results['valid_predict'][:,i,j], 
+                                             results['test_predict'][:,i,j], 
+                                             data_out[:,i,j], valid_out[:,i,j], test_out[:,i,j], loss, pred = True)
+
+                # See if this clears any erased memory from running the function
+                gc.collect() # Clears deleted variables from memory 
+
+                # Try reducing the size of map data by half to reduce the RAM memory
+                eval_train_map[i,j,:] = np.float32(r_tmp['train_eval'])
+                eval_valid_map[i,j,:] = np.float32(r_tmp['valid_eval'])
+                eval_test_map[i,j,:] = np.float32(r_tmp['test_eval'])
+            
+            
+        results['eval_train_map'] = eval_train_map
+        results['eval_valid_map'] = eval_valid_map
+        results['eval_test_map'] = eval_test_map
+        
+    # Save the results
+    with open('%s.pkl'%results_fname, 'wb') as fn:
+        pickle.dump(results, fn)
+        
+    return results
+
+
+def keras_evaluate_model(model, args, train_in, valid_in, test_in, train_out, valid_out, test_out, loss, pred = False):
+    '''
+    Evaluate an keras deep learning (ML) model. Assumes the validation and test datasets have the same temporal dimension.
+    
+    Inputs:
+    :param model: ML model being evaluated
+    :param args: Argparse arguments
+    :param train_in: Input training dataset used to train the model. Maybe the entire input dataset instead.
+    :param valid_in: Input validation dataset to help validate the model
+    :param test_in: Input testing dataset to test the model
+    :param train_out: Output training dataset used to train the model. Maybe the entire output dataset instead.
+    :param valid_out: Output validation dataset to help validate the model
+    :param test_out: Output testing dataset to test the model
+    :Param loss: String indicating the loss function used
+    :param pred: Boolean indicating whether the input data are predictions
+    
+    Outputs:
+    :param results: Dictionary results of evaluations for the ML model
+    '''
     
     # Collect model results
     results = {}
-    
-    # Model predictions
-    results['train_predict'] = model.predict(train_in)
-    results['valid_predict'] = model.predict(valid_in)
-    results['test_predict'] = model.predict(test_in)
-    
+        
     # Model performance
-    results['train_eval'] = model.evaluate(train_in, train_out)
-    results['valid_eval'] = model.evaluate(valid_in, valid_out)
-    results['test_eval'] = model.evaluate(test_in, test_out)
+
+    eval_train = []
+    eval_valid = []
+    eval_test = []
+
+    # Predictions
+    if np.invert(pred):
+        
+        if loss == 'binary_crossentropy':
+            train_pred = 1 - np.squeeze(model.predict(train_in))
+            valid_pred = 1 - np.squeeze(model.predict(valid_in))
+            test_pred = 1 - np.squeeze(model.predict(test_in))
+        elif (loss == 'categorical_crossentropy') | (loss == 'focal'):
+            if (args.ml_model.lower() == 'ann') | (args.ml_model.lower() == 'artificial_neural_network'):
+                train_pred = np.squeeze(model.predict(train_in))[:,1]
+                valid_pred = np.squeeze(model.predict(valid_in))[:,1]
+                test_pred = np.squeeze(model.predict(test_in))[:,1]
+            else:
+                train_pred = np.squeeze(model.predict(train_in))[:,:,1]
+                valid_pred = np.squeeze(model.predict(valid_in))[:,:,1]
+                test_pred = np.squeeze(model.predict(test_in))[:,:,1]
+        
+        print(np.nanmin(train_pred), np.nanmin(valid_pred), np.nanmin(test_pred))
+        print(np.nanmax(train_pred), np.nanmax(valid_pred), np.nanmax(test_pred))
+        print(train_pred.shape)
+        print(train_out.shape)
+    else:
+        train_pred = train_in
+        valid_pred = valid_in
+        test_pred = test_in
     
-    # Learning curves/model history
-    results['history'] = model.history
-     
-    # Collect the feature importance
-    if args.feature_importance:
-        pass
+    only_zeros = (np.nansum(train_pred < 0.5) == 0) | (np.nansum(train_out) == 0)
 
     
-    # Save the model
-    model.save(model_fname)
+    if np.invert(pred):
+        # Collect information for the ROC curve
+        if args.roc_curve:      
+            thresh = np.arange(0, 2, 1e-4)
+            thresh = np.round(thresh, 4)
+            results['fpr_train'] = np.ones((thresh.size)) * np.nan
+            results['tpr_train'] = np.ones((thresh.size)) * np.nan
+            results['fpr_valid'] = np.ones((thresh.size)) * np.nan
+            results['tpr_valid'] = np.ones((thresh.size)) * np.nan
+            results['fpr_test'] = np.ones((thresh.size)) * np.nan
+            results['tpr_test'] = np.ones((thresh.size)) * np.nan
+
+            fpr_train, tpr_train, thresh_train = metrics.roc_curve(train_out.flatten(), train_pred.flatten())
+
+            fpr_valid, tpr_valid, thresh_valid = metrics.roc_curve(valid_out.flatten(), valid_pred.flatten())
+
+            fpr_test, tpr_test, thresh_test = metrics.roc_curve(test_out.flatten(), test_pred.flatten())
+
+            # Note this step is needed to ensure the ROC curves have the same length across all rotations and regions
+            for n, t in enumerate(thresh):
+                # Place each tpr/fpr with its corresponding threshold. Perform an average if there are multiple thresholds in in a small range.
+                ind_train = np.where(t == np.round(thresh_train, 4))[0]
+                ind_valid = np.where(t == np.round(thresh_valid, 4))[0]
+                ind_test = np.where(t == np.round(thresh_test, 4))[0]
+
+                results['fpr_train'][n] = np.nanmean(fpr_train[ind_train])
+                results['tpr_train'][n] = np.nanmean(tpr_train[ind_train])
+
+                results['fpr_valid'][n] = np.nanmean(fpr_valid[ind_valid])
+                results['tpr_valid'][n] = np.nanmean(tpr_valid[ind_valid])
+
+                results['fpr_test'][n] = np.nanmean(fpr_test[ind_test])
+                results['tpr_test'][n] = np.nanmean(tpr_test[ind_test])
+
+
+
+        # Turn predictions into binary values
+        train_pred = np.where(train_pred >= 0.5, 1, 0)
+        valid_pred = np.where(valid_pred >= 0.5, 1, 0)
+        test_pred = np.where(test_pred >= 0.5, 1, 0)
+
+        # Model predictions   
+        results['train_predict'] = train_pred
+        results['valid_predict'] = valid_pred
+        results['test_predict'] = test_pred
+    
+        
+    # Perform the evaluations for each metric
+    for metric in args.metrics:
+
+        if metric == 'accuracy':
+            e_train = metrics.accuracy_score(train_out.flatten(), train_pred.flatten())
+            e_valid = metrics.accuracy_score(valid_out.flatten(), valid_pred.flatten())
+            e_test = metrics.accuracy_score(test_out.flatten(), test_pred.flatten())
+
+        elif metric == 'auc':
+            e_train = np.nan if only_zeros else metrics.roc_auc_score(train_out.flatten(), train_pred.flatten())
+            e_valid = np.nan if (np.nansum(valid_out < 0.5) == 0) | (np.nansum(valid_out < 0.5) == valid_out.size) else metrics.roc_auc_score(valid_out.flatten(), valid_pred.flatten())
+            e_test = np.nan if (np.nansum(test_out < 0.5) == 0) | (np.nansum(test_out < 0.5) == test_out.size) else metrics.roc_auc_score(test_out.flatten(), test_pred.flatten())
+
+        elif metric == 'precision':
+            e_train = metrics.precision_score(train_out.flatten(), train_pred.flatten())
+            e_valid = metrics.precision_score(valid_out.flatten(), valid_pred.flatten())
+            e_test = metrics.precision_score(test_out.flatten(), test_pred.flatten())
+
+        elif metric == 'recall':
+            e_train = metrics.recall_score(train_out.flatten(), train_pred.flatten())
+            e_valid = metrics.recall_score(valid_out.flatten(), valid_pred.flatten())
+            e_test = metrics.recall_score(test_out.flatten(), test_pred.flatten())
+
+        elif metric == 'f1_score':
+            e_train = metrics.f1_score(train_out.flatten(), train_pred.flatten())
+            e_valid = metrics.f1_score(valid_out.flatten(), valid_pred.flatten())
+            e_test = metrics.f1_score(test_out.flatten(), test_pred.flatten())
+            
+        elif metric == 'mse':
+            e_train = metrics.mean_squared_error(train_out.flatten(), train_pred.flatten())
+            e_valid = metrics.mean_squared_error(valid_out.flatten(), valid_pred.flatten())
+            e_test = metrics.mean_squared_error(test_out.flatten(), test_pred.flatten())
+            
+        elif metric == 'mae': # Might also add Cross-entropy
+            e_train = metrics.mean_absolute_error(train_out.flatten(), train_pred.flatten())
+            e_valid = metrics.mean_absolute_error(valid_out.flatten(), valid_pred.flatten())
+            e_test = metrics.mean_absolute_error(test_out.flatten(), test_pred.flatten())
+            
+        elif metric == 'tss':
+            # To get the true skill score, determine the true positives, true negatives, and false positives (summed over time and the region)
+            tp_train = np.nansum(np.where((train_pred.flatten() >= 0.5) & (train_out.flatten() == 1), 1, 0))
+            tp_valid = np.nansum(np.where((valid_pred.flatten() >= 0.5) & (valid_out.flatten() == 1), 1, 0))
+            tp_test = np.nansum(np.where((test_pred.flatten() >= 0.5) & (test_out.flatten() == 1), 1, 0))
+            
+            tn_train = np.nansum(np.where((train_pred.flatten() < 0.5) & (train_out.flatten() == 0), 1, 0))
+            tn_valid = np.nansum(np.where((valid_pred.flatten() < 0.5) & (valid_out.flatten() == 0), 1, 0))
+            tn_test = np.nansum(np.where((test_pred.flatten() < 0.5) & (test_out.flatten() == 0), 1, 0))
+            
+            fp_train = np.nansum(np.where((train_pred.flatten() >= 0.5) & (train_out.flatten() == 0), 1, 0))
+            fp_valid = np.nansum(np.where((valid_pred.flatten() >= 0.5) & (valid_out.flatten() == 0), 1, 0))
+            fp_test = np.nansum(np.where((test_pred.flatten() >= 0.5) & (test_out.flatten() == 0), 1, 0))
+            
+            # Obtain the TPR and FPR
+            tpr_train = tp_train/(tp_train + fp_train)
+            tpr_valid = tp_valid/(tp_valid + fp_valid)
+            tpr_test = tp_test/(tp_test + fp_test)
+            
+            fpr_train = fp_train/(tn_train + fp_train)
+            fpr_valid = fp_valid/(tn_valid + fp_valid)
+            fpr_test = fp_test/(tn_test + fp_test)
+            
+            # The true skill score (TSS) is the TPR - FPR
+            e_train = tpr_train - fpr_train
+            e_valid = tpr_valid - fpr_valid
+            e_test = tpr_test - fpr_test
+
+
+        eval_train.append(e_train)
+        eval_valid.append(e_valid)
+        eval_test.append(e_test)
+        
+    # Store the evaluation metrics    
+    results['train_eval'] = eval_train
+    results['valid_eval'] = eval_valid
+    results['test_eval'] = eval_test
+    
+    # If the input data is predictions, stop here
+    if pred:
+        return results
+                                             
+
+    # Collect the feature importance
+    if args.feature_importance:
+        pass # eli5 maybe helpful for showing feature importance and what layers are seeing.
         
     return results
     
@@ -756,7 +1268,7 @@ def execute_single_exp(args, train_in, valid_in, test_in, train_out, valid_out, 
     # Execute the experiment based on whether it is an sklearn model or NN
     if args.keras:
         results = execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, data_in, data_out, rotation,
-                                    model_fname)
+                                    model_fname, evaluate_each_grid)
         
     else:
         results = execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, data_in, data_out, rotation,
@@ -800,18 +1312,24 @@ def execute_exp(args, test = False):
     data_out = load_ml_data(args.output_data_fname, path = dataset_dir)
     data_out[data_out <= 0] = 0 # Remove once corrected
     
+    # Determine the data size
+    Nvar, T, IJ, Nfold  = data_in.shape
+    Nmethods = data_out.shape[0]
+    
     # Remove NaNs?
     if args.remove_nans:
-        data_in[np.isnan(data_in)] = -995
-        data_out[np.isnan(data_out)] = 0
+        if args.keras:
+            for var in range(Nvar):
+                data_in[var,np.isnan(data_in[var,:,:,:])] = np.nanmean(data_in[var,:,:,:])
+                
+            data_out[np.isnan(data_out)] = 2
+        else:
+            data_in[np.isnan(data_in)] = -995
+            data_out[np.isnan(data_out)] = 0
     
     print('Input size (NVariables x time x space x NFolds):', data_in.shape)
     print('Output size (NMethods x time x space x NFolds):', data_out.shape)
     
-    
-    # Make the rotations
-    Nvar, T, IJ, Nfold  = data_in.shape
-    Nmethods = data_out.shape[0]
     
     # Create a version of the entire dataset without being split
     data_in_whole = np.concatenate([data_in[:,:,:,fold] for fold in range(Nfold)], axis = 1)
@@ -823,6 +1341,15 @@ def execute_exp(args, test = False):
     
     # Collect the spatial size of the data
     I, J = lat.shape
+    
+    # Keras data needs to be rearranged (NVariables/NFilters needs to be at the end, and each time step is an example)
+    if args.keras:
+        # Move the first axis (NVar) to the last axis
+        data_in_whole = np.moveaxis(data_in_whole, 0, -1)
+        
+        # Reorder the main data into 3D (4D with NVar/NMethods) data
+        data_in_whole = data_in_whole.reshape(Nfold*T, I, J, Nvar, order = 'F')
+        data_out_whole = data_out_whole.reshape(Nmethods, Nfold*T, I, J, order = 'F')
     
     # Correct the longitude?
     if args.correct_lon:
@@ -840,7 +1367,7 @@ def execute_exp(args, test = False):
             # Split the data into training, validation, and test sets
             train_in, valid_in, test_in = split_data(data_in, args.ntrain_folds, rot, normalize = args.normalize)
             train_out, valid_out, test_out = split_data(data_out, args.ntrain_folds, rot, normalize = False) # Note the label data is already binary
-
+            
             # Generate the model filename
             model_fbase = generate_model_fname(args.ra_model, args.label, args.method, rot)
             model_fname = '%s/%s/%s/%s'%(dataset_dir, args.ml_model, args.method, model_fbase)
@@ -852,13 +1379,101 @@ def execute_exp(args, test = False):
                 args.class_weight = None
             else:
                 args.class_weight = weight
+                
+            
+            # Keras data needs to be rearranged (NVariables/NFilters needs to be at the end, and each time step is an example)
+            if args.keras:
+                # Move the first axis (NVar) to the last axis
+                train_in = np.moveaxis(train_in, 0, -1)
+                valid_in = np.moveaxis(valid_in, 0, -1)
+                test_in = np.moveaxis(test_in, 0, -1)
+                
+                
+                # Reorder the main data into 3D (4D with NVar/NMethods) data
+                train_in = train_in.reshape(train_in.shape[0], I, J, Nvar, order = 'F')
+                valid_in = valid_in.reshape(valid_in.shape[0], I, J, Nvar, order = 'F')
+                test_in = test_in.reshape(test_in.shape[0], I, J, Nvar, order = 'F')
+                
+                train_out = train_out.reshape(Nmethods, train_out.shape[1], I, J, order = 'F')
+                valid_out = valid_out.reshape(Nmethods, valid_out.shape[1], I, J, order = 'F')
+                test_out = test_out.reshape(Nmethods, test_out.shape[1], I, J, order = 'F')
+                
+                #lat_min = np.nanmin(lat); lat_max = np.nanmax(lat)
+                #lon_min = np.nanmin(lon); lon_max = np.nanmax(lon)
 
-            # Perform the experiment
-            # The ML model is saved in this step
-            execute_single_exp(args, train_in, valid_in, test_in, 
-                               train_out[method_ind,:,:], valid_out[method_ind,:,:], test_out[method_ind,:,:], 
-                               data_in_whole, data_out_whole[method_ind,:,:], rot,
-                               model_fname, evaluate_each_grid = True)
+                #tmp, lat_sub, lon_sub = subset_data(valid_in[:,:,:,0], lat, lon, LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
+                #Isub, Jsub = lat_sub.shape
+                
+                #train_in_tmp = np.ones((train_in.shape[0], Isub, Jsub, Nvar))
+                #valid_in_tmp = np.ones((valid_in.shape[0], Isub, Jsub, Nvar))
+                #test_in_tmp = np.ones((test_in.shape[0], Isub, Jsub, Nvar))
+                
+                #train_out_tmp = np.ones((Nmethods, train_out.shape[1], Isub, Jsub))
+                #valid_out_tmp = np.ones((Nmethods, valid_out.shape[1], Isub, Jsub))
+                #test_out_tmp = np.ones((Nmethods, test_out.shape[1], Isub, Jsub))
+                
+                #data_in_whole_tmp = np.ones((data_in_whole.shape[0], Isub, Jsub, Nvar))
+                #data_out_whole_tmp = np.ones((Nmethods, data_out_whole.shape[1], Isub, Jsub))
+                
+                #for var in range(Nvar):
+                #    train_in_tmp[:,:,:,var], _, _ = subset_data(train_in[:,:,:,var], lat, lon, 
+                #                                                LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
+                #    valid_in_tmp[:,:,:,var], _, _ = subset_data(valid_in[:,:,:,var], lat, lon, 
+                #                                                LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
+                #    test_in_tmp[:,:,:,var], _, _ = subset_data(test_in[:,:,:,var], lat, lon, 
+                #                                               LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
+                #    
+                #    data_in_whole_tmp[:,:,:,var], _, _ = subset_data(data_in_whole[:,:,:,var], lat, lon, 
+                #                                             LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
+                    
+                #for method in range(Nmethods):
+                #    train_out_tmp[method,:,:,:], _, _ = subset_data(train_out[method,:,:,:], lat, lon, 
+                #                                                    LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
+                #    valid_out_tmp[method,:,:,:], _, _ = subset_data(valid_out[method,:,:,:], lat, lon, 
+                #                                                    LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
+                #    test_out_tmp[method,:,:,:], _, _ = subset_data(test_out[method,:,:,:], lat, lon, 
+                #                                                   LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
+                #    
+                #    data_out_whole_tmp[method,:,:,:], _, _ = subset_data(data_out_whole[method,:,:,:], lat, lon, 
+                #                                           LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
+                    
+                #train_in = train_in_tmp
+                #valid_in = valid_in_tmp
+                #test_in = test_in_tmp
+                
+                #train_out = train_out_tmp
+                #valid_out = valid_out_tmp
+                #test_out = test_out_tmp
+                
+                #data_in_whole = data_in_whole_tmp
+                #data_out_whole = data_out_whole_tmp
+                
+                #train_out = np.where(train_out > 0.5, 1, 0)
+                #valid_out = np.where(valid_out > 0.5, 1, 0)
+                #test_out = np.where(test_out > 0.5, 1, 0)
+                #data_out_whole = np.where(data_out_whole > 0.5, 1, 0)
+                
+                #del train_in_tmp, valid_in_tmp, test_in_tmp, data_in_whole_tmp, train_out_tmp, valid_out_tmp, test_out_tmp, data_out_whole_tmp
+                #gc.collect()
+                
+                #print('The new data size is:', data_in_whole.shape)
+                
+                
+                # Perform the experiment
+                # The ML model is saved in this step
+                execute_single_exp(args, train_in, valid_in, test_in, 
+                                   train_out[method_ind,:,:,:], valid_out[method_ind,:,:,:], test_out[method_ind,:,:,:], 
+                                   data_in_whole, data_out_whole[method_ind,:,:,:], rot,
+                                   model_fname, evaluate_each_grid = True)
+                
+            else:
+
+                # Perform the experiment
+                # The ML model is saved in this step
+                execute_single_exp(args, train_in, valid_in, test_in, 
+                                   train_out[method_ind,:,:], valid_out[method_ind,:,:], test_out[method_ind,:,:], 
+                                   data_in_whole, data_out_whole[method_ind,:,:], rot,
+                                   model_fname, evaluate_each_grid = True)
     
     # Otherwise, train for 1 rotation at a time
     else:
@@ -885,10 +1500,36 @@ def execute_exp(args, test = False):
 
         # Perform the experiment
         # The ML model is saved in this step
-        results = execute_single_exp(args, train_in, valid_in, test_in, 
-                                     train_out[method_ind,:,:], valid_out[method_ind,:,:], test_out[method_ind,:,:], 
-                                     data_in_whole, data_out_whole[method_ind,:,:], args.rotation[0],
-                                     model_fname, evaluate_each_grid = True)
+        if args.keras:
+            # Move the first axis (NVar) to the last axis
+            train_in = np.moveaxis(train_in, 0, -1)
+            valid_in = np.moveaxis(valid_in, 0, -1)
+            test_in = np.moveaxis(test_in, 0, -1)
+
+
+            # Reorder the main data into 3D (4D with NVar/NMethods) data
+            train_in = train_in.reshape(train_in.shape[0], I, J, Nvar, order = 'F')
+            valid_in = valid_in.reshape(valid_in.shape[0], I, J, Nvar, order = 'F')
+            test_in = test_in.reshape(test_in.shape[0], I, J, Nvar, order = 'F')
+
+            train_out = train_out.reshape(Nmethods, train_out.shape[1], I, J, order = 'F')
+            valid_out = valid_out.reshape(Nmethods, valid_out.shape[1], I, J, order = 'F')
+            test_out = test_out.reshape(Nmethods, test_out.shape[1], I, J, order = 'F')
+
+            # Perform the experiment
+            # The ML model is saved in this step
+            execute_single_exp(args, train_in, valid_in, test_in, 
+                               train_out[method_ind,:,:,:], valid_out[method_ind,:,:,:], test_out[method_ind,:,:,:], 
+                               data_in_whole, data_out_whole[method_ind,:,:,:], args.rotation[0],
+                               model_fname, evaluate_each_grid = True)
+                
+        else:
+            # Perform the experiment
+            # The ML model is saved in this step
+            execute_single_exp(args, train_in, valid_in, test_in, 
+                               train_out[method_ind,:,:], valid_out[method_ind,:,:], test_out[method_ind,:,:], 
+                               data_in_whole, data_out_whole[method_ind,:,:], args.rotation[0],
+                               model_fname, evaluate_each_grid = True)
 
     # If this is a test run, merge the results over test rotations (otherwise, this is done separately in the main function, after all rotations are trained)
     if test:
@@ -913,6 +1554,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
     :param T, I, J: Size of the time (for 1 fold), horizontal, and width dimensions respectively
     '''
     
+    
     # Construct the base file name for each result
     model_fbase = 'results_%s_%s_%s_rot_'%(args.ra_model, 
                                            args.label, 
@@ -921,6 +1563,19 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
     dataset_dir = '%s/%s/%s/%s'%(args.dataset, args.ra_model, args.ml_model, method)
     dataset_dir_hub = '%s/%s'%(args.dataset, args.ra_model)
     model_fname = '%s/%s'%(dataset_dir, model_fbase)
+    
+    # Generate the name of the overall results file        
+    results_fbase = generate_results_fname(args.ra_model, args.label, method)
+    results_fname = '%s/%s'%(dataset_dir_hub, results_fbase)
+    print(results_fname)
+    
+    if os.path.exists('%s'%results_fname):
+        print('The model results have already been merged. Loading the results...')
+        
+        with open(results_fname, 'rb') as fn:
+            results = pickle.load(fn)
+        
+        return results
     
     # Collect the files for all rotations
     files = ['%s/%s'%(dataset_dir,f) for f in os.listdir(dataset_dir) if re.match(r'%s.+.pkl'%(model_fbase), f)]
@@ -931,9 +1586,14 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
     Nrot = len(files)
     
     # Initialize results
-    pred_train = np.ones((NFolds*T, I*J)) * np.nan
-    pred_valid = np.ones((NFolds*T, I*J)) * np.nan
-    pred_test = np.ones((NFolds*T, I*J)) * np.nan
+    if args.keras: # Keras models are already in a 3D shape
+        pred_train = np.ones((NFolds*T, I, J)) * np.nan
+        pred_valid = np.ones((NFolds*T, I, J)) * np.nan
+        pred_test = np.ones((NFolds*T, I, J)) * np.nan
+    else:
+        pred_train = np.ones((NFolds*T, I*J)) * np.nan
+        pred_valid = np.ones((NFolds*T, I*J)) * np.nan
+        pred_test = np.ones((NFolds*T, I*J)) * np.nan
     
     eval_train = np.ones((len(args.metrics))) * np.nan
     eval_valid = np.ones((len(args.metrics))) * np.nan
@@ -946,7 +1606,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
     eval_train_map = np.ones((I,J,len(args.metrics))) * np.nan
     eval_valid_map = np.ones((I,J,len(args.metrics))) * np.nan
     eval_test_map = np.ones((I,J,len(args.metrics))) * np.nan
-    
+
     eval_train_var_map = np.ones((I,J,len(args.metrics))) * np.nan
     eval_valid_var_map = np.ones((I,J,len(args.metrics))) * np.nan
     eval_test_var_map = np.ones((I,J,len(args.metrics))) * np.nan
@@ -956,8 +1616,8 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
         feature_import_var = np.ones((NVar)) * np.nan
     
     if args.keras:
-        learn_curves = np.ones((T, I*J)) * np.nan
-        learn_curves_var = np.ones((T, I*J)) * np.nan
+        learn_curves = np.ones((args.epochs)) * np.nan
+        learn_curves_var = np.ones((args.epochs)) * np.nan
     
     # Initialize some lists
     ptrain = []
@@ -1000,7 +1660,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
         etrain.append(result['train_eval'])
         evalid.append(result['valid_eval'])
         etest.append(result['test_eval'])
-        
+
         etrain_map.append(result['eval_train_map'])
         evalid_map.append(result['eval_valid_map'])
         etest_map.append(result['eval_test_map'])
@@ -1032,7 +1692,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
     eval_train_var = np.nanstd(np.stack(etrain, axis = -1), axis = -1)
     eval_valid_var = np.nanstd(np.stack(evalid, axis = -1), axis = -1)
     eval_test_var = np.nanstd(np.stack(etest, axis = -1), axis = -1)
-    
+
     eval_train_map = np.nanmean(np.stack(etrain_map, axis = -1), axis = -1)
     eval_valid_map = np.nanmean(np.stack(evalid_map, axis = -1), axis = -1)
     eval_test_map = np.nanmean(np.stack(etest_map, axis = -1), axis = -1)
@@ -1064,8 +1724,17 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
         feature_import_var = np.nanstd(np.stack(fi, axis = -1), axis = -1)
 
     if args.keras:
-        learn_curves[:,ind] = np.nanmean(np.stack(lc, axis = -1), axis = -1)
-        learn_curves_var[:,ind] = np.nanstd(np.stack(lc, axis = -1), axis = -1)
+        learn_curves = {}
+        learn_curves_var = {}
+        for key in lc[0].keys():
+            tmp = np.zeros((NFolds, args.epochs)) * np.nan
+            for n, curve in enumerate(lc):
+                n_epochs = len(curve[key])
+
+                tmp[n,:n_epochs] = curve[key]
+                
+            learn_curves[key] = np.nanmean(tmp, axis = 0)
+            learn_curves_var[key] = np.nanstd(tmp, axis = 0)
         
         
     # Create a small plot of model performance across rotations for each metric
@@ -1098,24 +1767,24 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
             i.set_size(16)
 
         # Save the figure
-        filename = '%s_%s_metric_performance_across_rotations.png'%(args.label, metric)
+        filename = '%s_%s_%s_metric_performance_across_rotations.png'%(args.label, method, metric)
         plt.savefig('%s/%s'%(dataset_dir_hub, filename), bbox_inches = 'tight')
         plt.show(block = False)
         
-            
-    # Generate the name of the overall results file        
-    results_fbase = generate_results_fname(args.ra_model, args.label, args.method, args.keras)
-    results_fname = '%s/%s'%(dataset_dir_hub, results_fbase)
-    print(results_fname)
     
     results = {}
     # Model coordinates
     results['lat'] = lat; results['lon'] = lon
     
     # Model predictions
-    results['all_predict'] = pred_train.reshape(NFolds*T, I, J, order = 'F')
-    results['valid_predict'] = pred_valid.reshape(NFolds*T, I, J, order = 'F')
-    results['test_predict'] = pred_test.reshape(NFolds*T, I, J, order = 'F')
+    if args.keras:
+        results['all_predict'] = pred_train
+        results['valid_predict'] = pred_valid
+        results['test_predict'] = pred_test
+    else:
+        results['all_predict'] = pred_train.reshape(NFolds*T, I, J, order = 'F')
+        results['valid_predict'] = pred_valid.reshape(NFolds*T, I, J, order = 'F')
+        results['test_predict'] = pred_test.reshape(NFolds*T, I, J, order = 'F')
     
     # Overall model performance
     results['all_eval'] = eval_train
@@ -1127,13 +1796,22 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
     results['test_eval_var'] = eval_test_var
     
     # Model performance over each individual grid point
-    results['all_eval_map'] = eval_train_map.reshape(I, J, len(args.metrics), order = 'F')
-    results['valid_eval_map'] = eval_valid_map.reshape(I, J, len(args.metrics), order = 'F')
-    results['test_eval_map'] = eval_test_map.reshape(I, J, len(args.metrics), order = 'F')
-    
-    results['all_eval_var_map'] = eval_train_var_map.reshape(I, J, len(args.metrics), order = 'F')
-    results['valid_eval_var_map'] = eval_valid_var_map.reshape(I, J, len(args.metrics), order = 'F')
-    results['test_eval_var_map'] = eval_test_var_map.reshape(I, J, len(args.metrics), order = 'F')
+    if args.keras:
+        results['all_eval_map'] = eval_train_map
+        results['valid_eval_map'] = eval_valid_map
+        results['test_eval_map'] = eval_test_map
+
+        results['all_eval_var_map'] = eval_train_var_map
+        results['valid_eval_var_map'] = eval_valid_var_map
+        results['test_eval_var_map'] = eval_test_var_map
+    else:
+        results['all_eval_map'] = eval_train_map.reshape(I, J, len(args.metrics), order = 'F')
+        results['valid_eval_map'] = eval_valid_map.reshape(I, J, len(args.metrics), order = 'F')
+        results['test_eval_map'] = eval_test_map.reshape(I, J, len(args.metrics), order = 'F')
+
+        results['all_eval_var_map'] = eval_train_var_map.reshape(I, J, len(args.metrics), order = 'F')
+        results['valid_eval_var_map'] = eval_valid_var_map.reshape(I, J, len(args.metrics), order = 'F')
+        results['test_eval_var_map'] = eval_test_var_map.reshape(I, J, len(args.metrics), order = 'F')
     
     # ROC curve
     if args.roc_curve:
@@ -1209,7 +1887,7 @@ if __name__ == '__main__':
         results = []
 
         for method in methods:
-            result_method = merge_results(args, lat, lon, Nfolds, Nvar, T, I, J)
+            result_method = merge_results(args, method, lat, lon, Nfolds, Nvar, T, I, J)
             
             results.append(result_method)
 
@@ -1232,9 +1910,9 @@ if __name__ == '__main__':
             metrics_test = [results[m]['test_eval_map'][:,:,met] for m in range(len(methods))]
 
             if (metric == 'mse') | (metric == 'mae'):
-                cmin = 0; cmax = 0.5; cint = 0.05
+                cmin = 0; cmax = 0.5; cint = 0.005
             else:
-                cmin = 0; cmax = 1; cint = 0.1
+                cmin = 0; cmax = 1; cint = 0.01
 
             # Plot the metric
             display_metric_map(metrics_all, lat, lon, methods, 
@@ -1250,7 +1928,7 @@ if __name__ == '__main__':
                                args.label, dataset = 'test', reverse = False, globe = args.globe, path = dataset_dir)
 
             # Remove variables at the end to clear space
-            del metric_all, metric_valid, metric_test
+            del metrics_all, metrics_valid, metrics_test
             gc.collect() # Clears deleted variables from memory 
 
 
@@ -1285,8 +1963,8 @@ if __name__ == '__main__':
                                methods, args.ra_model, args.label, dataset = 'test', path = dataset_dir)
 
             # Remove variables at the end to clear space
-            del tpr_all, tpr_valid, tpr_test, tpr_all_var, tpr_valid_var, tpr_test_var
-            del fpr_all, fpr_valid, fpr_test, fpr_all_var, fpr_valid_var, fpr_test_var
+            del tpr_all, tpr_valid, tpr_test, tpr_var_all, tpr_var_valid, tpr_var_test
+            del fpr_all, fpr_valid, fpr_test, fpr_var_all, fpr_var_valid, fpr_var_test
             gc.collect() # Clears deleted variables from memory 
 
 
@@ -1309,6 +1987,10 @@ if __name__ == '__main__':
 
 
         # Plot the learning curve?
+        if args.keras:
+            for m, method in enumerate(methods):
+                display_learning_curve(results[m]['history'], results[m]['history_var'], ['loss', 'categorical_accuracy'], 
+                                       False, args.ra_model, method, path = dataset_dir)
 
 
         # Make predictions?
@@ -1324,7 +2006,7 @@ if __name__ == '__main__':
 
                 # Load in the true labels
                 print('Loading true labels for the %s method...'%method)
-                true_fd = load_nc('fd', '%s.%s.pentad.nc'%(method, args.ra_model), path = dataset_dir)
+                true_fd = load_nc('fd', '%s.%s.pentad.nc'%(method, args.ra_model), path = '%s/FD_Data/'%dataset_dir)
 
                 ind = np.where( (true_fd['month'] >= 4) & (true_fd['month'] <= 10) )[0]
                 fd = true_fd['fd'][ind,:,:]
@@ -1334,18 +2016,18 @@ if __name__ == '__main__':
 
                 # Plot the threat scores?
                 if args.confusion_matrix_plots:
-                    plot('Plotting confusion matrix skill scores for the %s method...'%method)
+                    print('Plotting confusion matrix skill scores for the %s method...'%method)
                     mask = load_mask(model = args.ra_model)
 
                     # Plot the threat scores with the full predictions
-                    display_threat_score(fd, pred, true_fd['lat'], true_fd['lon'], dates, mask, 
+                    display_threat_score(fd, pred_all, true_fd['lat'], true_fd['lon'], dates, mask, 
                                          model = args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
 
-                    display_far_score(fd, pred, true_fd['lat'], true_fd['lon'], dates, 
-                                      model =  args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
+                    display_far(fd, pred_all, true_fd['lat'], true_fd['lon'], dates, 
+                                model =  args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
 
-                    display_pod_score(fd, pred, true_fd['lat'], true_fd['lon'], dates, 
-                                      model =  args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
+                    display_pod(fd, pred_all, true_fd['lat'], true_fd['lon'], dates, 
+                                model =  args.ra_model, label = '%s_%s'%(args.label, method), globe = args.globe, path = dataset_dir)
 
 
                     
@@ -1353,11 +2035,11 @@ if __name__ == '__main__':
                     display_threat_score(fd, pred_valid, true_fd['lat'], true_fd['lon'], dates, mask, 
                                          model = args.ra_model, label = '%s_%s_valid_set'%(args.label, method), globe = args.globe, path = dataset_dir)
 
-                    display_far_score(fd, pred_valid, true_fd['lat'], true_fd['lon'], dates, 
-                                      model =  args.ra_model, label = '%s_%s_valid_set'%(args.label, method), globe = args.globe, path = dataset_dir)
+                    display_far(fd, pred_valid, true_fd['lat'], true_fd['lon'], dates, 
+                                model =  args.ra_model, label = '%s_%s_valid_set'%(args.label, method), globe = args.globe, path = dataset_dir)
 
-                    display_pod_score(fd, pred_valid, true_fd['lat'], true_fd['lon'], dates, 
-                                      model =  args.ra_model, label = '%s_%s_valid_set'%(args.label, method), globe = args.globe, path = dataset_dir)
+                    display_pod(fd, pred_valid, true_fd['lat'], true_fd['lon'], dates, 
+                                model =  args.ra_model, label = '%s_%s_valid_set'%(args.label, method), globe = args.globe, path = dataset_dir)
                     
                     
                     
@@ -1365,17 +2047,17 @@ if __name__ == '__main__':
                     display_threat_score(fd, pred_test, true_fd['lat'], true_fd['lon'], dates, mask, 
                                          model = args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
 
-                    display_far_score(fd, pred_test, true_fd['lat'], true_fd['lon'], dates, 
-                                      model =  args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
+                    display_far(fd, pred_test, true_fd['lat'], true_fd['lon'], dates, 
+                                model =  args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
 
-                    display_pod_score(fd, pred_test, true_fd['lat'], true_fd['lon'], dates, 
-                                      model =  args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
+                    display_pod(fd, pred_test, true_fd['lat'], true_fd['lon'], dates, 
+                                model =  args.ra_model, label = '%s_%s_test_set'%(args.label, method), globe = args.globe, path = dataset_dir)
 
 
                 # Plot the predicted climatology map?
                 if args.climatology_plot:
                     print('Plotting the predicted climatology for the the %s method...'%method)
-                    display_fd_climatology(pred, true_fd['lat'], true_fd['lon'], dates, 'Predicted FD for %s'%method, 
+                    display_fd_climatology(pred_all, true_fd['lat'], true_fd['lon'], dates, 'Predicted FD for %s'%method, 
                                            model = '%s_%s'%(method, args.ra_model), path = dataset_dir, grow_season = True)
 
                     
@@ -1393,10 +2075,10 @@ if __name__ == '__main__':
                 if args.time_series:
                     print('Calculating areal coverage for the %s method...'%method)
                     # Examine predicted time series
-                    T, I, J = pred.shape
+                    T, I, J = pred_all.shape
 
                     # Determine the areal coverage for the time series
-                    tmp_pred = np.nansum(pred.reshape(T, I*J), axis = -1)*32*32
+                    tmp_pred = np.nansum(pred_all.reshape(T, I*J), axis = -1)*32*32
                     tmp_pred_valid = np.nansum(pred_valid.reshape(T, I*J), axis = -1)*32*32
                     tmp_pred_test = np.nansum(pred_test.reshape(T, I*J), axis = -1)*32*32
 
@@ -1465,25 +2147,25 @@ if __name__ == '__main__':
                     print('Plotting case studies for the %s method...'%method)
 
                     # Plot the case studies for the predicted labels
-                    display_case_study_maps(pred, true_fd['lon'], true_fd['lat'], dates, args.case_study_years, 
+                    display_case_study_maps(pred_all, true_fd['lon'], true_fd['lat'], dates, args.case_study_years, 
                                             method = method, label = args.label, dataset = args.ra_model, 
-                                            globe = False, path = dataset_dir, grow_season = True)
+                                            globe = False, path = dataset_dir, grow_season = True, pred_type = 'pred')
 
                     # Plot the case studies for the true labels
                     display_case_study_maps(fd, true_fd['lon'], true_fd['lat'], dates, args.case_study_years, 
                                             method = method, label = args.label, dataset = args.ra_model, 
-                                            globe = False, path = dataset_dir, grow_season = True)
+                                            globe = False, path = dataset_dir, grow_season = True, pred_type = 'true')
 
                     
                     # Repeat the predicted case studes with predicted labels using validation sets (to see how the model generalizes to data it has not seen)
                     display_case_study_maps(pred_valid, true_fd['lon'], true_fd['lat'], dates, args.case_study_years, 
-                                            method = method, label = '%s_test_set'%args.label, dataset = args.ra_model, 
-                                            globe = False, path = dataset_dir, grow_season = True)
+                                            method = method, label = '%s_valid_set'%args.label, dataset = args.ra_model, 
+                                            globe = False, path = dataset_dir, grow_season = True, pred_type = 'pred')
                     
                     # Repeat the predicted case studes with predicted labels using test sets only (to see how the model generalizes to data it has not seen)
                     display_case_study_maps(pred_test, true_fd['lon'], true_fd['lat'], dates, args.case_study_years, 
                                             method = method, label = '%s_test_set'%args.label, dataset = args.ra_model, 
-                                            globe = False, path = dataset_dir, grow_season = True)
+                                            globe = False, path = dataset_dir, grow_season = True, pred_type = 'pred')
 
 
 

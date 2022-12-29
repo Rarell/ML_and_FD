@@ -221,7 +221,7 @@ def load_mask(model):
     
     # Determine model specific variables
     if model == 'narr':
-        path = '../Data/narr'
+        path = '/Users/stuartedris/Desktop/PhD_Research_ML_and_FD/ML_and_FD_in_NARR/Data/narr'
         filename = 'land.nc'
         sname = 'land'
         
