@@ -21,7 +21,7 @@ Full citations for the referenced papers can be found at:
 - Pendergrass et al. 2020 (for EDDI method): https://doi.org/10.1038/s41558-020-0709-0
 - Li et al. 2020 (for SEDI method): https://doi.org/10.1016/j.catena.2020.104763
 - Liu et al. 2020 (for soil moisture method): https://doi.org/10.1175/JHM-D-19-0088.1
-- Otkin et al. 2020 (for FDII method): https://doi.org/10.3390/atmos12060741
+- Otkin et al. 2021 (for FDII method): https://doi.org/10.3390/atmos12060741
 
 
 TODO:

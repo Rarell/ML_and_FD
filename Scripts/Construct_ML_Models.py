@@ -193,7 +193,8 @@ def build_rf_model(args):
         
     # Determine class weights
     if np.invert(args.class_weight == None):
-        weights = {0:1, 1:args.class_weight}
+        #weights = [{0:1, 1:1}, {0:1, 1:args.class_weight}, {0:1, 1:0}]
+        weights = {0:1, 1:args.class_weight, 2:0}
     else:
         weights = None
     
@@ -383,11 +384,34 @@ def build_cnn_model(args, shape):
                 'L1_regularizer': args.L1_regularization,
                 'L2_regularizer': args.L2_regularization,
                 'lrate': args.lrate,
-                'metrics': ['categorical_accuracy', tf.keras.metrics.Precision(name = 'precision'), 
-                            tf.keras.metrics.Recall(name = 'recall'), tf.keras.metrics.AUC(name = 'auc')],
-                'class_weight': args.class_weight}
+                'metrics': ['categorical_accuracy', tf.keras.metrics.AUC(name = 'auc')],#, 
+               #             tf.keras.metrics.Precision(name = 'precision'), 
+               #             tf.keras.metrics.Recall(name = 'recall')], # Recall and precision may be used, but could cause errors when using variational autoencoders
+                'class_weight': args.class_weight,
+                'variational': args.variational,
+                # Data augmentation parameters
+                'data_augmentation': args.data_augmentation,
+                'crop_height': args.crop_height,
+                'crop_width': args.crop_width,
+                'flip': args.flip,
+                'rotation': args.data_aug_rotation,
+                'translate_height': args.translation_height,
+                'translate_width': args.translation_width,
+                'zoom_height': args.zoom_height,
+                'zoom_width': args.zoom_width}
     
     return sequential_cnn(arg_dict) if args.sequential else model_cnn(arg_dict)
+
+class Sampling(tf.keras.layers.Layer):
+    '''Uses inputs (z_mean, z_log_var) to sample a tensor z from a vector. 
+       Code taken from the keras autoencoder example at https://keras.io/examples/generative/vae/'''
+    
+    def call(self, inputs):
+        z_mean, z_log_var = inputs
+        batch = tf.shape(z_mean)[0]
+        dimension = tf.shape(z_mean)[1]
+        epsilon = tf.keras.backend.random_normal(shape = (batch, dimension))
+        return z_mean + tf.exp(0.5*z_log_var) * epsilon
 
 
 def sequential_cnn(args):
@@ -423,6 +447,43 @@ def sequential_cnn(args):
     # Add the input layer
     model.add(InputLayer(input_shape = (args['map_size'][1], args['map_size'][2], args['map_size'][3]), name = 'Input'))
     
+    if args['data_augmentation']:
+        data_aug_list = []
+        
+        if np.invert(args['crop_height'] == None) | np.invert(args['crop_width'] == None):
+            if args['crop_height'] == None:
+                args['crop_height'] = 0
+            if args['crop_width'] == None:
+                args['crop_width'] = 0
+            
+            data_aug_list.append(tf.keras.layers.RandomCrop(args['crop_height'], args['crop_width'], name = 'Crop'))
+            
+        elif np.invert(args['flip'] == 'None'):
+            data_aug_list.append(tf.keras.layers.RandomFlip(mode = args['flip'], name = 'Flip'))
+        
+        elif np.invert(args['rotation'] == None):
+            data_aug_list.append(tf.keras.layers.RandomRotation(args['rotation'], fill_mode = 'constant', name = 'Rotate'))
+            
+        elif np.invert(args['translate_height'] == None) | np.invert(args['translate_width'] == None):
+            if args['translate_height'] == None:
+                args['translate_height'] = 0
+            if args['translate_width'] == None:
+                args['translate_width'] = 0
+            
+            data_aug_list.append(tf.keras.layer.RandomTranslation(args['translate_height'], args['translate_width'], fill_mode = 'constant',
+                                                                  name = 'Translate'))
+            
+        elif np.invert(args['zoom_height'] == None) | np.invert(args['zoom_width'] == None):
+            if args['zoom_height'] == None:
+                args['zoom_height'] = 0
+            if args['zoom_width'] == None:
+                args['zoom_width'] = 0
+                
+            data_aug_list.append(tf.keras.layer.RandomZoom(args['zoom_height'], args['zoom_width'], fill_mode = 'constant', name = 'Zoom'))
+            
+        data_augmentation = Sequential(data_aug_list, name = 'Data_Augmentation')
+        model.add(data_augmentation)
+    
     # Build the encode side
     for n, (nf, k, s, psh, psv) in enumerate(zip(args['nfilters'], 
                                                  args['kernel_size'], 
@@ -449,6 +510,17 @@ def sequential_cnn(args):
             model.add(MaxPooling2D(pool_size = (psv, psh),
                                    strides = (psv, psh),
                                    name = 'MAX%d'%(n+1)))
+            
+    if args['variational']:
+        pass
+        #x, y, filters = tf.shape(tensor).numpy()
+        #model.add(Flatten())
+        #model.add(Dense(int(args['nfilters'][-1]*1.5), activate = 'elu', name = 'encoder_dense'))
+        #tensor_mean = Dense(2, activation = 'elu', name = 'encoder_mean')(tensor)
+        #tensor_log_var = Dense(2, activation = 'elu', name = 'encoder_log_var')(tensor)
+        #model.add(Sampling(tensor_mean, tensor_log_var))
+        #model.add(Dense(x*y*filters, activation = 'elu', name = 'decoder_dense'))
+        #model.add(Reshape(x, y, filters)(tensor))
             
             
     # Build the decoder side
@@ -541,6 +613,43 @@ def model_cnn(args):
     input_tensor = Input(shape = (args['map_size'][1], args['map_size'][2], args['map_size'][3]), name = 'Input')
     tensor = input_tensor
     
+    if args['data_augmentation']:
+        data_aug_list = []
+        
+        if np.invert(args['crop_height'] == None) | np.invert(args['crop_width'] == None):
+            if args['crop_height'] == None:
+                args['crop_height'] = 0
+            if args['crop_width'] == None:
+                args['crop_width'] = 0
+            
+            data_aug_list.append(tf.keras.layers.RandomCrop(args['crop_height'], args['crop_width'], name = 'Crop'))
+            
+        elif np.invert(args['flip'] == 'None'):
+            data_aug_list.append(tf.keras.layers.RandomFlip(mode = args['flip'], name = 'Flip'))
+        
+        elif np.invert(args['rotation'] == None):
+            data_aug_list.append(tf.keras.layers.RandomRotation(args['rotation'], fill_mode = 'constant', name = 'Rotate'))
+            
+        elif np.invert(args['translate_height'] == None) | np.invert(args['translate_width'] == None):
+            if args['translate_height'] == None:
+                args['translate_height'] = 0
+            if args['translate_width'] == None:
+                args['translate_width'] = 0
+            
+            data_aug_list.append(tf.keras.layer.RandomTranslation(args['translate_height'], args['translate_width'], fill_mode = 'constant', 
+                                                                  name = 'Translate'))
+            
+        elif np.invert(args['zoom_height'] == None) | np.invert(args['zoom_width'] == None):
+            if args['zoom_height'] == None:
+                args['zoom_height'] = 0
+            if args['zoom_width'] == None:
+                args['zoom_width'] = 0
+                
+            data_aug_list.append(tf.keras.layer.RandomZoom(args['zoom_height'], args['zoom_width'], fill_mode = 'constant', name = 'Zoom'))
+            
+        data_augmentation = Sequential(data_aug_list, name = 'Data_Augmentation')
+        tensor = data_augmentation(tensor)
+    
     # Define an empty list to be used for skip connections
     skip_connections = []
     
@@ -573,6 +682,18 @@ def model_cnn(args):
             tensor = MaxPooling2D(pool_size = (psv, psh), 
                                   strides = (psv, psh),
                                   name = 'MAX%d'%(n+1))(tensor)
+            
+    if args['variational']:
+        x = tensor.shape[1]
+        y = tensor.shape[2]
+        filters = tensor.shape[3]
+        tensor = Flatten()(tensor)
+        tensor = Dense(int(args['nfilters'][-1]*1.5), activation = 'elu', name = 'encoder_dense')(tensor)
+        tensor_mean = Dense(2, activation = 'elu', name = 'encoder_mean')(tensor)
+        tensor_log_var = Dense(2, activation = 'elu', name = 'encoder_log_var')(tensor)
+        tensor = Sampling()([tensor_mean, tensor_log_var])
+        tensor = Dense(x*y*filters, activation = 'elu', name = 'decoder_dense')(tensor)
+        tensor = Reshape((x, y, filters), name = 'decoder_reshape')(tensor)
             
             
     # Build the decoder side
@@ -637,6 +758,11 @@ def model_cnn(args):
     
     return model
 
+
+#%%
+##############################################
+
+# Function to make a Recurrent network model
 
 def build_rnn_model(args, shape):
     '''
@@ -771,6 +897,60 @@ def focal_loss(gamma=2, alpha=4):
         reduced_fl = tf.reduce_max(fl, axis=1)
         return tf.reduce_mean(reduced_fl)
     return focal_loss_fixed
+
+def variational_loss(loss = 'cateogrical_crossentropy', gamma = 2.0, alpha = 4.0):
+    
+    gamma = float(gamma)
+    alpha = float(alpha)
+    
+    def focal_loss_fixed(y_true, y_pred):
+        """Focal loss for multi-classification
+        FL(p_t)=-alpha(1-p_t)^{gamma}ln(p_t)
+        Notice: y_pred is probability after softmax
+        gradient is d(Fl)/d(p_t) not d(Fl)/d(x) as described in the paper
+        d(Fl)/d(p_t) * [p_t(1-p_t)] = d(Fl)/d(x)
+        Focal Loss for Dense Object Detection
+        https://arxiv.org/abs/1708.02002
+
+        Arguments:
+            y_true {tensor} -- ground truth labels, shape of [batch_size, num_cls]
+            y_pred {tensor} -- model's output, shape of [batch_size, num_cls]
+
+        Keyword Arguments:
+            gamma {float} -- (default: {2.0})
+            alpha {float} -- (default: {4.0})
+
+        Returns:
+            [tensor] -- loss.
+        """
+        epsilon = 1e-9
+        y_true = tf.convert_to_tensor(y_true, tf.float32)
+        y_pred = tf.convert_to_tensor(y_pred, tf.float32)
+
+        model_out = tf.add(y_pred, epsilon)
+        ce = tf.multiply(y_true, -tf.math.log(model_out))
+        weight = tf.multiply(y_true, tf.math.pow(tf.subtract(1., model_out), gamma))
+        fl = tf.multiply(alpha, tf.multiply(weight, ce))
+        reduced_fl = tf.reduce_max(fl, axis=1)
+        return tf.reduce_mean(reduced_fl)
+    
+    def combine_loss(y_true, y_pred):
+        '''
+        Combine the the KL Divergence and focal/categorical cross entropy loss functions for variational autoencoders
+        
+        
+        '''
+        
+        if loss == 'categorical_crossentropy':
+            combined_loss = tf.add(tf.keras.losses.categorical_crossentropy(y_true, y_pred), tf.keras.losses.kl_divergence(y_true, y_pred))
+        elif loss == 'focal':
+            combined_loss = tf.add(focal_loss_fixed(y_true, y_pred), tf.keras.losses.kl_divergence(y_true, y_pred))
+        #else:
+        #    raise "Variational encoder loss is only compatible with categoricall crossentropy and focal losses (currently)"
+            
+        return combined_loss
+    return combine_loss
+        
 
 
 

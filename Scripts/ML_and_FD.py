@@ -184,6 +184,17 @@ def create_ml_parser():
     parser.add_argument('--L2_regularization', '--l2', type=float, default=None, help='L2 regularization factor (only active if no L2)')
     
     
+    # Data augmentation parameter (currently only applied to CNNs
+    parser.add_argument('--data_augmentation', action='store_true', help = 'Use data augmentation')
+    parser.add_argument('--crop_height', type=int, default=None, help = 'Crop the map along the height axis. This must have the same primes used in the max pooling layers')
+    parser.add_argument('--crop_width', type=int, default=None, help = 'Crop the map along the width axis. This must have the same primes used in the max pooling layers')
+    parser.add_argument('--flip', type=str, default='None', help = 'Flip the map. Entries are "horizontal", "vertical", "horizontal_and_vertical", or "vertical_and_horizontal"')
+    parser.add_argument('--data_aug_rotation', type=float, default=None, help = 'Rotate the map. Inputs are percentage of rotation (e.g., 0.2 is 20% of a 360 degree rotation)')
+    parser.add_argument('--translation_height', type=float, default=None, help = 'Slide the map along the height axis. Inputs are percentage of slide (e.g., 0.2 is up to +/- 20% of the full image sliding')
+    parser.add_argument('--translation_width', type=float, default=None, help = 'Slide the map along the width axis. Inputs are percentage of slide (e.g., 0.2 is up to +/- 20% of the full image sliding')
+    parser.add_argument('--zoom_height', type=float, default=None, help = 'Zoom the map along the height axis. Inputs are percentage of zoom (e.g., 0.2 is up to a 20% zoom)')
+    parser.add_argument('--zoom_width', type=float, default=None, help = 'Zoom the map along the width axis. Inputs are percentage of zoom (e.g., 0.2 is up to a 20% zoom)')
+
     
     # Specific experiment configuration
     parser.add_argument('--ntrain_folds', type=int, default=3, help='Number of training folds')
@@ -223,6 +234,7 @@ def create_ml_parser():
     
     # Convolutional U-Net 
     parser.add_argument('--sequential', action='store_true', help = 'Build a sequential U-net (has no skip connections)')
+    parser.add_argument('--variational', action='store_true', help = 'Build a variational autoencoder/U-net')
     parser.add_argument('--nfilters', nargs='+', type=int, default = [20,20,20], help = 'Number of filters in each convolutional per layer (sequence of ints) for the encoder (reverse order for the decoder)')
     parser.add_argument('--kernel_size', nargs='+', type=int, default = [3,3,3], help = 'CNN kernel size per layer (sequence of ints) for the encoder (reverse order for the decoder)')
     parser.add_argument('--strides', nargs='+', type=int, default = [1,1,1], help = 'CNN strides per layer (sequence of ints) for the encoder (reverse order for the decoder)')
@@ -414,6 +426,23 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
     # Reshape data
     NV, T, IJ = train_in.shape
     NV, Tt, IJ = valid_in.shape
+    
+    # Normalize data?
+    if args.normalize:
+        for ij in range(IJ):
+            if np.mod(ij, 1000) == 0: 
+                print('%4.2f percent through normalization...'%(ij/IJ*100))
+                    
+            scaler_train = StandardScaler()
+            scaler_valid = StandardScaler()
+            scaler_test = StandardScaler()
+            scaler_whole = StandardScaler()
+
+            train_in[:,:,ij] = scaler_train.fit_transform(train_in[:,:,ij])
+            valid_in[:,:,ij] = scaler_valid.fit_transform(valid_in[:,:,ij])
+            test_in[:,:,ij] = scaler_test.fit_transform(test_in[:,:,ij])
+
+            data_in[:,:,ij] = scaler_whole.fit_transform(data_in[:,:,ij])
 
     train_in = train_in.reshape(NV, T*IJ, order = 'F')
     valid_in = valid_in.reshape(NV, Tt*IJ, order = 'F')
@@ -458,6 +487,13 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
     NV, T, IJ = data_in.shape
     data_in = data_in.reshape(NV, T*IJ, order = 'F')
     data_out = data_out.reshape(T*IJ, order = 'F')
+    
+    # Revmove multiclass labels (they are not needed outside of training)
+    data_out[data_out == 2] = 0
+    
+    train_out[train_out == 2] = 0
+    valid_out[valid_out == 2] = 0
+    test_out[test_out == 2] = 0
     
     results = sklearn_evaluate_model(model, args, data_in, valid_in, test_in, data_out, valid_out, test_out, IJ, T, Tt)
     
@@ -819,14 +855,19 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         train_out = np.moveaxis(train_out, 0, 1)
         valid_out = np.moveaxis(valid_out, 0, 1)
         test_out = np.moveaxis(test_out, 0, 1)
+        
+    if args.variational:
+        args.loss = variational_loss(loss = loss, gamma = args.focal_parameters[0], alpha = args.focal_parameters[1])
 
-    if loss == 'focal':
+    elif loss == 'focal':
         args.loss = focal_loss(gamma = args.focal_parameters[0], alpha = args.focal_parameters[1])
 
         
     if os.path.exists('%s/'%model_fname):
         # Make any custom objects?
-        if loss == 'focal':
+        if args.variational:
+            custom_objects = {'combine_loss': args.loss}
+        elif loss == 'focal':
             custom_objects = {'focal_loss_fixed': args.loss}
         else:
             custom_objects = None
@@ -1318,14 +1359,14 @@ def execute_exp(args, test = False):
     
     # Remove NaNs?
     if args.remove_nans:
-        if args.keras:
-            for var in range(Nvar):
-                data_in[var,np.isnan(data_in[var,:,:,:])] = np.nanmean(data_in[var,:,:,:])
-                
-            data_out[np.isnan(data_out)] = 2
-        else:
-            data_in[np.isnan(data_in)] = -995
-            data_out[np.isnan(data_out)] = 0
+        #if args.keras:
+        for var in range(Nvar):
+            data_in[var,np.isnan(data_in[var,:,:,:])] = np.nanmean(data_in[var,:,:,:])
+
+        data_out[np.isnan(data_out)] = 2
+        #else:
+        #    data_in[np.isnan(data_in)] = -995
+        #    data_out[np.isnan(data_out)] = 0
     
     print('Input size (NVariables x time x space x NFolds):', data_in.shape)
     print('Output size (NMethods x time x space x NFolds):', data_out.shape)
