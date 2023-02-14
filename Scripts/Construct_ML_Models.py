@@ -226,7 +226,8 @@ def build_svm_model(args):
     
     # Determine class weights
     if args.class_weight != None:
-        weights = {0:1, 1:args.class_weight}
+        #weights = [{0:1, 1:1}, {0:1, 1:args.class_weight}, {0:1, 1:0}]
+        weights = {0:1, 1:args.class_weight, 2:0}
     else:
         weights = 'balanced'
       
@@ -272,7 +273,8 @@ def build_adaboost_model(args):
     
     # Determine class weights
     if args.class_weight != None:
-        weights = {0:1, 1:args.class_weight}
+        #weights = [{0:1, 1:1}, {0:1, 1:args.class_weight}, {0:1, 1:0}]
+        weights = {0:1, 1:args.class_weight, 2:0}
     else:
         weights = 'balanced'
       
