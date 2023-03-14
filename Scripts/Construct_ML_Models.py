@@ -227,7 +227,7 @@ def build_svm_model(args):
     # Determine class weights
     if args.class_weight != None:
         #weights = [{0:1, 1:1}, {0:1, 1:args.class_weight}, {0:1, 1:0}]
-        weights = {0:1, 1:args.class_weight, 2:0}
+        weights = {0:1, 1:args.class_weight}
     else:
         weights = 'balanced'
       
@@ -235,7 +235,7 @@ def build_svm_model(args):
     if args.svm_kernel == 'linear':
         model = svm.LinearSVC(penalty = args.svm_regularizer,
                               loss = args.svm_loss,
-                              dual = False, # Perferred when n_samples > n_features. n_features = 8, and n_samples >= 43
+                              dual = False, # False is perferred when n_samples > n_features. n_features = 8, and n_samples >= 43
                               tol = args.svm_stopping_err,
                               C = args.svm_regularizer_value,
                               fit_intercept = args.svm_intercept,
