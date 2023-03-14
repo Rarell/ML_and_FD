@@ -610,9 +610,14 @@ def sklearn_evaluate_model(model, args, train_in, valid_in, test_in, train_out, 
                     test_pred_auc = 0
 
             else:
-                train_pred_auc = model.decision_function(train_in.T)
-                valid_pred_auc = model.decision_function(valid_in.T)
-                test_pred_auc = model.decision_function(test_in.T)
+                if args.ml_model == 'svm':
+                    train_pred_auc = model.decision_function(train_in.T)
+                    valid_pred_auc = model.decision_function(valid_in.T)
+                    test_pred_auc = model.decision_function(test_in.T)
+                else:
+                    train_pred_auc = model.decision_function(train_in.T)[:,1]
+                    valid_pred_auc = model.decision_function(valid_in.T)[:,1]
+                    test_pred_auc = model.decision_function(test_in.T)[:,1]
             
             e_train = np.nan if only_zeros else metrics.roc_auc_score(train_out, train_pred_auc)
             e_valid = np.nan if (np.nansum(valid_out) == 0) | (np.nansum(valid_out) == valid_out.size) else metrics.roc_auc_score(valid_out, valid_pred_auc)
@@ -715,9 +720,14 @@ def sklearn_evaluate_model(model, args, train_in, valid_in, test_in, train_out, 
                 test_pred_roc = 0
         
         else:
-            train_pred_roc = model.decision_function(train_in.T)
-            valid_pred_roc = model.decision_function(valid_in.T)
-            test_pred_roc = model.decision_function(test_in.T)
+            if args.ml_model == 'svm':
+                train_pred_roc = model.decision_function(train_in.T)
+                valid_pred_roc = model.decision_function(valid_in.T)
+                test_pred_roc = model.decision_function(test_in.T)
+            else:
+                train_pred_roc = model.decision_function(train_in.T)[:,1]
+                valid_pred_roc = model.decision_function(valid_in.T)[:,1]
+                test_pred_roc = model.decision_function(test_in.T)[:,1]
         
         thresh = np.arange(0, 2, 1e-4)
         thresh = np.round(thresh, 4)
@@ -1360,10 +1370,17 @@ def execute_exp(args, test = False):
     # Remove NaNs?
     if args.remove_nans:
         #if args.keras:
-        for var in range(Nvar):
-            data_in[var,np.isnan(data_in[var,:,:,:])] = np.nanmean(data_in[var,:,:,:])
+        if args.ml_model == 'svm':
+            for var in range(Nvar):
+                data_in[var,np.isnan(data_in[var,:,:,:])] = 0
+            
+            data_out[np.isnan(data_out)] = 0
+            
+        else:
+            for var in range(Nvar):
+                data_in[var,np.isnan(data_in[var,:,:,:])] = np.nanmean(data_in[var,:,:,:])
 
-        data_out[np.isnan(data_out)] = 2
+            data_out[np.isnan(data_out)] = 2
         #else:
         #    data_in[np.isnan(data_in)] = -995
         #    data_out[np.isnan(data_out)] = 0
