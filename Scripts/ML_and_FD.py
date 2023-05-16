@@ -9,12 +9,12 @@ Created on Sat Oct 2 17:52:45 2021
 # Author: Stuart Edris (sgedris@ou.edu)
 # Description:
 #     This is the main script for the employment of machine learning to identify flash drought study.
-#     This script takes in indces calculated from the Calculate_Indices script (training data) and the 
+#     This script takes in indces calculated from the Process_Data script (training data) and the 
 #     identified flash drought in the Calculate_FD script (label data) and identifies flash drought
-#     using those indices (minus the index used to calculate flash drought). Several models are employed
-#     (decision trees to set the process up, boosted trees, random forests, SVMs, and nueral networks).
-#     Models are run for each flash drought identification method. Output results are given in the final
-#     models, ROC curves, tables of performance statistics, weights (contribution of each index), etc.
+#     using those variables that indicates flash drought (T, P, ET, PET, and SM). Several models are employed
+#     (ada boosted trees, random forests, SVMs, and ANNs/DNNs, CNNs, RNNs, and transformer networks).
+#     Models are run for each flash drought identification method. Output results consist of performance statistics, ROC curves,
+#     predicted climatologies, predicted case studies, feature contributions, etc.
 #
 # 
 #
@@ -173,6 +173,7 @@ def create_ml_parser():
     parser.add_argument('--loss', type=str, default='binary_crossentropy', help = 'Loss being minimized by model')
     parser.add_argument('--focal_parameters', type=float, nargs=2, default=[2, 4], help = 'Parameters for the focal loss function (gamma is first value, alpha is the second)')
     parser.add_argument('--batch', type=int, default=43, help="Training set batch size")
+    parser.add_argument('--prefetch', type=int, default=2, help="How many batches to prefetch during training (keras models only)")
     parser.add_argument('--activation', type=str, nargs='+', default=['sigmoid', 'tanh'], help='Activation function(s) for each layer in the NNs')
     parser.add_argument('--output_activation', type=str, default = 'sigmoid', help='Activation function for the NN output layer')
     parser.add_argument('--multiprocess', action='store_true', help='Use multiple processing in training the deep model')
@@ -827,6 +828,9 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
                 data_in[:,i,j,:] = scaler_whole.fit_transform(data_in[:,i,j,:])
     
     
+    del scaler_train, scaler_valid, scaler_test, scaler_whole
+    gc.collect()
+    
     # output data is read in shapes of (1, T, I, J). Remove the 1.
     train_out = np.squeeze(train_out)
     valid_out = np.squeeze(valid_out)
@@ -898,12 +902,12 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         # Set up sample weights for the neural network
         weights = np.ones((train_out.shape[:]))
         
-        # Set locations with sea values (data_out == -1) to have weights of 0 (no impact
+        # Set locations with sea values (data_out == 2) to have weights of 0 (no impact)
         weights = np.where(train_out == 2, 0, weights)
 
         
         # Determine class weights
-        if args.class_weight != None:
+        if np.invert(args.class_weight == None):
             
             # Set weights where there is flash drought
             weights = np.where(train_out == 1, args.class_weight, weights)
@@ -967,15 +971,27 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         print(tmp_valid_out.shape)
         
         
+        # Turn the data into a dataset
+        train_dataset = tf.data.Dataset.from_tensor_slices((train_in, tmp_train_out, weights))
+        valid_dataset = tf.data.Dataset.from_tensor_slices((valid_in, tmp_valid_out))
+        
+        # Batch and prefetch the data
+        train_dataset = train_dataset.batch(args.batch)
+        valid_dataset = valid_dataset.batch(args.batch)
+        
+        train_dataset = train_dataset.prefetch(args.prefetch)
+        valid_dataset = valid_dataset.prefetch(args.prefetch)
+        
+        
         #print(np.nansum(train_out == 1)/train_out.size, np.log(np.nansum(train_out == 1)/train_out.size))
         # Train the model
-        history = model.fit(x = np.array(train_in), y = np.array(tmp_train_out),
-                            batch_size=args.batch, shuffle = False, 
+        history = model.fit(train_dataset,
+                            shuffle = False, 
                             epochs = args.epochs, verbose = args.verbose>=2,
-                            validation_data = (np.array(valid_in), np.array(tmp_valid_out)), 
+                            validation_data = (valid_dataset), 
                             callbacks = [early_stopping_cb],
-                            use_multiprocessing = args.multiprocess,
-                            sample_weight = weights)
+                            use_multiprocessing = args.multiprocess)#,
+                            #sample_weight = weights)
         
         
         # Report if verbosity is turned on
@@ -988,6 +1004,10 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         
         # Save the model
         model.save('%s'%(model_fname))
+    
+    # Remove some of the unused variables to to reduce RAM usage
+    del tmp_train_out, tmp_valid_out, weights
+    gc.collect()
     
     # Evaluate the model
     Ttot, I, J, NV = data_in.shape
@@ -1456,66 +1476,6 @@ def execute_exp(args, test = False):
                 valid_out = valid_out.reshape(Nmethods, valid_out.shape[1], I, J, order = 'F')
                 test_out = test_out.reshape(Nmethods, test_out.shape[1], I, J, order = 'F')
                 
-                #lat_min = np.nanmin(lat); lat_max = np.nanmax(lat)
-                #lon_min = np.nanmin(lon); lon_max = np.nanmax(lon)
-
-                #tmp, lat_sub, lon_sub = subset_data(valid_in[:,:,:,0], lat, lon, LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
-                #Isub, Jsub = lat_sub.shape
-                
-                #train_in_tmp = np.ones((train_in.shape[0], Isub, Jsub, Nvar))
-                #valid_in_tmp = np.ones((valid_in.shape[0], Isub, Jsub, Nvar))
-                #test_in_tmp = np.ones((test_in.shape[0], Isub, Jsub, Nvar))
-                
-                #train_out_tmp = np.ones((Nmethods, train_out.shape[1], Isub, Jsub))
-                #valid_out_tmp = np.ones((Nmethods, valid_out.shape[1], Isub, Jsub))
-                #test_out_tmp = np.ones((Nmethods, test_out.shape[1], Isub, Jsub))
-                
-                #data_in_whole_tmp = np.ones((data_in_whole.shape[0], Isub, Jsub, Nvar))
-                #data_out_whole_tmp = np.ones((Nmethods, data_out_whole.shape[1], Isub, Jsub))
-                
-                #for var in range(Nvar):
-                #    train_in_tmp[:,:,:,var], _, _ = subset_data(train_in[:,:,:,var], lat, lon, 
-                #                                                LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
-                #    valid_in_tmp[:,:,:,var], _, _ = subset_data(valid_in[:,:,:,var], lat, lon, 
-                #                                                LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
-                #    test_in_tmp[:,:,:,var], _, _ = subset_data(test_in[:,:,:,var], lat, lon, 
-                #                                               LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
-                #    
-                #    data_in_whole_tmp[:,:,:,var], _, _ = subset_data(data_in_whole[:,:,:,var], lat, lon, 
-                #                                             LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
-                    
-                #for method in range(Nmethods):
-                #    train_out_tmp[method,:,:,:], _, _ = subset_data(train_out[method,:,:,:], lat, lon, 
-                #                                                    LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
-                #    valid_out_tmp[method,:,:,:], _, _ = subset_data(valid_out[method,:,:,:], lat, lon, 
-                #                                                    LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
-                #    test_out_tmp[method,:,:,:], _, _ = subset_data(test_out[method,:,:,:], lat, lon, 
-                #                                                   LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
-                #    
-                #    data_out_whole_tmp[method,:,:,:], _, _ = subset_data(data_out_whole[method,:,:,:], lat, lon, 
-                #                                           LatMin = lat_min, LatMax = lat_max, LonMin = -105, LonMax = lon_max)
-                    
-                #train_in = train_in_tmp
-                #valid_in = valid_in_tmp
-                #test_in = test_in_tmp
-                
-                #train_out = train_out_tmp
-                #valid_out = valid_out_tmp
-                #test_out = test_out_tmp
-                
-                #data_in_whole = data_in_whole_tmp
-                #data_out_whole = data_out_whole_tmp
-                
-                #train_out = np.where(train_out > 0.5, 1, 0)
-                #valid_out = np.where(valid_out > 0.5, 1, 0)
-                #test_out = np.where(test_out > 0.5, 1, 0)
-                #data_out_whole = np.where(data_out_whole > 0.5, 1, 0)
-                
-                #del train_in_tmp, valid_in_tmp, test_in_tmp, data_in_whole_tmp, train_out_tmp, valid_out_tmp, test_out_tmp, data_out_whole_tmp
-                #gc.collect()
-                
-                #print('The new data size is:', data_in_whole.shape)
-                
                 
                 # Perform the experiment
                 # The ML model is saved in this step
@@ -1539,6 +1499,10 @@ def execute_exp(args, test = False):
         train_in, valid_in, test_in = split_data(data_in, args.ntrain_folds, args.rotation, normalize = args.normalize)
         train_out, valid_out, test_out = split_data(data_out, args.ntrain_folds, args.rotation, normalize = False) # Note the label data is already binary
 
+        # Remove very large files from the RAM
+        del data_in, data_out
+        gc.collect()
+        
         # Generate the model filename
         model_fbase = generate_model_fname(args.ra_model, args.label, args.method, args.rotation[0])
         model_fname = '%s/%s/%s/%s'%(dataset_dir, args.ml_model, args.method, model_fbase)

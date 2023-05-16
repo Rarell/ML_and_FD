@@ -348,7 +348,7 @@ def build_ann_model(args, shape):
                                 epsilon = None, decay = 0.0, amsgrad = False)
     
     # Build the model and define the loss function
-    mode = 'temporal' if (args.class_weight != None) else None
+    mode = 'temporal' if np.invert(args.class_weight == None) else None
     
     model.compile(loss = args.loss, optimizer = opt, 
                   metrics = ['categorical_accuracy', tf.keras.metrics.Precision(name = 'precision'), 
@@ -851,7 +851,7 @@ def build_rnn_model(args, shape):
                                    epsilon = None, decay = 0.0, amsgrad = False)
     
     # Build the model and define the loss function
-    mode = 'temporal' if (args.class_weight != None) else None
+    mode = 'temporal' if np.invert(args.class_weight == None) else None
     
     model.compile(loss = args.loss, optimizer = opt, 
                   metrics = ['categorical_accuracy', tf.keras.metrics.Precision(name = 'precision'), 

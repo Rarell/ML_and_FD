@@ -923,7 +923,7 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
 def parse_data(data, dates, path, fname, years = None, months = None, days = None):
     '''
     Parse a list 3D time x lat x space datasets into time x space x folds datasets, with each
-    fold being 1 growing season. The data is then saved latter use.
+    fold being 1 growing season. The data is then saved to a cdf (.nc) file for later use.
     
     Inputs:
     :param data: List of 3D datasets in time x lat x lon formats. Must be a list.
