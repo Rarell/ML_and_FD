@@ -10,9 +10,17 @@ This script contains functions used to create the maps and figures to display an
 This script assumes it is being running in the 'ML_and_FD_in_NARR' directory
 
 TODO:
+- Update figures for global scale
 - Might add a function to display how forests are making predictions
 - Might add a function to display certain NN layers to see how it is identifying FD
 - Adjust case_studies to display more than 1 type of growing seaons
+- New Figures:
+  - Spigatti plot for learning curves
+  - Combine climatology with time series
+  - Combine case study maps and add XAI time series part (feature importance)
+  - Confusion matrix?
+  
+- NOTE: TICK and LABEL SIZES HAVE BEEN MODIFIED: TEST THEM
 """
 
 
@@ -117,10 +125,10 @@ def display_metric_map(data, lat, lon, methods, metric, cmin, cmax, cint, model,
     
     if np.invert(globe):
         plt.subplots_adjust(left = 0.1, right = 0.9, bottom = 0.1, top = 0.9, wspace = 0.1, hspace = 0.2)
-        fig.suptitle(model.upper(), y = 0.925, size = 18)
+        fig.suptitle(model.upper(), y = 0.925, size = 22)
     else:
         plt.subplots_adjust(left = 0.1, right = 0.9, bottom = 0.1, top = 0.9, wspace = 0.1, hspace = 0.2)
-        fig.suptitle(model.upper(), y = 0.925, size = 18)
+        fig.suptitle(model.upper(), y = 0.925, size = 22)
         
         
     for m, method in enumerate(methods):
@@ -148,8 +156,8 @@ def display_metric_map(data, lat, lon, methods, metric, cmin, cmax, cint, model,
         ax.set_xticks(LonLabel, crs = fig_proj)
         ax.set_yticks(LatLabel, crs = fig_proj)
         
-        ax.set_yticklabels(LatLabel, fontsize = 14)
-        ax.set_xticklabels(LonLabel, fontsize = 14)
+        ax.set_yticklabels(LatLabel, fontsize = 20)
+        ax.set_xticklabels(LonLabel, fontsize = 20)
         
         ax.xaxis.set_major_formatter(LonFormatter)
         ax.yaxis.set_major_formatter(LatFormatter)
@@ -164,7 +172,7 @@ def display_metric_map(data, lat, lon, methods, metric, cmin, cmax, cint, model,
             ax.set_extent([-179, 179, -65, 80])
         
         # Add method label
-        ax.set_ylabel(method.title(), size = 14, labelpad = 45.0, rotation = 0)
+        ax.set_ylabel(method.title(), size = 20, labelpad = 45.0, rotation = 0)
         
         # Add a colorbar at the end
         if m == (len(methods)-1):
@@ -172,8 +180,8 @@ def display_metric_map(data, lat, lon, methods, metric, cmin, cmax, cint, model,
             cbar = fig.colorbar(cs, cax = cbax, orientation = 'vertical')
             cbar.set_ticks(np.round(np.arange(cmin, cmax+cint, cint*10), 2)) # Set a total of 10 ticks
             for i in cbar.ax.yaxis.get_ticklabels():
-                i.set_size(18)
-            cbar.ax.set_ylabel(metric.upper(), fontsize = 18)
+                i.set_size(22)
+            cbar.ax.set_ylabel(metric.upper(), fontsize = 22)
             
     # Save the figure
     filename = '%s_%s_%s_maps.png'%(metric, label, dataset)
@@ -206,7 +214,7 @@ def display_roc_curves(tprs, fprs, tprs_var, fprs_var, methods, model, label, da
     fig, axes = plt.subplots(figsize = [10, 10*len(methods)], nrows = len(methods), ncols = 1)
     
     plt.subplots_adjust(left = 0.1, right = 0.9, bottom = 0.1, top = 0.9, wspace = 0.1, hspace = 0.2)
-    fig.suptitle(model.upper(), y = 0.925, size = 18)
+    fig.suptitle(model.upper(), y = 0.925, size = 22)
     
     for m, method in enumerate(methods):
         if len(methods) == 1: # For test cases where only 1 method is examined, the sole axis cannot be subscripted
@@ -247,7 +255,7 @@ def display_roc_curves(tprs, fprs, tprs_var, fprs_var, methods, model, label, da
         ax.plot([0,1], [0,1], 'k-', linewidth = 1)
         
         # Set the label
-        ax.set_ylabel(method.title(), fontsize = 18)
+        ax.set_ylabel(method.title(), fontsize = 22)
         
         # Set the ticks
         # ax.set_xticks(np.round(np.arange(0, 1+0.2, 0.2), 1))
@@ -257,7 +265,7 @@ def display_roc_curves(tprs, fprs, tprs_var, fprs_var, methods, model, label, da
         
         # Set the tick size
         for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-            i.set_size(18)
+            i.set_size(22)
             
     # Save the figure
     filename = '%s_%s_ROC_curves.png'%(label, dataset)
@@ -291,7 +299,7 @@ def display_learning_curves(loss, loss_var, methods, metric, model, label, path 
                              subplot_kw = {'projection': fig_proj})
     
     plt.subplots_adjust(left = 0.1, right = 0.9, bottom = 0.1, top = 0.9, wspace = 0.1, hspace = 0.2)
-    fig.suptitle(model, y = 0.945, size = 18)
+    fig.suptitle(model, y = 0.945, size = 22)
     
     for m, method in enumerate(methods):
         ax = axes[m]
@@ -300,14 +308,14 @@ def display_learning_curves(loss, loss_var, methods, metric, model, label, path 
         ax.plot(epochs, loss[m][0], 'b', linewidth = 2, label = 'Training')
         ax.plot(epochs, loss[m][1], 'orange', linestyle = '.-', linewidth = 2, label = 'Validation')
         
-        ax.legend(loc='top right', fontsize = 16)
+        ax.legend(loc='top right', fontsize = 20)
         
         # Plot the variation
         ax.fill_between(epochs, loss[m][0]-loss_var[m][0], loss[m][0]+loss_var[m][0], alpha = 0.5, edgecolor = 'b', facecolor = 'b')
         ax.fill_between(epochs, loss[m][1]-loss_var[m][1], loss[m][1]+loss_var[m][1], alpha = 0.5, edgecolor = 'orange', facecolor = 'orange')
         
         # Set the label
-        ax.set_ylabel(method, fontsize = 18)
+        ax.set_ylabel(method, fontsize = 22)
         
         # Set the ticks
         # ax.set_xticks(np.round(np.arange(0, 1+0.2, 0.2), 1))
@@ -317,7 +325,7 @@ def display_learning_curves(loss, loss_var, methods, metric, model, label, path 
         
         # Set the tick size
         for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-            i.set_size(18)
+            i.set_size(22)
             
     # Save the figure
     filename = '%s_%s_learning_curves.png'%(metric, label)
@@ -355,7 +363,7 @@ def display_feature_importance(fimportance, fimportance_var, feature_names, meth
     fig, ax = plt.subplots(figsize = [18, 14])
     
     # Set the title
-    ax.set_title('Feature Importance for the %s'%model.upper(), fontsize = 16)
+    ax.set_title('Feature Importance for the %s'%model.upper(), fontsize = 22)
     
     bars = []
     
@@ -365,10 +373,10 @@ def display_feature_importance(fimportance, fimportance_var, feature_names, meth
         bars.append(bar)
         
     # Add the legend
-    ax.legend(bars, methods, fontsize = 16)
+    ax.legend(bars, methods, fontsize = 22)
         
     # Set the labels
-    ax.set_ylabel('Feature Importance', fontsize = 16)
+    ax.set_ylabel('Feature Importance', fontsize = 22)
     
     # Set the ticks
     ax.set_xticks(ind + 2*width)#-width/1)
@@ -376,7 +384,7 @@ def display_feature_importance(fimportance, fimportance_var, feature_names, meth
     
     # Set the tick size
     for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-        i.set_size(18)
+        i.set_size(22)
         
     # Save the figure
     filename = '%s_feature_importance.png'%(label)
@@ -415,7 +423,7 @@ def display_time_series(data_true, data_pred, data_true_var, data_pred_var, time
     fig, ax = plt.subplots(figsize = [12, 8])
     
     # Set the title
-    ax.set_title('Time Series of the %s for the %s'%(var_name, model), fontsize = 16)
+    ax.set_title('Time Series of the %s for the %s'%(var_name, model), fontsize = 22)
     
     # Make the plots color = 'r', linestyle = '-', linewidth = 1, label = 'True values'
     ax.errorbar(time, data_true, yerr = data_true_var, capsize = 3, errorevery = 3*N, 
@@ -424,18 +432,18 @@ def display_time_series(data_true, data_pred, data_true_var, data_pred_var, time
                 color = 'b', linestyle = '-.', linewidth = 1.5, label = 'Predicted values')
     
     # Make a legend
-    ax.legend(loc = 'upper right', fontsize = 16)
+    ax.legend(loc = 'upper right', fontsize = 20)
     
     # Set the labels
-    ax.set_ylabel(var_name, fontsize = 16)
-    ax.set_xlabel('Time', fontsize = 16)
+    ax.set_ylabel(var_name, fontsize = 22)
+    ax.set_xlabel('Time', fontsize = 22)
     
     # Set the ticks
     ax.xaxis.set_major_formatter(DateFormatter('%Y'))
     
     # Set the tick sizes
     for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-        i.set_size(16)
+        i.set_size(20)
         
     # Save the figure
     filename = '%s_%s_time_series.png'%(var_name, label)
@@ -466,7 +474,7 @@ def display_learning_curve(lc, lc_var, metric_names, plot_var, model, label, pat
         fig, ax = plt.subplots(figsize = [12, 8])
     
         # Set the title
-        ax.set_title('Learning curve of the %s for the %s'%(metric, model), fontsize = 16)
+        ax.set_title('Learning curve of the %s for the %s'%(metric, model), fontsize = 22)
     
         # Display the loss
         ax.plot(lc['%s'%metric], 'b-', label = 'Training')
@@ -478,15 +486,15 @@ def display_learning_curve(lc, lc_var, metric_names, plot_var, model, label, pat
             ax.fill_between(range(len(lc['val_%s'%metric])), lc['val_%s'%metric]-lc_var['val_%s'%metric], lc['val_%s'%metric]+lc_var['val_%s'%metric], 
                             alpha = 0.5, edgecolor = 'b', facecolor = 'r')
         
-        ax.legend(fontsize = 16)
+        ax.legend(fontsize = 20)
         
         # Set the labels
-        ax.set_ylabel(metric, fontsize = 16)
-        ax.set_xlabel('Epochs', fontsize = 16)
+        ax.set_ylabel(metric, fontsize = 22)
+        ax.set_xlabel('Epochs', fontsize = 22)
         
         # Set the tick sizes
         for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-            i.set_size(16)
+            i.set_size(20)
     
         # Save the figure
         filename = '%s_%s_%s_learning_curve.png'%(model, label, metric)
@@ -603,7 +611,7 @@ def display_case_study_maps(data, lon, lat, time, year_list, method, label, data
         ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
         # Set the flash drought title
-        ax.set_title('Flash Drought for %s'%year, size = 18)
+        ax.set_title('Flash Drought for %s'%year, size = 22)
 
         # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
         ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
@@ -621,8 +629,8 @@ def display_case_study_maps(data, lon, lat, time, year_list, method, label, data
         ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
         ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
 
-        ax.set_yticklabels(LatLabel, fontsize = 18)
-        ax.set_xticklabels(LonLabel, fontsize = 18)
+        ax.set_yticklabels(LatLabel, fontsize = 20)
+        ax.set_xticklabels(LonLabel, fontsize = 20)
 
         ax.xaxis.set_major_formatter(LonFormatter)
         ax.yaxis.set_major_formatter(LatFormatter)
@@ -647,9 +655,9 @@ def display_case_study_maps(data, lon, lat, time, year_list, method, label, data
 
         # Set the colorbar ticks
         cbar.set_ticks([3.5, 4.3, 5.2, 6.05, 6.9, 7.75, 8.7, 9.5])
-        cbar.ax.set_yticklabels(['No FD', 'Apr', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct'], fontsize = 16)
+        cbar.ax.set_yticklabels(['No FD', 'Apr', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct'], fontsize = 22)
         for i in cbar.ax.yaxis.get_ticklabels():
-            i.set_size(18)
+            i.set_size(20)
         
         # Set the colorbar ticks
         # cbar.set_ticks(np.arange(0, 12+1, 1))
@@ -741,22 +749,22 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     fig, ax = plt.subplots(figsize = [12, 8])
     
     # Set the title
-    ax.set_title('Time Series of the threat score for the %s'%(model), fontsize = 16)
+    ax.set_title('Time Series of the threat score for the %s'%(model), fontsize = 22)
     
     # Make the plots
     ax.plot(time, ts_s, 'r-', linewidth = 2, label = 'True values')
 
     
     # Set the labels
-    ax.set_ylabel('Threat Score', fontsize = 16)
-    ax.set_xlabel('Time', fontsize = 16)
+    ax.set_ylabel('Threat Score', fontsize = 22)
+    ax.set_xlabel('Time', fontsize = 22)
     
     # Set the ticks
     ax.xaxis.set_major_formatter(DateFormatter('%Y'))
     
     # Set the tick sizes
     for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-        i.set_size(16)
+        i.set_size(20)
         
     # Save the figure
     filename = 'threat_score_%s_time_series.png'%(label)
@@ -768,22 +776,22 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     fig, ax = plt.subplots(figsize = [12, 8])
     
     # Set the title
-    ax.set_title('Time Series of the equitable threat score for the %s'%(model), fontsize = 16)
+    ax.set_title('Time Series of the equitable threat score for the %s'%(model), fontsize = 20)
     
     # Make the plots 
     ax.plot(time, ets_s, 'r-', linewidth = 2, label = 'True values')
 
     
     # Set the labels
-    ax.set_ylabel('Equitable Threat Score', fontsize = 16)
-    ax.set_xlabel('Time', fontsize = 16)
+    ax.set_ylabel('Equitable Threat Score', fontsize = 22)
+    ax.set_xlabel('Time', fontsize = 22)
     
     # Set the ticks
     ax.xaxis.set_major_formatter(DateFormatter('%Y'))
     
     # Set the tick sizes
     for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-        i.set_size(16)
+        i.set_size(20)
         
     # Save the figure
     filename = 'equitable_threat_score_%s_time_series.png'%(label)
@@ -837,7 +845,7 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
     # Set the flash drought title
-    ax.set_title('Threat Score for %s'%model, size = 18)
+    ax.set_title('Threat Score for %s'%model, size = 22)
 
     # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
     ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
@@ -855,8 +863,8 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
     ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
 
-    ax.set_yticklabels(LatLabel, fontsize = 18)
-    ax.set_xticklabels(LonLabel, fontsize = 18)
+    ax.set_yticklabels(LatLabel, fontsize = 20)
+    ax.set_xticklabels(LonLabel, fontsize = 20)
 
     ax.xaxis.set_major_formatter(LonFormatter)
     ax.yaxis.set_major_formatter(LatFormatter)
@@ -878,11 +886,11 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     else:
         cbax = fig.add_axes([0.925, 0.32, 0.020, 0.36])
     cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
-    cbar.ax.set_ylabel('Threat Score', fontsize = 18)
+    cbar.ax.set_ylabel('Threat Score', fontsize = 22)
 
     # Set the colorbar ticks
     for i in cbar.ax.yaxis.get_ticklabels():
-        i.set_size(18)
+        i.set_size(20)
         
         
     # Save the figure
@@ -899,7 +907,7 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
     # Set the flash drought title
-    ax.set_title('Equitable Threat Score for %s'%model, size = 18)
+    ax.set_title('Equitable Threat Score for %s'%model, size = 22)
 
     # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
     ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
@@ -917,8 +925,8 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
     ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
 
-    ax.set_yticklabels(LatLabel, fontsize = 18)
-    ax.set_xticklabels(LonLabel, fontsize = 18)
+    ax.set_yticklabels(LatLabel, fontsize = 20)
+    ax.set_xticklabels(LonLabel, fontsize = 20)
 
     ax.xaxis.set_major_formatter(LonFormatter)
     ax.yaxis.set_major_formatter(LatFormatter)
@@ -940,11 +948,11 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     else:
         cbax = fig.add_axes([0.925, 0.32, 0.020, 0.36])
     cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
-    cbar.ax.set_ylabel('Equitable Threat Score', fontsize = 18)
+    cbar.ax.set_ylabel('Equitable Threat Score', fontsize = 22)
 
     # Set the colorbar ticks
     for i in cbar.ax.yaxis.get_ticklabels():
-        i.set_size(18)
+        i.set_size(20)
         
     # Save the figure
     filename = 'equitable_threat_score_%s_map.png'%(label)
@@ -1009,22 +1017,22 @@ def display_far(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     fig, ax = plt.subplots(figsize = [12, 8])
     
     # Set the title
-    ax.set_title('Time Series of the FAR score for the %s'%(model), fontsize = 16)
+    ax.set_title('Time Series of the FAR score for the %s'%(model), fontsize = 22)
     
     # Make the plots
     ax.plot(time, far_s, 'r-', linewidth = 2, label = 'True values')
 
     
     # Set the labels
-    ax.set_ylabel('FAR', fontsize = 16)
-    ax.set_xlabel('Time', fontsize = 16)
+    ax.set_ylabel('FAR', fontsize = 22)
+    ax.set_xlabel('Time', fontsize = 22)
     
     # Set the ticks
     ax.xaxis.set_major_formatter(DateFormatter('%Y'))
     
     # Set the tick sizes
     for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-        i.set_size(16)
+        i.set_size(20)
         
     # Save the figure
     filename = 'far_%s_time_series.png'%(label)
@@ -1079,7 +1087,7 @@ def display_far(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
     # Set the flash drought title
-    ax.set_title('FAR Score for %s'%model, size = 18)
+    ax.set_title('FAR Score for %s'%model, size = 22)
 
     # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
     ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
@@ -1097,8 +1105,8 @@ def display_far(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
     ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
 
-    ax.set_yticklabels(LatLabel, fontsize = 18)
-    ax.set_xticklabels(LonLabel, fontsize = 18)
+    ax.set_yticklabels(LatLabel, fontsize = 20)
+    ax.set_xticklabels(LonLabel, fontsize = 20)
 
     ax.xaxis.set_major_formatter(LonFormatter)
     ax.yaxis.set_major_formatter(LatFormatter)
@@ -1120,11 +1128,11 @@ def display_far(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     else:
         cbax = fig.add_axes([0.925, 0.32, 0.020, 0.36])
     cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
-    cbar.ax.set_ylabel('FAR', fontsize = 18)
+    cbar.ax.set_ylabel('FAR', fontsize = 22)
 
     # Set the colorbar ticks
     for i in cbar.ax.yaxis.get_ticklabels():
-        i.set_size(18)
+        i.set_size(20)
         
         
     # Save the figure
@@ -1193,22 +1201,22 @@ def display_pod(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     fig, ax = plt.subplots(figsize = [12, 8])
     
     # Set the title
-    ax.set_title('Time Series of the POD for the %s'%(model), fontsize = 16)
+    ax.set_title('Time Series of the POD for the %s'%(model), fontsize = 22)
     
     # Make the plots
     ax.plot(time, pod_s, 'r-', linewidth = 2, label = 'True values')
 
     
     # Set the labels
-    ax.set_ylabel('POD', fontsize = 16)
-    ax.set_xlabel('Time', fontsize = 16)
+    ax.set_ylabel('POD', fontsize = 22)
+    ax.set_xlabel('Time', fontsize = 22)
     
     # Set the ticks
     ax.xaxis.set_major_formatter(DateFormatter('%Y'))
     
     # Set the tick sizes
     for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-        i.set_size(16)
+        i.set_size(20)
         
     # Save the figure
     filename = 'pod_%s_time_series.png'%(label)
@@ -1264,7 +1272,7 @@ def display_pod(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
 
     # Set the flash drought title
-    ax.set_title('POD for %s'%model, size = 18)
+    ax.set_title('POD for %s'%model, size = 22)
 
     # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
     ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
@@ -1282,8 +1290,8 @@ def display_pod(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
     ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
 
-    ax.set_yticklabels(LatLabel, fontsize = 18)
-    ax.set_xticklabels(LonLabel, fontsize = 18)
+    ax.set_yticklabels(LatLabel, fontsize = 20)
+    ax.set_xticklabels(LonLabel, fontsize = 20)
 
     ax.xaxis.set_major_formatter(LonFormatter)
     ax.yaxis.set_major_formatter(LatFormatter)
@@ -1305,11 +1313,11 @@ def display_pod(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     else:
         cbax = fig.add_axes([0.925, 0.32, 0.020, 0.36])
     cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
-    cbar.ax.set_ylabel('POD', fontsize = 18)
+    cbar.ax.set_ylabel('POD', fontsize = 22)
 
     # Set the colorbar ticks
     for i in cbar.ax.yaxis.get_ticklabels():
-        i.set_size(18)
+        i.set_size(20)
         
         
     # Save the figure

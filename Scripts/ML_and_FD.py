@@ -9,7 +9,7 @@ Created on Sat Oct 2 17:52:45 2021
 # Author: Stuart Edris (sgedris@ou.edu)
 # Description:
 #     This is the main script for the employment of machine learning to identify flash drought study.
-#     This script takes in indces calculated from the Process_Data script (training data) and the 
+#     This script takes in indces calculated from the Raw_Data_Processing script (training data) and the 
 #     identified flash drought in the Calculate_FD script (label data) and identifies flash drought
 #     using those variables that indicates flash drought (T, P, ET, PET, and SM). Several models are employed
 #     (ada boosted trees, random forests, SVMs, and ANNs/DNNs, CNNs, RNNs, and transformer networks).
@@ -31,30 +31,40 @@ Created on Sat Oct 2 17:52:45 2021
 #   3.0.0 - 11/16/2022 - Removed splitting of data into regions to converse memory. Restructured execute_exp (now main experiment function) to train 
 #                        1 rotation and 1 method at a time. execute_exp is now structured to work with the OU schooner supercomputer.
 #   3.1.0 - 12/28/2022 - Added Keras models and evaluation to the the code, and ANN, CNN, and RNNs to Construct_ML_Models.py. Other improvements and fixes.
+#   3.2.0 - 1/14/2023 - Updated TensorFlow to 2.8 and added data augmentation layers to the CNNs
+#   3.2.1 - 5/15/2023 - Changed TensorFlow models to use Datasets instead of numpy arrays. Other similar changes to reduce RAM uses of TensorFlow models. 
+#                       Other bug fixes.
 #
 # Inputs:
-#   - Data files for FD indices and identified FD (.nc format)
+#   - Data files for FD indicator features, and FD labels (.pkl format)
+#   - Input arguments indicating where to find the data files, ML model parameters, and others (see create_ml_parser() function).
 #
 # Outputs:
-#   - A number of figure showing the results of the SL algorithms
-#   - Several outputs (in the terminal) showing performance metrics for the ML algorithms
+#   - File for ML model created (.pkl for sklearn model, folders for TensorFlow model)
+#   - File for model results for rotation created 
+#     (contains overall statistical performance, maps of statistics, ROC curves, and learning curves (TF models); .pkl file)
+#   - File containing the averaged results over all rotations (includes XAI variables; .pkl file)
+#   - Figures displaying model results (coming from the file that contains the averaged results overall rotations)
 #
 # To Do:
-#   - Main function
-#       - Add learning curve calculations and figures
+#   - Update documentation to contain information for each input parameter/feature contained
 #   - May look into residual curves (training and validation metric performance over different number of folds; 
 #                                    may be too computationally and temporally expensive)
 #   - May look into Ceteris-Paribus effect
 #   - Add argparse arguments for other ML models
 #   - Add XAI for keras models
+#   - See multiple hashtag comments in merge_results() function for list of tasks (4 total comments)
+#   - See multiple hashtag comments in if __name__ == ... for list of tasks (3 total comments)
 #
 # Bugs:
-#   - 
+#   - sklearn models maybe standardized along the wrong axis
+#   - TensorFlow models are known to perform more poorly if the computer has not been power cycled (turned off and on) for a while. 
+#     True even if the kernel is reset
 #
 # Notes:
 #   - See tf_environment.yml for a list of all packages and versions. netcdf4 and cartopy must be downloaded seperately.
 #   - This script assumes it is being running in the 'ML_and_FD_in_NARR' directory
-#   - Several of the comments for this program are based on the Spyder IDL, which can separate the code into different blocks of code, or 'cells'
+#   - Several of the comments for this program are based on the Spyder IDL, which can separate the code into different blocks of code, or 'cells' using '#%%'
 #
 ###############################################################
 
@@ -277,7 +287,7 @@ def load_ml_data(fname, path = './Data'):
 ##############################################
 
 # Function to separate 4D data into training, validation, and testing datasets
-def split_data(data, ntrain_folds, rotation, normalize = False):
+def split_data(data, ntrain_folds, rotation):
     '''
     Split a data set into a training, validation, and test datasets based on folds
     
@@ -285,7 +295,6 @@ def split_data(data, ntrain_folds, rotation, normalize = False):
     :param data: Input data to be split. Must be in a Nfeate/Nmethod x time x space x fold format
     :param ntrain_folds: Number of folds to include in the training set
     :param rotation: The rotation of k-fold to use
-    :param normalize: Boolean indicating whether to normalize the data to range from 0 to 1
     
     Outputs:
     :param train: Training dataset
@@ -297,29 +306,13 @@ def split_data(data, ntrain_folds, rotation, normalize = False):
     N, T, IJ, Nfolds = data.shape
     
     data_norm = data
-    
-    # Normalize the data?
-    #if normalize:
-    #    for n in range(N):
-    #        # Note the training set is T (K), ET, PET, P, and soil moisture, which are all, theoretically > 0
-    #        max_value = np.nanmax(data[n,:,:,:])
-    #        #min_value = np.nanmin(data)
-    #        #mean_value = np.nanmean(data)
-    #        
-    #        data_norm[n,:,:,:] = data_norm[n,:,:,:]/max_value
             
     # Determine the training, validation, and test folds
     train_folds = (np.arange(ntrain_folds) + rotation) % Nfolds
     validation_folds = int((np.array([ntrain_folds]) + rotation) % Nfolds)
     test_folds = int((np.array([ntrain_folds]) + 1 + rotation) % Nfolds)
     
-    # Collect the training, validation, and test data
-    # train = np.ones((N, T*ntrain_folds, IJ))
-    # for n, fold in enumerate(train_folds):
-    #     ind_start = n*T
-    #     ind_end = (n+1)*T
-    #     train[:,ind_start:ind_end,:] = data_norm[:,:,:,fold]
-    
+    # Collect the training, validation, and test data    
     train_folds = np.sort(train_folds)
     train = np.concatenate([data_norm[:,:,:,fold] for fold in train_folds], axis = 1)
         
@@ -424,10 +417,11 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
         return
     
     # sklearn models only accept 2D inputs and 1D outputs
-    # Reshape data
     NV, T, IJ = train_in.shape
     NV, Tt, IJ = valid_in.shape
     
+    
+    ###### May need to change transpose variables
     # Normalize data?
     if args.normalize:
         for ij in range(IJ):
@@ -583,12 +577,15 @@ def sklearn_evaluate_model(model, args, train_in, valid_in, test_in, train_out, 
     # Perform the evaluations for each metric
     for metric in args.metrics:
 
+        # Collect the accuracy metric?
         if metric == 'accuracy':
             e_train = metrics.accuracy_score(train_out, train_pred)
             e_valid = metrics.accuracy_score(valid_out, valid_pred)
             e_test = metrics.accuracy_score(test_out, test_pred)
 
+        # Collect the AUC metric?
         elif metric == 'auc':
+            # RFs don't have the decision_function() subfunction, so predict_proba() is used instead
             if (args.ml_model.lower() == 'rf') | (args.ml_model.lower() == 'random_forest'):
                 train_pred_auc = model.predict_proba(train_in.T)
                 valid_pred_auc = model.predict_proba(valid_in.T)
@@ -611,6 +608,7 @@ def sklearn_evaluate_model(model, args, train_in, valid_in, test_in, train_out, 
                     test_pred_auc = 0
 
             else:
+                # decision_function() from SVMs only return 1D array without breaking it into 0s and 1s columns
                 if args.ml_model == 'svm':
                     train_pred_auc = model.decision_function(train_in.T)
                     valid_pred_auc = model.decision_function(valid_in.T)
@@ -624,31 +622,37 @@ def sklearn_evaluate_model(model, args, train_in, valid_in, test_in, train_out, 
             e_valid = np.nan if (np.nansum(valid_out) == 0) | (np.nansum(valid_out) == valid_out.size) else metrics.roc_auc_score(valid_out, valid_pred_auc)
             e_test = np.nan if (np.nansum(test_out) == 0) | (np.nansum(test_out) == test_out.size) else metrics.roc_auc_score(test_out, test_pred_auc)
 
+        # Collect precision?
         elif metric == 'precision':
             e_train = metrics.precision_score(train_out, train_pred)
             e_valid = metrics.precision_score(valid_out, valid_pred)
             e_test = metrics.precision_score(test_out, test_pred)
 
+        # Collect recall?
         elif metric == 'recall':
             e_train = metrics.recall_score(train_out, train_pred)
             e_valid = metrics.recall_score(valid_out, valid_pred)
             e_test = metrics.recall_score(test_out, test_pred)
 
+        # Collect the F1-Score?
         elif metric == 'f1_score':
             e_train = metrics.f1_score(train_out, train_pred)
             e_valid = metrics.f1_score(valid_out, valid_pred)
             e_test = metrics.f1_score(test_out, test_pred)
             
+        # Collect the MSE?
         elif metric == 'mse':
             e_train = metrics.mean_squared_error(train_out, train_pred)
             e_valid = metrics.mean_squared_error(valid_out, valid_pred)
             e_test = metrics.mean_squared_error(test_out, test_pred)
             
+        # Collect the MAE?
         elif metric == 'mae': # Might also add Cross-entropy
             e_train = metrics.mean_absolute_error(train_out, train_pred)
             e_valid = metrics.mean_absolute_error(valid_out, valid_pred)
             e_test = metrics.mean_absolute_error(test_out, test_pred)
             
+        # Collect the TSS (True Skill Score)?
         elif metric == 'tss':
             # To get the true skill score, determine the true positives, true negatives, and false positives (summed over time and the region)
             tp_train = np.nansum(np.where((train_pred == 1) & (train_out == 1), 1, 0))
@@ -730,6 +734,7 @@ def sklearn_evaluate_model(model, args, train_in, valid_in, test_in, train_out, 
                 valid_pred_roc = model.decision_function(valid_in.T)[:,1]
                 test_pred_roc = model.decision_function(test_in.T)[:,1]
         
+        # Group the FPR and TPR predictions into specific bins, each 0.0001 apart
         thresh = np.arange(0, 2, 1e-4)
         thresh = np.round(thresh, 4)
         results['fpr_train'] = np.ones((thresh.size)) * np.nan
@@ -828,6 +833,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
                 data_in[:,i,j,:] = scaler_whole.fit_transform(data_in[:,i,j,:])
     
     
+    # Remove the scalers once their use is done
     del scaler_train, scaler_valid, scaler_test, scaler_whole
     gc.collect()
     
@@ -856,6 +862,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         test_out = test_out.reshape(Tt*I*J, order = 'F')
 
 
+    # Rearrange data for RNNs and transformers so that all grid points are examples, and they are recurrsive along the time axis
     elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
         train_in = train_in.reshape(T, I*J, NV, order = 'F')
         valid_in = valid_in.reshape(Tt, I*J, NV, order = 'F')
@@ -870,13 +877,14 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         valid_out = np.moveaxis(valid_out, 0, 1)
         test_out = np.moveaxis(test_out, 0, 1)
         
+    # Define the loss function for focal loss functions or variational autoencoders
     if args.variational:
         args.loss = variational_loss(loss = loss, gamma = args.focal_parameters[0], alpha = args.focal_parameters[1])
 
     elif loss == 'focal':
         args.loss = focal_loss(gamma = args.focal_parameters[0], alpha = args.focal_parameters[1])
 
-        
+    # Define custom objects if a combined loss function (variational autocoder) or focal loss was used (custom object so they can be loaded)
     if os.path.exists('%s/'%model_fname):
         # Make any custom objects?
         if args.variational:
@@ -929,15 +937,9 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         weight_shape.append(1)
         
         weights = weights.reshape(weight_shape, order = 'F')
-            
-            #if (loss == 'categorical_crossentropy') | (loss == 'focal'):
-            #    tmp_train_out = tmp_train_out.reshape(T*I*J, 3, order = 'F')
-            #    tmp_valid_out = tmp_valid_out.reshape(Tt*I*J, 3, order = 'F')
-            #else:
-            #    tmp_train_out = tmp_train_out.reshape(T*I*J, order = 'F')
-            #    tmp_valid_out = tmp_valid_out.reshape(Tt*I*J, order = 'F')
 
         
+        # Define the labels in the case of binary or categorical cross-entropy losses
         if loss == 'binary_crossentropy':
             # Invert the binary labels for binary cross entropy; should force the model to balance between normalizing the inputs and putting 0s in the weights
             tmp_train_out = 1 - train_out
@@ -1151,11 +1153,13 @@ def keras_evaluate_model(model, args, train_in, valid_in, test_in, train_out, va
     # Predictions
     if np.invert(pred):
         
+        # Define the model predictions based on  loss function
         if loss == 'binary_crossentropy':
             train_pred = 1 - np.squeeze(model.predict(train_in))
             valid_pred = 1 - np.squeeze(model.predict(valid_in))
             test_pred = 1 - np.squeeze(model.predict(test_in))
         elif (loss == 'categorical_crossentropy') | (loss == 'focal'):
+            # The size of the model outputs for ANNs will be different from other NNs
             if (args.ml_model.lower() == 'ann') | (args.ml_model.lower() == 'artificial_neural_network'):
                 train_pred = np.squeeze(model.predict(train_in))[:,1]
                 valid_pred = np.squeeze(model.predict(valid_in))[:,1]
@@ -1165,6 +1169,7 @@ def keras_evaluate_model(model, args, train_in, valid_in, test_in, train_out, va
                 valid_pred = np.squeeze(model.predict(valid_in))[:,:,1]
                 test_pred = np.squeeze(model.predict(test_in))[:,:,1]
         
+        # Output some predictions to see how the model performed (max values < 0.5 means no FD was predicted)
         print(np.nanmin(train_pred), np.nanmin(valid_pred), np.nanmin(test_pred))
         print(np.nanmax(train_pred), np.nanmax(valid_pred), np.nanmax(test_pred))
         print(train_pred.shape)
@@ -1179,7 +1184,8 @@ def keras_evaluate_model(model, args, train_in, valid_in, test_in, train_out, va
     
     if np.invert(pred):
         # Collect information for the ROC curve
-        if args.roc_curve:      
+        if args.roc_curve:
+            # Group TPR and FPR values into bins, each 0.0001 apart
             thresh = np.arange(0, 2, 1e-4)
             thresh = np.round(thresh, 4)
             results['fpr_train'] = np.ones((thresh.size)) * np.nan
@@ -1189,6 +1195,7 @@ def keras_evaluate_model(model, args, train_in, valid_in, test_in, train_out, va
             results['fpr_test'] = np.ones((thresh.size)) * np.nan
             results['tpr_test'] = np.ones((thresh.size)) * np.nan
 
+            # Calcualte TPR and FPR
             fpr_train, tpr_train, thresh_train = metrics.roc_curve(train_out.flatten(), train_pred.flatten())
 
             fpr_valid, tpr_valid, thresh_valid = metrics.roc_curve(valid_out.flatten(), valid_pred.flatten())
@@ -1227,41 +1234,49 @@ def keras_evaluate_model(model, args, train_in, valid_in, test_in, train_out, va
     # Perform the evaluations for each metric
     for metric in args.metrics:
 
+        # Collect accuracy?
         if metric == 'accuracy':
             e_train = metrics.accuracy_score(train_out.flatten(), train_pred.flatten())
             e_valid = metrics.accuracy_score(valid_out.flatten(), valid_pred.flatten())
             e_test = metrics.accuracy_score(test_out.flatten(), test_pred.flatten())
 
+        # Collect AUC?? Note some checks to ensure AUC is calculated without error if no FD is found
         elif metric == 'auc':
             e_train = np.nan if only_zeros else metrics.roc_auc_score(train_out.flatten(), train_pred.flatten())
             e_valid = np.nan if (np.nansum(valid_out < 0.5) == 0) | (np.nansum(valid_out < 0.5) == valid_out.size) else metrics.roc_auc_score(valid_out.flatten(), valid_pred.flatten())
             e_test = np.nan if (np.nansum(test_out < 0.5) == 0) | (np.nansum(test_out < 0.5) == test_out.size) else metrics.roc_auc_score(test_out.flatten(), test_pred.flatten())
 
+        # Collect precision?
         elif metric == 'precision':
             e_train = metrics.precision_score(train_out.flatten(), train_pred.flatten())
             e_valid = metrics.precision_score(valid_out.flatten(), valid_pred.flatten())
             e_test = metrics.precision_score(test_out.flatten(), test_pred.flatten())
 
+        # Collect recall?
         elif metric == 'recall':
             e_train = metrics.recall_score(train_out.flatten(), train_pred.flatten())
             e_valid = metrics.recall_score(valid_out.flatten(), valid_pred.flatten())
             e_test = metrics.recall_score(test_out.flatten(), test_pred.flatten())
 
+        # Collect the F1-Score?
         elif metric == 'f1_score':
             e_train = metrics.f1_score(train_out.flatten(), train_pred.flatten())
             e_valid = metrics.f1_score(valid_out.flatten(), valid_pred.flatten())
             e_test = metrics.f1_score(test_out.flatten(), test_pred.flatten())
             
+        # Collect the MSE?
         elif metric == 'mse':
             e_train = metrics.mean_squared_error(train_out.flatten(), train_pred.flatten())
             e_valid = metrics.mean_squared_error(valid_out.flatten(), valid_pred.flatten())
             e_test = metrics.mean_squared_error(test_out.flatten(), test_pred.flatten())
             
+        # Collect the MAE?
         elif metric == 'mae': # Might also add Cross-entropy
             e_train = metrics.mean_absolute_error(train_out.flatten(), train_pred.flatten())
             e_valid = metrics.mean_absolute_error(valid_out.flatten(), valid_pred.flatten())
             e_test = metrics.mean_absolute_error(test_out.flatten(), test_pred.flatten())
             
+        # Collect the TSS (True Skill Score)?
         elif metric == 'tss':
             # To get the true skill score, determine the true positives, true negatives, and false positives (summed over time and the region)
             tp_train = np.nansum(np.where((train_pred.flatten() >= 0.5) & (train_out.flatten() == 1), 1, 0))
@@ -1299,16 +1314,7 @@ def keras_evaluate_model(model, args, train_in, valid_in, test_in, train_out, va
     results['train_eval'] = eval_train
     results['valid_eval'] = eval_valid
     results['test_eval'] = eval_test
-    
-    # If the input data is predictions, stop here
-    if pred:
-        return results
-                                             
-
-    # Collect the feature importance
-    if args.feature_importance:
-        pass # eli5 maybe helpful for showing feature importance and what layers are seeing.
-        
+                            
     return results
     
     
@@ -1417,6 +1423,10 @@ def execute_exp(args, test = False):
     et = load_nc('evap', 'evaporation.%s.pentad.nc'%args.ra_model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
     lat = et['lat']; lon = et['lon']
     
+    # Remove the unused data
+    del et
+    gc.collect()
+    
     # Collect the spatial size of the data
     I, J = lat.shape
     
@@ -1443,8 +1453,8 @@ def execute_exp(args, test = False):
         for rot in args.rotation:
 
             # Split the data into training, validation, and test sets
-            train_in, valid_in, test_in = split_data(data_in, args.ntrain_folds, rot, normalize = args.normalize)
-            train_out, valid_out, test_out = split_data(data_out, args.ntrain_folds, rot, normalize = False) # Note the label data is already binary
+            train_in, valid_in, test_in = split_data(data_in, args.ntrain_folds, rot)
+            train_out, valid_out, test_out = split_data(data_out, args.ntrain_folds) # Note the label data is already binary
             
             # Generate the model filename
             model_fbase = generate_model_fname(args.ra_model, args.label, args.method, rot)
@@ -1495,14 +1505,6 @@ def execute_exp(args, test = False):
     
     # Otherwise, train for 1 rotation at a time
     else:
-        # Split the data into training, validation, and test sets
-        train_in, valid_in, test_in = split_data(data_in, args.ntrain_folds, args.rotation, normalize = args.normalize)
-        train_out, valid_out, test_out = split_data(data_out, args.ntrain_folds, args.rotation, normalize = False) # Note the label data is already binary
-
-        # Remove very large files from the RAM
-        del data_in, data_out
-        gc.collect()
-        
         # Generate the model filename
         model_fbase = generate_model_fname(args.ra_model, args.label, args.method, args.rotation[0])
         model_fname = '%s/%s/%s/%s'%(dataset_dir, args.ml_model, args.method, model_fbase)
@@ -1512,6 +1514,16 @@ def execute_exp(args, test = False):
         if os.path.exists(model_fname):
             print('File already exists/experiment has already been performed')
             return
+        
+        # Split the data into training, validation, and test sets
+        print('Splitting data training/validation/test sets...')
+        train_in, valid_in, test_in = split_data(data_in, args.ntrain_folds, args.rotation)
+        train_out, valid_out, test_out = split_data(data_out, args.ntrain_folds, args.rotation) # Note the label data is already binary
+
+        # Remove very large files from the RAM
+        del data_in, data_out
+        gc.collect()
+        
 
         # If the training data has too few FD, bagging can easly find some subsets that have no FD, resulting in a class weight error.
         # Ignore the class weights for this scenario
@@ -1574,6 +1586,9 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
     :param NFolds: Total number of folds in the full dataset
     :param NVar: Number of variables used to train the ML model
     :param T, I, J: Size of the time (for 1 fold), horizontal, and width dimensions respectively
+    
+    Outputs:
+    .pkl file containing merged results
     '''
     
     
@@ -1591,6 +1606,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
     results_fname = '%s/%s'%(dataset_dir_hub, results_fbase)
     print(results_fname)
     
+    # If the file already exists, simply load the file
     if os.path.exists('%s'%results_fname):
         print('The model results have already been merged. Loading the results...')
         
@@ -1600,6 +1616,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
         return results
     
     # Collect the files for all rotations
+    # NOTE: filenames with single digit numbers need leading zeros to sort properly (e.g., 01, 02, 03, ...)
     files = ['%s/%s'%(dataset_dir,f) for f in os.listdir(dataset_dir) if re.match(r'%s.+.pkl'%(model_fbase), f)]
     files.sort()
     
@@ -1633,6 +1650,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
     eval_valid_var_map = np.ones((I,J,len(args.metrics))) * np.nan
     eval_test_var_map = np.ones((I,J,len(args.metrics))) * np.nan
     
+    ###### May Expand
     if args.feature_importance:
         feature_import = np.ones((NVar)) * np.nan
         feature_import_var = np.ones((NVar)) * np.nan
@@ -1723,6 +1741,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
     eval_valid_var_map = np.nanstd(np.stack(evalid_map, axis = -1), axis = -1)
     eval_test_var_map = np.nanstd(np.stack(etest_map, axis = -1), axis = -1)    
 
+    # Merge ROC curves
     if args.roc_curve:
         fpr_train = np.nanmean(np.stack(fpr_train_tmp, axis = -1), axis = -1)
         fpr_valid = np.nanmean(np.stack(fpr_valid_tmp, axis = -1), axis = -1)
@@ -1741,10 +1760,13 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
         tpr_test_var = np.nanstd(np.stack(tpr_test_tmp, axis = -1), axis = -1)
 
 
+    ###### May Expand
     if args.feature_importance:
         feature_import = np.nanmean(np.stack(fi, axis = -1), axis = -1)
         feature_import_var = np.nanstd(np.stack(fi, axis = -1), axis = -1)
 
+    # Merge learning curves
+    ### ADD SPIGGATI LEARNING CURVES
     if args.keras:
         learn_curves = {}
         learn_curves_var = {}
@@ -1854,11 +1876,13 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J):
         results['tpr_test_var'] = tpr_test_var
     
     # Feature importance
+    ###### May Expand
     if args.feature_importance:
         results['feature_importance'] = feature_import
         results['feature_importance_var'] = feature_import_var
     
     # Learning curves/model history
+    #### ADD SPIGGATTI LEARNING CURVES
     if args.keras:
         results['history'] = learn_curves
         results['history_var'] = learn_curves_var
@@ -1992,6 +2016,7 @@ if __name__ == '__main__':
 
 
         # Plot the feature importance?
+        ####### CHANGE to args.interpret, include case studies with time series, and feature importance in time, average RF trees, and others!
         if args.feature_importance:
             features = [r'T', r'ET', r'$\Delta$ET', r'PET', r'$\Delta$PET', r'P', r'SM', r'$\Delta$SM']
             NFeature = results[0]['feature_importance'].shape[0]
@@ -2009,6 +2034,7 @@ if __name__ == '__main__':
 
 
         # Plot the learning curve?
+        ##### ADD SPAGGATTI LEARNING CURVES
         if args.keras:
             for m, method in enumerate(methods):
                 display_learning_curve(results[m]['history'], results[m]['history_var'], ['loss', 'categorical_accuracy'], 
@@ -2164,6 +2190,8 @@ if __name__ == '__main__':
                     display_time_series(true_area, pred_area_test, true_area_var, pred_area_var_test, dates[::43], 
                                         r'Areal Coverage (km^2)', args.ra_model, '%s_%s_test_set'%(args.label, method), path = dataset_dir)
 
+                ##### MAY MERGE TIMESERIES AND CLIMATOLOGIES GRAPHS
+                
                 # Plot a set of case studies?
                 if args.case_studies:
                     print('Plotting case studies for the %s method...'%method)

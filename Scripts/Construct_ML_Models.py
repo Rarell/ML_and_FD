@@ -13,12 +13,10 @@ This script assumes it is being running in the 'ML_and_FD_in_NARR' directory
 Current ML models include:
 - 
 
-TODO:
+TO DO:
 - Fill out the build_model() function
 - Add NNs:
-    ANNs
-    CNNs
-    RNNs
+    Transformer
     Others
 - Test reworked code
     Model load functions have not been tested
@@ -79,8 +77,12 @@ def build_sklearn_model(args):
     
     Inputs:
     :param args: Argparse arguments
+    
+    Outputs:
+    :param model: sklearn model (still needs to use .fit())
     '''
     
+    # Determine which model to build
     if (args.ml_model.lower() == 'rf') | (args.ml_model.lower() == 'random_forest'):
         model = build_rf_model(args)
         
@@ -96,8 +98,16 @@ def build_sklearn_model(args):
 def build_keras_model(args, shape = None):
     '''
     Build a ML model (a nueral network) from the keras package
+    
+    Inputs:
+    :param args: Argparse arguments
+    :param shape: Shape of input data
+    
+    Outputs:
+    :param model: TensorFlow model (still needs to use .fit())
     '''
     
+    # Determine which model to build
     if (args.ml_model.lower() == 'ann') | (args.ml_model.lower() == 'artificial_neural_network'):
         model = build_ann_model(args, shape)
         
@@ -185,6 +195,9 @@ def build_rf_model(args):
     
     Inputs:
     :param args: Argparse arguments
+    
+    Outputs:
+    :param model: Random Forest Classifier model
     '''
     
     # args.tree_max_features is a str. Turn it into a None object if None is specified
@@ -222,6 +235,9 @@ def build_svm_model(args):
     
     :Inputs:
     :param args: Argparse arguments
+    
+    Outputs:
+    :param model: Support Vector Machine Classifier model
     '''
     
     # Determine class weights
@@ -233,6 +249,7 @@ def build_svm_model(args):
       
     # Build the model
     if args.svm_kernel == 'linear':
+        # Linear SVMS have an omptized method in the LinearSVC class
         model = svm.LinearSVC(penalty = args.svm_regularizer,
                               loss = args.svm_loss,
                               dual = False, # False is perferred when n_samples > n_features. n_features = 8, and n_samples >= 43
@@ -269,6 +286,9 @@ def build_adaboost_model(args):
     
     :Inputs:
     :param args: Argparse arguments
+    
+    Outputs:
+    :param model: Ada boosted Decision Tree Classifier model
     '''
     
     # Determine class weights
@@ -306,6 +326,9 @@ def build_ann_model(args, shape):
     :Inputs:
     :param args: Argparse arguments
     :param shape: The shape of the training data (size/n_examples x map shape x n_variables)
+    
+    Outputs:
+    :param model: Artificial/Densely connected NN model
     '''
     
                     
@@ -364,11 +387,14 @@ def build_ann_model(args, shape):
 # Function to make a Convolutional U-net model
 def build_cnn_model(args, shape):
     '''
-    Build a convolutional N-net either sequentially (without skip connections) or non-sequentially (with skip connections)
+    Build a convolutional U-net either sequentially (without skip connections) or non-sequentially (with skip connections)
     
     :Inputs:
     :param args: Argparse arguments
     :param shape: The shape of the training data (size/n_examples x map shape x n_variables)
+    
+    Outputs:
+    :param model: Convolutional NN model
     '''
     
     # Create a dictionary of the arguments for convience
@@ -420,6 +446,7 @@ def sequential_cnn(args):
     '''
     Build a sequential convolutional U-style autoencoder (does not have skip connections)
     
+    :Inputs:
     :param args: Dictionary of parameters for the model. Dictionary must contain:
                      map_size: Size of input data
                      nfilters: List of the number of filters in each CNN layer
@@ -434,6 +461,21 @@ def sequential_cnn(args):
                      lambda_l2: Lambda_2 parameter for L2 regularization
                      lrate: Learning rate for the model
                      metrics: List of metrics to calculate for each epoch and for evaluations
+                     class_weight: Float of the class weight that will be applied
+                     variational: Boolean indicating whether to use a variational autoencoder
+                     data_augmentation: Boolean indicating whether to use data augmentation (DA)
+                     crop_height: Number of pixels/grid points to crop along the height axis (DA parameter)
+                     crop_width: Number of pixels/grid points to crop along the width axis (DA parameter)
+                     flip: String of either 'horizontal', 'vertical', 'both', or None for flipping the image (DA parameter)
+                     rotation: Float of how much to rotation the image 
+                               (value is a decimal percentage of rotation, e.g., 0.5 is half of 2*pi rotation; DA parameter)
+                     translate_height: Float of how much to translate the image in the height axis (DA parameter)
+                     translate_width: Float of how much to translate the image in the width axis (DA parameter)
+                     zoom_height: Float of how much to translate the image in the height axis (DA parameter)
+                     zoom_width: Float of how much to translate the image in the width axis (DA parameter)
+    
+    :Outputs:
+    :param model: Sequential CNN model
     '''
     # Define the regularizer
     if args['L2_regularizer'] is not None:
@@ -449,9 +491,11 @@ def sequential_cnn(args):
     # Add the input layer
     model.add(InputLayer(input_shape = (args['map_size'][1], args['map_size'][2], args['map_size'][3]), name = 'Input'))
     
+    # Add data augmentation?
     if args['data_augmentation']:
         data_aug_list = []
         
+        # Add cropping?
         if np.invert(args['crop_height'] == None) | np.invert(args['crop_width'] == None):
             if args['crop_height'] == None:
                 args['crop_height'] = 0
@@ -460,12 +504,15 @@ def sequential_cnn(args):
             
             data_aug_list.append(tf.keras.layers.RandomCrop(args['crop_height'], args['crop_width'], name = 'Crop'))
             
+        # Flip the image?
         elif np.invert(args['flip'] == 'None'):
             data_aug_list.append(tf.keras.layers.RandomFlip(mode = args['flip'], name = 'Flip'))
         
+        # Add rotation?
         elif np.invert(args['rotation'] == None):
             data_aug_list.append(tf.keras.layers.RandomRotation(args['rotation'], fill_mode = 'constant', name = 'Rotate'))
             
+        # Add translation?
         elif np.invert(args['translate_height'] == None) | np.invert(args['translate_width'] == None):
             if args['translate_height'] == None:
                 args['translate_height'] = 0
@@ -474,7 +521,7 @@ def sequential_cnn(args):
             
             data_aug_list.append(tf.keras.layer.RandomTranslation(args['translate_height'], args['translate_width'], fill_mode = 'constant',
                                                                   name = 'Translate'))
-            
+        # Add zooming?
         elif np.invert(args['zoom_height'] == None) | np.invert(args['zoom_width'] == None):
             if args['zoom_height'] == None:
                 args['zoom_height'] = 0
@@ -492,6 +539,7 @@ def sequential_cnn(args):
                                                  args['strides'], 
                                                  args['pool_size_horizontal'], 
                                                  args['pool_size_vertical'])):
+        # Add the convolutional layer(s)
         model.add(Conv2D(kernel_size = k,
                          filters = nf, 
                          strides = s,
@@ -513,6 +561,7 @@ def sequential_cnn(args):
                                    strides = (psv, psh),
                                    name = 'MAX%d'%(n+1)))
             
+    # Make a variational encoder? (Currently only works with non-sequential models)
     if args['variational']:
         pass
         #x, y, filters = tf.shape(tensor).numpy()
@@ -538,6 +587,7 @@ def sequential_cnn(args):
                                    name = 'UpSample%d'%(n+1)))
 
 
+        # Add convolutional layers
         model.add(Conv2D(kernel_size = k,
                          filters = nf, 
                          strides = s,
@@ -584,8 +634,9 @@ def sequential_cnn(args):
     
 def model_cnn(args):
     '''
-    Build a non-sequential convolutional u-et with skip connections right before each pool/right after each upsample
+    Build a non-sequential convolutional U-net with skip connections right before each pool/right after each upsample
     
+    :Inputs:
     :param args: Dictionary of parameters for the model. Dictionary must contain:
                      image_size: Size of input data
                      nclasses: Number of classes to be predicted
@@ -601,6 +652,21 @@ def model_cnn(args):
                      lambda_l2: Lambda_2 parameter for L2 regularization
                      lrate: Learning rate for the model
                      metrics: List of metrics to calculate for each epoch and for evaluations
+                     class_weight: Float of the class weight that will be applied
+                     variational: Boolean indicating whether to use a variational autoencoder
+                     data_augmentation: Boolean indicating whether to use data augmentation (DA)
+                     crop_height: Number of pixels/grid points to crop along the height axis (DA parameter)
+                     crop_width: Number of pixels/grid points to crop along the width axis (DA parameter)
+                     flip: String of either 'horizontal', 'vertical', 'both', or None for flipping the image (DA parameter)
+                     rotation: Float of how much to rotation the image 
+                               (value is a decimal percentage of rotation, e.g., 0.5 is half of 2*pi rotation; DA parameter)
+                     translate_height: Float of how much to translate the image in the height axis (DA parameter)
+                     translate_width: Float of how much to translate the image in the width axis (DA parameter)
+                     zoom_height: Float of how much to translate the image in the height axis (DA parameter)
+                     zoom_width: Float of how much to translate the image in the width axis (DA parameter)
+    
+    :Outputs:
+    :param model: Sequential CNN model
     '''
     # Define the regularizer
     if args['L2_regularizer'] is not None:
@@ -615,9 +681,11 @@ def model_cnn(args):
     input_tensor = Input(shape = (args['map_size'][1], args['map_size'][2], args['map_size'][3]), name = 'Input')
     tensor = input_tensor
     
+    # Add data augmentation?
     if args['data_augmentation']:
         data_aug_list = []
         
+        # Crop the image?
         if np.invert(args['crop_height'] == None) | np.invert(args['crop_width'] == None):
             if args['crop_height'] == None:
                 args['crop_height'] = 0
@@ -626,12 +694,15 @@ def model_cnn(args):
             
             data_aug_list.append(tf.keras.layers.RandomCrop(args['crop_height'], args['crop_width'], name = 'Crop'))
             
+        # Flip the image?
         elif np.invert(args['flip'] == 'None'):
             data_aug_list.append(tf.keras.layers.RandomFlip(mode = args['flip'], name = 'Flip'))
         
+        # Rotate the image?
         elif np.invert(args['rotation'] == None):
             data_aug_list.append(tf.keras.layers.RandomRotation(args['rotation'], fill_mode = 'constant', name = 'Rotate'))
             
+        # Translate the image?
         elif np.invert(args['translate_height'] == None) | np.invert(args['translate_width'] == None):
             if args['translate_height'] == None:
                 args['translate_height'] = 0
@@ -641,6 +712,7 @@ def model_cnn(args):
             data_aug_list.append(tf.keras.layer.RandomTranslation(args['translate_height'], args['translate_width'], fill_mode = 'constant', 
                                                                   name = 'Translate'))
             
+        # Zoom the image?
         elif np.invert(args['zoom_height'] == None) | np.invert(args['zoom_width'] == None):
             if args['zoom_height'] == None:
                 args['zoom_height'] = 0
@@ -661,6 +733,7 @@ def model_cnn(args):
                                                  args['strides'], 
                                                  args['pool_size_horizontal'], 
                                                  args['pool_size_vertical'])):
+        # Add the convolutional layer(s)
         tensor = Conv2D(kernel_size = k,
                         filters = nf, 
                         strides = s,
@@ -684,16 +757,25 @@ def model_cnn(args):
             tensor = MaxPooling2D(pool_size = (psv, psh), 
                                   strides = (psv, psh),
                                   name = 'MAX%d'%(n+1))(tensor)
-            
+    
+    # Make the encoder a variational encoder?
     if args['variational']:
         x = tensor.shape[1]
         y = tensor.shape[2]
         filters = tensor.shape[3]
+        
+        # Flattern the tensor
         tensor = Flatten()(tensor)
         tensor = Dense(int(args['nfilters'][-1]*1.5), activation = 'elu', name = 'encoder_dense')(tensor)
+        
+        # Determine the mean and standard deviation
         tensor_mean = Dense(2, activation = 'elu', name = 'encoder_mean')(tensor)
         tensor_log_var = Dense(2, activation = 'elu', name = 'encoder_log_var')(tensor)
+        
+        # Sample the mean and standard deviation
         tensor = Sampling()([tensor_mean, tensor_log_var])
+        
+        # Restore the sampled data back to the original latent layer size
         tensor = Dense(x*y*filters, activation = 'elu', name = 'decoder_dense')(tensor)
         tensor = Reshape((x, y, filters), name = 'decoder_reshape')(tensor)
             
@@ -712,6 +794,7 @@ def model_cnn(args):
             # Attach skip connection
             tensor = Concatenate()([tensor, skip_connections.pop()])
 
+        # Add the convolutional layer(s)
         tensor = Conv2D(kernel_size = k,
                         filters = nf, 
                         strides = s,
@@ -773,6 +856,9 @@ def build_rnn_model(args, shape):
     :Inputs:
     :param args: Argparse arguments
     :param shape: The shape of the training data (time x map shape/N samples x n_variables)
+    
+    :Outputs:
+    :param model: Recurrent/Recursive NN model
     '''
     # Define the regularizer
     if args.L1_regularization is not None:
@@ -790,6 +876,7 @@ def build_rnn_model(args, shape):
               
     # Add recurrent layers
     for n, (unit, activation, model_type) in enumerate(zip(args.rnn_units, args.rnn_activation, args.rnn_model)):
+        # Add a GRU layer?
         if model_type == 'GRU': # The local bash run did seem to acknowledge the literal 'is' here
             model.add(GRU(unit,
                           activation = activation,
@@ -801,6 +888,7 @@ def build_rnn_model(args, shape):
                           dropout = args.dropout,
                           name = 'GRU_layer%d'%(n+1)))
 
+        # Add an LSTM?
         elif model_type == 'LSTM':
             model.add(LSTM(unit,
                            activation = activation,
@@ -812,6 +900,7 @@ def build_rnn_model(args, shape):
                            dropout = args.dropout,
                            name = 'LSTM_layer%d'%(n+1)))
 
+        # If another layer is specified, add a simple RNN layer instead
         else:
             model.add(SimpleRNN(unit,
                                 activation = activation,
@@ -864,7 +953,17 @@ def build_rnn_model(args, shape):
 # Code was obtained from, and information on the focal loss can be found at, 
 # https://www.dlology.com/blog/multi-class-classification-with-focal-loss-for-imbalanced-datasets/
 def focal_loss(gamma=2, alpha=4):
+    '''
+    Custom loss function (focal loss), that modifies the categorical cross-entropy loss for class imbalance
+    
+    :Inputs:
+    :param gamma, alpha: Loss function parameters that controll how much emphasis is palced on class imbalance
+    
+    :Outputs:
+    :param focal_loss_fixed: Focal loss
+    '''
 
+    # Turn the parameters into floats
     gamma = float(gamma)
     alpha = float(alpha)
 
@@ -892,15 +991,31 @@ def focal_loss(gamma=2, alpha=4):
         y_true = tf.convert_to_tensor(y_true, tf.float32)
         y_pred = tf.convert_to_tensor(y_pred, tf.float32)
 
+        # Calculate the focal loss
         model_out = tf.add(y_pred, epsilon)
+        
         ce = tf.multiply(y_true, -tf.math.log(model_out))
+        
         weight = tf.multiply(y_true, tf.math.pow(tf.subtract(1., model_out), gamma))
+        
         fl = tf.multiply(alpha, tf.multiply(weight, ce))
+        
         reduced_fl = tf.reduce_max(fl, axis=1)
+        
         return tf.reduce_mean(reduced_fl)
     return focal_loss_fixed
 
-def variational_loss(loss = 'cateogrical_crossentropy', gamma = 2.0, alpha = 4.0):
+def variational_loss(loss = 'categorical_crossentropy', gamma = 2.0, alpha = 4.0):
+    '''
+    Define the combined loss functions (loss + KL divergence loss) for variational autoencoders
+    
+    :Inputs:
+    :param loss: String indicating main loss function (must be 'categorical_crossentropy' or 'focal')
+    :param gamma, alpha: Parameters for the focal loss function controlling the emphasis on class imbalance
+    
+    :Outputs:
+    :param combine_loss: The combined loss functions
+    '''
     
     gamma = float(gamma)
     alpha = float(alpha)
@@ -929,20 +1044,32 @@ def variational_loss(loss = 'cateogrical_crossentropy', gamma = 2.0, alpha = 4.0
         y_true = tf.convert_to_tensor(y_true, tf.float32)
         y_pred = tf.convert_to_tensor(y_pred, tf.float32)
 
+        # Calculate the focal loss
         model_out = tf.add(y_pred, epsilon)
+        
         ce = tf.multiply(y_true, -tf.math.log(model_out))
+        
         weight = tf.multiply(y_true, tf.math.pow(tf.subtract(1., model_out), gamma))
+        
         fl = tf.multiply(alpha, tf.multiply(weight, ce))
+        
         reduced_fl = tf.reduce_max(fl, axis=1)
+        
         return tf.reduce_mean(reduced_fl)
     
     def combine_loss(y_true, y_pred):
         '''
         Combine the the KL Divergence and focal/categorical cross entropy loss functions for variational autoencoders
         
+        :Inputs:
+        :param y_true: True label/prediction
+        :param y_pred: Predicted label/prediction
         
+        :Outputs:
+        :param combined_loss: The combined loss functions
         '''
         
+        # Determine the main loss
         if loss == 'categorical_crossentropy':
             combined_loss = tf.add(tf.keras.losses.categorical_crossentropy(y_true, y_pred), tf.keras.losses.kl_divergence(y_true, y_pred))
         elif loss == 'focal':
