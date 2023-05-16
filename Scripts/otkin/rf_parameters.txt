@@ -1,12 +1,12 @@
---label=ada_experiment
+--label=rf_experiment
 --remove_nans
---ml_model=ada
---class_weight=55
+--normalize
+--ml_model=rf
+--class_weight=4.5
+--n_trees=150
 --tree_criterion=gini
 --tree_depth=15
 --tree_max_features=sqrt
---ada_n_estimators=80
---ada_learning_rate=1e-4
 --metrics
 accuracy
 precision
@@ -20,4 +20,3 @@ tss
 --climatology_plot
 --time_series
 --case_studies
---feature_importance

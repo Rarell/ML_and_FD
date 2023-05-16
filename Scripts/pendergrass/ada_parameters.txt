@@ -1,7 +1,7 @@
 --label=ada_experiment
 --remove_nans
 --ml_model=ada
---class_weight=55
+--class_weight=160
 --tree_criterion=gini
 --tree_depth=15
 --tree_max_features=sqrt

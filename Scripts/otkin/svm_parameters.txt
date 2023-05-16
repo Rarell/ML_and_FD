@@ -1,7 +1,7 @@
 --label=svm_experiment
 --remove_nans
 --ml_model=svm
---class_weight=26.5
+--class_weight=6.5
 --svm_regularizer=l2
 --svm_regularizer_value=1e-4
 --svm_loss=squared_hinge
