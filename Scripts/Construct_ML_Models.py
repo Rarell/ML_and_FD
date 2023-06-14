@@ -367,6 +367,8 @@ def build_ann_model(args, shape):
     
     
     # Define the optimizer
+    # NOTE: In newer versions of TF, the decay parameter is weight_decay
+    # Likewise, None is not a valid entry in newer versions; epsilon = 1e-7 (default) needed instead
     opt = keras.optimizers.Adam(learning_rate = args.lrate, beta_1 = 0.9, beta_2 = 0.999,
                                 epsilon = None, decay = 0.0, amsgrad = False)
     
@@ -621,6 +623,8 @@ def sequential_cnn(args):
     model.add(Dense(units = 3, use_bias = True, name = 'Output', activation = args['output_activation']))
 
     # Define the optimizer
+    # NOTE: In newer versions of TF, the decay parameter is weight_decay
+    # Likewise, None is not a valid entry in newer versions; epsilon = 1e-7 (default) needed instead
     opt = tf.keras.optimizers.Adam(learning_rate = args['lrate'], beta_1 = 0.9, beta_2 = 0.999,
                                    epsilon = None, decay = 0.0, amsgrad = False)
 
@@ -832,6 +836,8 @@ def model_cnn(args):
     model = Model(inputs = input_tensor, outputs = output_tensor)
 
     # Define the optimizer
+    # NOTE: In newer versions of TF, the decay parameter is weight_decay
+    # Likewise, None is not a valid entry in newer versions; epsilon = 1e-7 (default) needed instead
     opt = tf.keras.optimizers.Adam(learning_rate = args['lrate'], beta_1 = 0.9, beta_2 = 0.999,
                                    epsilon = None, decay = 0.0, amsgrad = False)
 
@@ -936,6 +942,8 @@ def build_rnn_model(args, shape):
                     name = 'Output'))
     
     # Define the optimizer
+    # NOTE: In newer versions of TF, the decay parameter is weight_decay
+    # Likewise, None is not a valid entry in newer versions; epsilon = 1e-7 (default) needed instead
     opt = tf.keras.optimizers.Adam(learning_rate = args.lrate, beta_1 = 0.9, beta_2 = 0.999,
                                    epsilon = None, decay = 0.0, amsgrad = False)
     

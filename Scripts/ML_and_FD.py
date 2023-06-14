@@ -5,7 +5,7 @@ Created on Sat Oct 2 17:52:45 2021
 
 ##############################################################
 # File: ML_and_FD.py
-# Version: 1.0.0
+# Version: 3.3.0
 # Author: Stuart Edris (sgedris@ou.edu)
 # Description:
 #     This is the main script for the employment of machine learning to identify flash drought study.
@@ -34,6 +34,7 @@ Created on Sat Oct 2 17:52:45 2021
 #   3.2.0 - 1/14/2023 - Updated TensorFlow to 2.8 and added data augmentation layers to the CNNs
 #   3.2.1 - 5/15/2023 - Changed TensorFlow models to use Datasets instead of numpy arrays. Other similar changes to reduce RAM uses of TensorFlow models. 
 #                       Other bug fixes.
+#   3.3.0 - 6/14/2023 - Added capability of utilizing GPUs with TF models used a mirrored strategy approach.
 #
 # Inputs:
 #   - Data files for FD indicator features, and FD labels (.pkl format)
@@ -151,10 +152,10 @@ def create_ml_parser():
     
     parser.add_argument('--input_data_fname', type=str, default='fd_input_features.pkl', help='Filename of the input data')
     parser.add_argument('--output_data_fname', type=str, default='fd_output_labels.pkl', help='Filename of the target output data')
-    
+        
     # CPU/GPU
     parser.add_argument('--cpus_per_task', type=int, default=None, help="Number of threads to consume")
-    parser.add_argument('--gpu', action='store_true', help='Use a GPU')
+    parser.add_argument('--gpu', action='store_true', help='Use GPU processors (only for TensorFlow models)')
 
     # High-level experiment configuration
     parser.add_argument('--exp_type', type=str, default=None, help="Experiment type")
@@ -813,6 +814,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     # Reshape data
     T, I, J, NV = train_in.shape
     Tt, I, J, NV = valid_in.shape
+    Ttot, I, J, NV = data_in.shape
     
     # Normalize data?
     if args.normalize:
@@ -841,6 +843,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     train_out = np.squeeze(train_out)
     valid_out = np.squeeze(valid_out)
     test_out = np.squeeze(test_out)
+    data_out = np.squeeze(data_out)
     
     
     # Reshape output data for training
@@ -850,7 +853,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     
     # Record the loss
     loss = args.loss
-    
+        
     # Rearrange data for ANNs so that all time steps and grid points are examples
     if (args.ml_model.lower() == 'ann') | (args.ml_model.lower() == 'artificial_neural_network'):
         train_in = train_in.reshape(T*I*J, NV, order = 'F')
@@ -860,6 +863,13 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         train_out = train_out.reshape(T*I*J, order = 'F')
         valid_out = valid_out.reshape(Tt*I*J, order = 'F')
         test_out = test_out.reshape(Tt*I*J, order = 'F')
+        
+        data_in = data_in.reshape(Ttot*I*J, NV, order = 'F')
+        data_out = data_out.reshape(Ttot*I*J, order = 'F')
+        
+        print(data_in.shape)
+        print(valid_in.shape)
+        print(test_in.shape)
 
 
     # Rearrange data for RNNs and transformers so that all grid points are examples, and they are recurrsive along the time axis
@@ -876,6 +886,15 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         train_out = np.moveaxis(train_out, 0, 1)
         valid_out = np.moveaxis(valid_out, 0, 1)
         test_out = np.moveaxis(test_out, 0, 1)
+        
+        data_in = data_in.reshape(Ttot, I*J, NV, order = 'F')
+        data_out = data_out.reshape(Ttot, I*J, order = 'F')
+        
+        data_in = np.moveaxis(data_in, 0, 1)
+        data_out = np.moveaxis(data_out, 0, 1)
+        
+    # Collect the input shape
+    input_shape = train_in.shape
         
     # Define the loss function for focal loss functions or variational autoencoders
     if args.variational:
@@ -898,14 +917,6 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         model = keras.models.load_model(model_fname, custom_objects = custom_objects)
                 
     else:
-        
-        # Build the model
-        model = build_keras_model(args, shape = train_in.shape)
-
-        # Callbacks
-        early_stopping_cb = keras.callbacks.EarlyStopping(patience=args.patience,
-                                                          restore_best_weights=True,
-                                                          min_delta=args.min_delta)
         
         # Set up sample weights for the neural network
         weights = np.ones((train_out.shape[:]))
@@ -976,13 +987,61 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         # Turn the data into a dataset
         train_dataset = tf.data.Dataset.from_tensor_slices((train_in, tmp_train_out, weights))
         valid_dataset = tf.data.Dataset.from_tensor_slices((valid_in, tmp_valid_out))
+        test_dataset  = tf.data.Dataset.from_tensor_slices((test_in))
+        full_dataset  = tf.data.Dataset.from_tensor_slices((data_in))
         
         # Batch and prefetch the data
         train_dataset = train_dataset.batch(args.batch)
         valid_dataset = valid_dataset.batch(args.batch)
+        test_dataset  = test_dataset.batch(args.batch)
+        full_dataset  = full_dataset.batch(args.batch)
         
         train_dataset = train_dataset.prefetch(args.prefetch)
         valid_dataset = valid_dataset.prefetch(args.prefetch)
+        test_dataset  = test_dataset.prefetch(args.prefetch)
+        full_dataset  = full_dataset.prefetch(args.prefetch)
+        
+        # May see if this breaks the code
+        del train_in, valid_in, test_in, data_in
+        gc.collect()
+        
+        if args.gpu: # Set up the model to run on GPU
+            
+            ### Code comes from slides made and presented by Dr. Andrew Fagg, at https://drive.google.com/file/d/1YH_zSKT7TblLMC4eofmUruOdKXmt28yx/view
+            ### (accessed from the AI2ES website, ai2es.org/products/education/#shortcourses
+            
+            # Determine the available devices
+            physical_devices = tf.config.get_visible_devices('GPU')
+            n_physical_devices = len(physical_devices)
+            
+            # Set the memory growth look for all available RAM (set to False; also ensures all devices have the same memory growth flag)
+            for physical_device in physical_devices:
+                tf.config.experimental.set_memory_growth(physical_device, False)
+                
+            # Output to ensure the correct number of GPUs are being used compared to expectations
+            print('There are %d GPUs\n'%n_physical_devices)
+            
+            # TensorFlow object that does some magic (Use documentation to expand on this
+            strategy = tf.distribute.MirroredStrategy()
+            
+            # Build the mode within the strategy scope to run in the GPU
+            with strategy.scope():
+                 # Build the model
+                model = build_keras_model(args, shape = input_shape)
+                
+                # Models built within this scope will mirror computation accross devices.
+                # This is akin to running multiple input batches across multiple devices.
+                # Note the splitting does not have to be uniform.
+
+        else: # Else just build the model normally
+            # Build the model
+            model = build_keras_model(args, shape = input_shape)
+
+            
+        # Callbacks
+        early_stopping_cb = keras.callbacks.EarlyStopping(patience=args.patience,
+                                                          restore_best_weights=True,
+                                                          min_delta=args.min_delta)
         
         
         #print(np.nansum(train_out == 1)/train_out.size, np.log(np.nansum(train_out == 1)/train_out.size))
@@ -1011,9 +1070,6 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     del tmp_train_out, tmp_valid_out, weights
     gc.collect()
     
-    # Evaluate the model
-    Ttot, I, J, NV = data_in.shape
-    data_out = np.squeeze(data_out)
     
     # Remove the 2 values to prevent errors
     train_out = np.where(train_out == 2, 0, train_out)
@@ -1022,24 +1078,10 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
 
     data_out = np.where(data_out == 2, 0, data_out)
     
-    # Rearrange data for ANNs so that all time steps and grid points are examples
-    if (args.ml_model.lower() == 'ann') | (args.ml_model.lower() == 'artificial_neural_network'):
-        data_in = data_in.reshape(Ttot*I*J, NV, order = 'F')
-        data_out = data_out.reshape(Ttot*I*J, order = 'F')
-        
-        print(data_in.shape)
-        print(valid_in.shape)
-        print(test_in.shape)
-
-    # For RNNs, the data is fed in as space x time
-    elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
-        data_in = data_in.reshape(Ttot, I*J, NV, order = 'F')
-        data_out = data_out.reshape(Ttot, I*J, order = 'F')
-        
-        data_in = np.moveaxis(data_in, 0, 1)
-        data_out = np.moveaxis(data_out, 0, 1)
     
-    results = keras_evaluate_model(model, args, data_in, valid_in, test_in, data_out, valid_out, test_out, loss)
+    # Perform initial evaluations
+    results = keras_evaluate_model(model, args, full_dataset, valid_dataset, test_dataset, data_out, valid_out, test_out, loss)
+    #results = keras_evaluate_model(model, args, data_in, valid_in, test_in, data_out, valid_out, test_out, loss)
     
     # Note this can cause an error if the model is loaded instead of trained, since history would not exist
     # (Currently not known how to retain the training history from the loaded model stage)
@@ -1454,7 +1496,7 @@ def execute_exp(args, test = False):
 
             # Split the data into training, validation, and test sets
             train_in, valid_in, test_in = split_data(data_in, args.ntrain_folds, rot)
-            train_out, valid_out, test_out = split_data(data_out, args.ntrain_folds) # Note the label data is already binary
+            train_out, valid_out, test_out = split_data(data_out, args.ntrain_folds, rot) # Note the label data is already binary
             
             # Generate the model filename
             model_fbase = generate_model_fname(args.ra_model, args.label, args.method, rot)
