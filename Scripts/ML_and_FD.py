@@ -797,6 +797,11 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     :param results: Dictionary results from the ML model, including predictions, performance metrics, and learning curves
     '''
     
+    # Limit how much CPU TF takes                                               
+    #os.environ['OMP_NUM_THREADS'] = "10"                                  
+    #tf.config.threading.set_inter_op_parallelism_threads(1)
+    #tf.config.threading.set_intra_op_parallelism_threads(1)
+    
     # Construct the base file name for the result
     results_fbase = 'results_%s_%s_%s_rot_%s'%(args.ra_model, 
                                                args.label, 
