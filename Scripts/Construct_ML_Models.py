@@ -15,8 +15,8 @@ Current ML models include:
 
 TO DO:
 - Fill out the build_model() function
+- Test build_attention_model() function more; ensure they work and output what is desired, if a decoder is needed, etc.
 - Add NNs:
-    Transformer
     Others
 - Test reworked code
     Model load functions have not been tested
@@ -116,6 +116,9 @@ def build_keras_model(args, shape = None):
         
     elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
         model = build_rnn_model(args, shape)
+        
+    elif (args.ml_model.lower() == 'attention') | (args.ml_model.lower() == 'transformer'):
+        model = build_attention_model(args, shape)
     
     return model
 
@@ -932,6 +935,78 @@ def build_rnn_model(args, shape):
         if args.dropout is not None:
             model.add(Dropout(rate = args.dropout, name = 'D%d_dropout'%(n+1)))
             
+    # Add the output layer
+    # Activation for the output layer must be softmax
+    model.add(Dense(3, 
+                    use_bias = True, 
+                    activation = args.output_activation, 
+                    kernel_initializer = 'random_uniform',
+                    bias_initializer = 'zeros',
+                    name = 'Output'))
+    
+    # Define the optimizer
+    # NOTE: In newer versions of TF, the decay parameter is weight_decay
+    # Likewise, None is not a valid entry in newer versions; epsilon = 1e-7 (default) needed instead
+    opt = tf.keras.optimizers.Adam(learning_rate = args.lrate, beta_1 = 0.9, beta_2 = 0.999,
+                                   epsilon = None, decay = 0.0, amsgrad = False)
+    
+    # Build the model and define the loss function
+    mode = 'temporal' if np.invert(args.class_weight == None) else None
+    
+    model.compile(loss = args.loss, optimizer = opt, 
+                  metrics = ['categorical_accuracy', tf.keras.metrics.Precision(name = 'precision'), 
+                             tf.keras.metrics.Recall(name = 'recall'), tf.keras.metrics.AUC(name = 'auc')], sample_weight_mode = mode)
+    
+    return model
+
+#%%
+##############################################
+
+# Function to make an attention network model, based on a transformer model
+
+def build_attention_model(args, shape):
+    '''
+    Construct an recurrent neural network (RNN) model using keras
+    
+    :Inputs:
+    :param args: Argparse arguments
+    :param shape: The shape of the training data (time x map shape/N samples x n_variables)
+    
+    :Outputs:
+    :param model: Recurrent/Recursive NN model
+    '''
+    # Define the regularizer
+    if args.L1_regularization is not None:
+        regularizer = keras.regularizers.l1(args.L1_regularization)
+    elif args.L2_regularization is not None:
+        regularizer = keras.regularizers.l2(args.L2_regularization)
+    else:
+        regularizer = None # Define the regularizar for the model, but set to 0 to not use it
+        
+    if args.dropout is None:
+        dropout = 0.0
+    else:
+        dropout = args.dropout
+        
+    # Create the model
+    model = Sequential()
+
+    # Add the embedding layer layer
+    model.add(InputLayer(input_shape = (None, shape[2]), name = 'Input'))
+         
+    #### Do Convolution before hand?
+        
+    # Add transformer encoder layer
+    model.add(TransformerEncoderBlock(num_attention_heads = args.attention_heads,
+                                      inner_dim = args.inner_unit,
+                                      inner_activation = args.inner_activation,
+                                      activity_regularizer = regularizer,
+                                      output_dropout = dropout,
+                                      attention_dropout = dropout,
+                                      inner_dropout = dropout))
+    
+    #### Add a decoder?
+    
     # Add the output layer
     # Activation for the output layer must be softmax
     model.add(Dense(3, 

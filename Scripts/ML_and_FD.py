@@ -5,7 +5,7 @@ Created on Sat Oct 2 17:52:45 2021
 
 ##############################################################
 # File: ML_and_FD.py
-# Version: 3.3.0
+# Version: 3.4.0
 # Author: Stuart Edris (sgedris@ou.edu)
 # Description:
 #     This is the main script for the employment of machine learning to identify flash drought study.
@@ -35,6 +35,7 @@ Created on Sat Oct 2 17:52:45 2021
 #   3.2.1 - 5/15/2023 - Changed TensorFlow models to use Datasets instead of numpy arrays. Other similar changes to reduce RAM uses of TensorFlow models. 
 #                       Other bug fixes.
 #   3.3.0 - 6/14/2023 - Added capability of utilizing GPUs with TF models used a mirrored strategy approach.
+#   3.4.0 - 6/21/2023 - Added self attention networks, based on the transformer configuration.
 #
 # Inputs:
 #   - Data files for FD indicator features, and FD labels (.pkl format)
@@ -56,6 +57,7 @@ Created on Sat Oct 2 17:52:45 2021
 #   - Add XAI for keras models
 #   - See multiple hashtag comments in merge_results() function for list of tasks (4 total comments)
 #   - See multiple hashtag comments in if __name__ == ... for list of tasks (3 total comments)
+#   - Test and work on attention model to ensure it works, and produces what is desired
 #
 # Bugs:
 #   - sklearn models maybe standardized along the wrong axis
@@ -134,10 +136,7 @@ def create_ml_parser():
     '''
     Create argument parser
     '''
-    
-    # To add: args.time_series, args.climatology_plot, args.case_studies, args.case_study_years
-              
-    
+
     # Parse the command-line arguments
     parser = argparse.ArgumentParser(description='ML Calculations', fromfile_prefix_chars='@')
 
@@ -257,6 +256,12 @@ def create_ml_parser():
     parser.add_argument('--rnn_units', nargs='+', type=int, default = [10, 10], help = 'Number of hidden units in the RNN layers, per layer (sequence of ints)')
     parser.add_argument('--rnn_model', nargs='+', type=str, default = ['GRU', 'GRU'], help = 'Type of recurrent layer it use RNN per layer (sequence of strings)')
     parser.add_argument('--rnn_activation', nargs='+', type=str, default = ['tanh', 'tanh'], help = 'Activation function to use in the RNN per layer (sequence of strings)')
+    
+    # Attention parameters
+    parser.add_argument('--attention_heads' type=int, default=3, help='Number of heads in multi-headed attention')
+    parser.add_argument('--inner_dim', type=int, default=5, help='Units of the output dense layer in the transformer encoder')
+    parser.add_argument('--inner_activation', type=str, default='elu', help='Activation function for the transformer encoder inner dense layer')
+    
     
     
     return parser
@@ -878,7 +883,8 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
 
 
     # Rearrange data for RNNs and transformers so that all grid points are examples, and they are recurrsive along the time axis
-    elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
+    elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network') | 
+         (args.ml_model.lower() == 'attention') | (args.ml_model.lower() == 'transformer'):
         train_in = train_in.reshape(T, I*J, NV, order = 'F')
         valid_in = valid_in.reshape(Tt, I*J, NV, order = 'F')
         test_in = test_in.reshape(Tt, I*J, NV, order = 'F')
