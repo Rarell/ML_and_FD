@@ -257,10 +257,11 @@ def create_ml_parser():
     parser.add_argument('--rnn_model', nargs='+', type=str, default = ['GRU', 'GRU'], help = 'Type of recurrent layer it use RNN per layer (sequence of strings)')
     parser.add_argument('--rnn_activation', nargs='+', type=str, default = ['tanh', 'tanh'], help = 'Activation function to use in the RNN per layer (sequence of strings)')
     
-    # Attention parameters
+    # Attention parameters; note setting ml_model = transformer will override encoder_decoder and create a transformer network
     parser.add_argument('--attention_heads' type=int, default=3, help='Number of heads in multi-headed attention')
     parser.add_argument('--inner_dim', type=int, default=5, help='Units of the output dense layer in the transformer encoder')
     parser.add_argument('--inner_activation', type=str, default='elu', help='Activation function for the transformer encoder inner dense layer')
+    parser.add_argument('--encoder_decoder', type=str, default='encoder', help='Create a transformer encoder and/or a decoder block (options are encoder/decoder/both')
     
     
     

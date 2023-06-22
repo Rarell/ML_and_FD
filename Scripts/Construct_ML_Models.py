@@ -64,6 +64,7 @@ from sklearn import metrics
 from tensorflow.keras.layers import InputLayer, Dense, Dropout, Reshape, Masking, Flatten, RepeatVector
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, SpatialDropout2D, Concatenate
 from tensorflow.keras.layers import SimpleRNN, LSTM, GRU
+from tensorflow.keras.layers import TransformerEncoderBlock, TransformerDecoderBlock
 from tensorflow.keras.models import Sequential, Model
 
 
@@ -995,17 +996,36 @@ def build_attention_model(args, shape):
     model.add(InputLayer(input_shape = (None, shape[2]), name = 'Input'))
          
     #### Do Convolution before hand?
-        
-    # Add transformer encoder layer
-    model.add(TransformerEncoderBlock(num_attention_heads = args.attention_heads,
-                                      inner_dim = args.inner_unit,
-                                      inner_activation = args.inner_activation,
-                                      activity_regularizer = regularizer,
-                                      output_dropout = dropout,
-                                      attention_dropout = dropout,
-                                      inner_dropout = dropout))
     
-    #### Add a decoder?
+    # Build a transformer?
+    if args.ml_model.lower() == 'transformer':
+        model.add(TransformerDecoderBlock(num_attention_heads = args.attention_heads,
+                                          intermediate_size = args.inner_unit
+                                          intermediate_activation = args.inner_activation,
+                                          dropout_rate = dropout,
+                                          attention_dropout_rate = dropout,
+                                          multi_channel_cross_attention = True))
+        
+    else:
+        # Add a transformer encoder layer?
+        if (args.encoder_decoder.lower() == 'encoder') | (args.encoder_decoder.lower() == 'both'):
+            model.add(TransformerEncoderBlock(num_attention_heads = args.attention_heads,
+                                              inner_dim = args.inner_unit,
+                                              inner_activation = args.inner_activation,
+                                              activity_regularizer = regularizer,
+                                              output_dropout = dropout,
+                                              attention_dropout = dropout,
+                                              inner_dropout = dropout))
+            
+        # Add a transformer decoder layer?
+        elif (args.encoder_decoder.lower() == 'decoder') | (args.encoder_decoder.lower() == 'both'):
+            model.add(TransformerDecoderBlock(num_attention_heads = args.attention_heads,
+                                          intermediate_size = args.inner_unit
+                                          intermediate_activation = args.inner_activation,
+                                          dropout_rate = dropout,
+                                          attention_dropout_rate = dropout,
+                                          multi_channel_cross_attention = False))
+    
     
     # Add the output layer
     # Activation for the output layer must be softmax
