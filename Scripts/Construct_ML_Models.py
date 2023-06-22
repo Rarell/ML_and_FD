@@ -40,6 +40,7 @@ import matplotlib.colors as mcolors
 from matplotlib import colorbar as mcolorbar
 import tensorflow as tf
 from tensorflow import keras
+import tensorflow_models as tfm
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import cartopy.mpl.ticker as cticker
@@ -64,7 +65,8 @@ from sklearn import metrics
 from tensorflow.keras.layers import InputLayer, Dense, Dropout, Reshape, Masking, Flatten, RepeatVector
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, SpatialDropout2D, Concatenate
 from tensorflow.keras.layers import SimpleRNN, LSTM, GRU
-from tensorflow.keras.layers import TransformerEncoderBlock, TransformerDecoderBlock
+from tensorflow_models.nlp import layers
+#from tensorflow_models.nlp.layers import TransformerEncoderBlock, TransformerDecoderBlock
 from tensorflow.keras.models import Sequential, Model
 
 
@@ -374,7 +376,7 @@ def build_ann_model(args, shape):
     # NOTE: In newer versions of TF, the decay parameter is weight_decay
     # Likewise, None is not a valid entry in newer versions; epsilon = 1e-7 (default) needed instead
     opt = keras.optimizers.Adam(learning_rate = args.lrate, beta_1 = 0.9, beta_2 = 0.999,
-                                epsilon = None, decay = 0.0, amsgrad = False)
+                                epsilon = 1e-7, weight_decay = 0.0, amsgrad = False)
     
     # Build the model and define the loss function
     mode = 'temporal' if np.invert(args.class_weight == None) else None
@@ -630,7 +632,7 @@ def sequential_cnn(args):
     # NOTE: In newer versions of TF, the decay parameter is weight_decay
     # Likewise, None is not a valid entry in newer versions; epsilon = 1e-7 (default) needed instead
     opt = tf.keras.optimizers.Adam(learning_rate = args['lrate'], beta_1 = 0.9, beta_2 = 0.999,
-                                   epsilon = None, decay = 0.0, amsgrad = False)
+                                   epsilon = 1e-7, weight_decay = 0.0, amsgrad = False)
 
     # Build the model and define the loss function
     mode = 'temporal' if (args['class_weight'] != None) else None
@@ -843,7 +845,7 @@ def model_cnn(args):
     # NOTE: In newer versions of TF, the decay parameter is weight_decay
     # Likewise, None is not a valid entry in newer versions; epsilon = 1e-7 (default) needed instead
     opt = tf.keras.optimizers.Adam(learning_rate = args['lrate'], beta_1 = 0.9, beta_2 = 0.999,
-                                   epsilon = None, decay = 0.0, amsgrad = False)
+                                   epsilon = 1e-7, weight_decay = 0.0, amsgrad = False)
 
     # Build the model and define the loss function
     mode = 'temporal' if (args['class_weight'] != None) else None
@@ -949,7 +951,7 @@ def build_rnn_model(args, shape):
     # NOTE: In newer versions of TF, the decay parameter is weight_decay
     # Likewise, None is not a valid entry in newer versions; epsilon = 1e-7 (default) needed instead
     opt = tf.keras.optimizers.Adam(learning_rate = args.lrate, beta_1 = 0.9, beta_2 = 0.999,
-                                   epsilon = None, decay = 0.0, amsgrad = False)
+                                   epsilon = 1e-7, weight_decay = 0.0, amsgrad = False)
     
     # Build the model and define the loss function
     mode = 'temporal' if np.invert(args.class_weight == None) else None
@@ -989,58 +991,53 @@ def build_attention_model(args, shape):
     else:
         dropout = args.dropout
         
-    # Create the model
-    model = Sequential()
-
-    # Add the embedding layer layer
-    model.add(InputLayer(input_shape = (None, shape[2]), name = 'Input'))
+    
+    # Define the input tensor
+    input_tensor = Input(shape = (shape[1], shape[2], shape[3]), name = 'Input')
+    tensor = input_tensor
          
     #### Do Convolution before hand?
+
+    # Add a transformer encoder layer?
+    if (args.encoder_decoder.lower() == 'encoder') | (args.encoder_decoder.lower() == 'both'):
+        tensor = layers.TransformerEncoderBlock(num_attention_heads = args.attention_heads,
+                                                inner_dim = args.inner_unit,
+                                                inner_activation = args.inner_activation,
+                                                activity_regularizer = regularizer,
+                                                output_dropout = dropout,
+                                                attention_dropout = dropout,
+                                                inner_dropout = dropout)(tensor)
+
+    # Add a transformer decoder layer?
+    elif (args.encoder_decoder.lower() == 'decoder') | (args.encoder_decoder.lower() == 'both'):
+        tensor = layers.TransformerDecoderBlock(num_attention_heads = args.attention_heads,
+                                                intermediate_size = args.inner_unit,
+                                                intermediate_activation = args.inner_activation,
+                                                dropout_rate = dropout,
+                                                attention_dropout_rate = dropout,
+                                                multi_channel_cross_attention = False)
     
-    # Build a transformer?
-    if args.ml_model.lower() == 'transformer':
-        model.add(TransformerDecoderBlock(num_attention_heads = args.attention_heads,
-                                          intermediate_size = args.inner_unit
-                                          intermediate_activation = args.inner_activation,
-                                          dropout_rate = dropout,
-                                          attention_dropout_rate = dropout,
-                                          multi_channel_cross_attention = True))
-        
-    else:
-        # Add a transformer encoder layer?
-        if (args.encoder_decoder.lower() == 'encoder') | (args.encoder_decoder.lower() == 'both'):
-            model.add(TransformerEncoderBlock(num_attention_heads = args.attention_heads,
-                                              inner_dim = args.inner_unit,
-                                              inner_activation = args.inner_activation,
-                                              activity_regularizer = regularizer,
-                                              output_dropout = dropout,
-                                              attention_dropout = dropout,
-                                              inner_dropout = dropout))
-            
-        # Add a transformer decoder layer?
-        elif (args.encoder_decoder.lower() == 'decoder') | (args.encoder_decoder.lower() == 'both'):
-            model.add(TransformerDecoderBlock(num_attention_heads = args.attention_heads,
-                                          intermediate_size = args.inner_unit
-                                          intermediate_activation = args.inner_activation,
-                                          dropout_rate = dropout,
-                                          attention_dropout_rate = dropout,
-                                          multi_channel_cross_attention = False))
     
+    # This last reshape and dense layer allows the use of sample weights (data shape must be < 3D)
+    tensor = Reshape((shape[1]*shape[2], shape[3]), name = 'Output_reshape')(tensor)
     
     # Add the output layer
     # Activation for the output layer must be softmax
-    model.add(Dense(3, 
-                    use_bias = True, 
-                    activation = args.output_activation, 
-                    kernel_initializer = 'random_uniform',
-                    bias_initializer = 'zeros',
-                    name = 'Output'))
+    output_tensor = Dense(3, 
+                          use_bias = True, 
+                          activation = args.output_activation, 
+                          kernel_initializer = 'random_uniform',
+                          bias_initializer = 'zeros',
+                          name = 'Output')(tensor)
+    
+    # Create the model
+    model = Model(inputs = input_tensor, outputs = output_tensor)
     
     # Define the optimizer
     # NOTE: In newer versions of TF, the decay parameter is weight_decay
     # Likewise, None is not a valid entry in newer versions; epsilon = 1e-7 (default) needed instead
     opt = tf.keras.optimizers.Adam(learning_rate = args.lrate, beta_1 = 0.9, beta_2 = 0.999,
-                                   epsilon = None, decay = 0.0, amsgrad = False)
+                                   epsilon = 1e-7, weight_decay = 0.0, amsgrad = False)
     
     # Build the model and define the loss function
     mode = 'temporal' if np.invert(args.class_weight == None) else None

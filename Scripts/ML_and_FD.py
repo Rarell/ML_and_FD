@@ -57,12 +57,14 @@ Created on Sat Oct 2 17:52:45 2021
 #   - Add XAI for keras models
 #   - See multiple hashtag comments in merge_results() function for list of tasks (4 total comments)
 #   - See multiple hashtag comments in if __name__ == ... for list of tasks (3 total comments)
-#   - Test and work on attention model to ensure it works, and produces what is desired
+#   - Work on transformer models
 #
 # Bugs:
 #   - sklearn models maybe standardized along the wrong axis
 #   - TensorFlow models are known to perform more poorly if the computer has not been power cycled (turned off and on) for a while. 
 #     True even if the kernel is reset
+#   - Current errors for the transformer models have been removed, however the local computer nearly crashed when a test run was done (during the training step;
+#     this is presumed to be due to the transformers computation requirements)
 #
 # Notes:
 #   - See tf_environment.yml for a list of all packages and versions. netcdf4 and cartopy must be downloaded seperately.
@@ -258,9 +260,9 @@ def create_ml_parser():
     parser.add_argument('--rnn_activation', nargs='+', type=str, default = ['tanh', 'tanh'], help = 'Activation function to use in the RNN per layer (sequence of strings)')
     
     # Attention parameters; note setting ml_model = transformer will override encoder_decoder and create a transformer network
-    parser.add_argument('--attention_heads' type=int, default=3, help='Number of heads in multi-headed attention')
-    parser.add_argument('--inner_dim', type=int, default=5, help='Units of the output dense layer in the transformer encoder')
-    parser.add_argument('--inner_activation', type=str, default='elu', help='Activation function for the transformer encoder inner dense layer')
+    parser.add_argument('--attention_heads', type=int, default=3, help='Number of heads in multi-headed attention')
+    parser.add_argument('--inner_unit', type=int, default=5, help='Units of the output dense layer in the transformer encoder/decoder')
+    parser.add_argument('--inner_activation', type=str, default='elu', help='Activation function for the transformer encoder/decoder inner dense layer')
     parser.add_argument('--encoder_decoder', type=str, default='encoder', help='Create a transformer encoder and/or a decoder block (options are encoder/decoder/both')
     
     
@@ -884,8 +886,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
 
 
     # Rearrange data for RNNs and transformers so that all grid points are examples, and they are recurrsive along the time axis
-    elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network') | 
-         (args.ml_model.lower() == 'attention') | (args.ml_model.lower() == 'transformer'):
+    elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'): #| (args.ml_model.lower() == 'attention') | (args.ml_model.lower() == 'transformer'):
         train_in = train_in.reshape(T, I*J, NV, order = 'F')
         valid_in = valid_in.reshape(Tt, I*J, NV, order = 'F')
         test_in = test_in.reshape(Tt, I*J, NV, order = 'F')
@@ -997,7 +998,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         
         
         # Turn the data into a dataset
-        train_dataset = tf.data.Dataset.from_tensor_slices((train_in, tmp_train_out, weights))
+        train_dataset = tf.data.Dataset.from_tensor_slices((train_in, tmp_train_out))#, weights))
         valid_dataset = tf.data.Dataset.from_tensor_slices((valid_in, tmp_valid_out))
         test_dataset  = tf.data.Dataset.from_tensor_slices((test_in))
         full_dataset  = tf.data.Dataset.from_tensor_slices((data_in))
@@ -1007,7 +1008,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         valid_dataset = valid_dataset.batch(args.batch)
         test_dataset  = test_dataset.batch(args.batch)
         full_dataset  = full_dataset.batch(args.batch)
-        
+
         train_dataset = train_dataset.prefetch(args.prefetch)
         valid_dataset = valid_dataset.prefetch(args.prefetch)
         test_dataset  = test_dataset.prefetch(args.prefetch)
