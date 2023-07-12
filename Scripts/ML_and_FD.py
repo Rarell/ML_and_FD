@@ -36,6 +36,7 @@ Created on Sat Oct 2 17:52:45 2021
 #                       Other bug fixes.
 #   3.3.0 - 6/14/2023 - Added capability of utilizing GPUs with TF models used a mirrored strategy approach.
 #   3.4.0 - 6/21/2023 - Added self attention networks, based on the transformer configuration.
+#   3.5.0 - 7/10/2023 - Added CNN-RNN network code.
 #
 # Inputs:
 #   - Data files for FD indicator features, and FD labels (.pkl format)
@@ -49,11 +50,9 @@ Created on Sat Oct 2 17:52:45 2021
 #   - Figures displaying model results (coming from the file that contains the averaged results overall rotations)
 #
 # To Do:
-#   - Update documentation to contain information for each input parameter/feature contained
 #   - May look into residual curves (training and validation metric performance over different number of folds; 
 #                                    may be too computationally and temporally expensive)
 #   - May look into Ceteris-Paribus effect
-#   - Add argparse arguments for other ML models
 #   - Add XAI for keras models
 #   - See multiple hashtag comments in merge_results() function for list of tasks (4 total comments)
 #   - See multiple hashtag comments in if __name__ == ... for list of tasks (3 total comments)
@@ -885,8 +884,17 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         print(test_in.shape)
 
 
+    # Rearrange data for CNNs and U-nets so that all pentads are examples, and the convolution is along space axis
+    #elif (args.ml_model.lower() == 'cnn') | (args.ml_model.lower() == 'convolutional_neural_network') | (args.ml_model.lower() == 'u-network') | (args.ml_model.lower() == 'autoencoder'):
+    #    train_in = train_in.reshape(T, I*J, NV, order = 'F')
+    #    valid_in = valid_in.reshape(Tt, I*J, NV, order = 'F')
+    #    test_in = test_in.reshape(Tt, I*J, NV, order = 'F')
+    #    
+    #    data_in = data_in.reshape(Ttot, I*J, NV, order = 'F')
+    #    data_out = data_out.reshape(Ttot, I*J, order = 'F')
+        
     # Rearrange data for RNNs and transformers so that all grid points are examples, and they are recurrsive along the time axis
-    elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'): #| (args.ml_model.lower() == 'attention') | (args.ml_model.lower() == 'transformer'):
+    elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network') | (args.ml_model.lower() == 'cnn-rnn'): #| (args.ml_model.lower() == 'attention') | (args.ml_model.lower() == 'transformer'):
         train_in = train_in.reshape(T, I*J, NV, order = 'F')
         valid_in = valid_in.reshape(Tt, I*J, NV, order = 'F')
         test_in = test_in.reshape(Tt, I*J, NV, order = 'F')
