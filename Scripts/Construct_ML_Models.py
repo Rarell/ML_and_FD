@@ -64,6 +64,7 @@ from sklearn import metrics
 # Tensorflow 2.x way of doing things
 from tensorflow.keras.layers import InputLayer, Dense, Dropout, Reshape, Masking, Flatten, RepeatVector
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, SpatialDropout2D, Concatenate
+from tensorflow.keras.layers import Conv1D, MaxPooling1D, UpSampling1D, SpatialDropout1D
 from tensorflow.keras.layers import SimpleRNN, LSTM, GRU
 from tensorflow_models.nlp import layers
 #from tensorflow_models.nlp.layers import TransformerEncoderBlock, TransformerDecoderBlock
@@ -116,6 +117,9 @@ def build_keras_model(args, shape = None):
         
     elif (args.ml_model.lower() == 'cnn') | (args.ml_model.lower() == 'convolutional_neural_network') | (args.ml_model.lower() == 'u-network') | (args.ml_model.lower() == 'autoencoder'):
         model = build_cnn_model(args, shape)
+        
+    elif (args.ml_model.lower() == 'cnn-rnn'):
+        model = build_cnn_rnn_model(args, shape)
         
     elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
         model = build_rnn_model(args, shape)
@@ -496,6 +500,10 @@ def sequential_cnn(args):
     # Create the model
     model = Sequential()
     
+    #### Note, depending on how the data is set up, this may take some editing for 1D or 2D data.
+    ### There are 9 locations to change 1D/2D shapes (InputLayer, Conv1D/Conv2D, SpatialDropout1D/2D, MaxPooling1D/2D, UpSampling1D/2D, Conv1D/2D,
+    ### SpatialDropout1D/2D, Conv1D/2D, and commenting/uncommenting Reshape)
+    
     # Add the input layer
     model.add(InputLayer(input_shape = (args['map_size'][1], args['map_size'][2], args['map_size'][3]), name = 'Input'))
     
@@ -527,7 +535,7 @@ def sequential_cnn(args):
             if args['translate_width'] == None:
                 args['translate_width'] = 0
             
-            data_aug_list.append(tf.keras.layer.RandomTranslation(args['translate_height'], args['translate_width'], fill_mode = 'constant',
+            data_aug_list.append(tf.keras.layers.RandomTranslation(args['translate_height'], args['translate_width'], fill_mode = 'constant',
                                                                   name = 'Translate'))
         # Add zooming?
         elif np.invert(args['zoom_height'] == None) | np.invert(args['zoom_width'] == None):
@@ -536,7 +544,7 @@ def sequential_cnn(args):
             if args['zoom_width'] == None:
                 args['zoom_width'] = 0
                 
-            data_aug_list.append(tf.keras.layer.RandomZoom(args['zoom_height'], args['zoom_width'], fill_mode = 'constant', name = 'Zoom'))
+            data_aug_list.append(tf.keras.layers.RandomZoom(args['zoom_height'], args['zoom_width'], fill_mode = 'constant', name = 'Zoom'))
             
         data_augmentation = Sequential(data_aug_list, name = 'Data_Augmentation')
         model.add(data_augmentation)
@@ -565,6 +573,9 @@ def sequential_cnn(args):
             
         # Downscale?
         if (psh > 1) | (psv > 1):
+            #model.add(MaxPooling1D(pool_size = psh,
+            #                       strides = psh,
+            #                       name = 'MAX%d'%(n+1)))
             model.add(MaxPooling2D(pool_size = (psv, psh),
                                    strides = (psv, psh),
                                    name = 'MAX%d'%(n+1)))
@@ -591,6 +602,8 @@ def sequential_cnn(args):
 
         # Upsample?
         if (ush > 1) | (usv > 1):
+            #model.add(UpSampling1D(size = ush, 
+            #                       name = 'UpSample%d'%(n+1)))
             model.add(UpSampling2D(size = (usv, ush), 
                                    name = 'UpSample%d'%(n+1)))
 
@@ -687,6 +700,11 @@ def model_cnn(args):
         kernel_regularizer = None
     
     
+    #### Note, depending on how the data is set up, this may take some editing for 1D or 2D data.
+    ### There are 10 locations to change 1D/2D shapes (InputLayer, Conv1D/Conv2D, SpatialDropout1D/2D, MaxPooling1D/2D, 
+    ### (x,y,filters reshape in variational component), UpSampling1D/2D, Conv1D/2D,
+    ### SpatialDropout1D/2D, Conv1D/2D, and commenting/uncommenting Reshape
+    
     # Define the input tensor
     input_tensor = Input(shape = (args['map_size'][1], args['map_size'][2], args['map_size'][3]), name = 'Input')
     tensor = input_tensor
@@ -719,7 +737,7 @@ def model_cnn(args):
             if args['translate_width'] == None:
                 args['translate_width'] = 0
             
-            data_aug_list.append(tf.keras.layer.RandomTranslation(args['translate_height'], args['translate_width'], fill_mode = 'constant', 
+            data_aug_list.append(tf.keras.layers.RandomTranslation(args['translate_height'], args['translate_width'], fill_mode = 'constant', 
                                                                   name = 'Translate'))
             
         # Zoom the image?
@@ -729,7 +747,7 @@ def model_cnn(args):
             if args['zoom_width'] == None:
                 args['zoom_width'] = 0
                 
-            data_aug_list.append(tf.keras.layer.RandomZoom(args['zoom_height'], args['zoom_width'], fill_mode = 'constant', name = 'Zoom'))
+            data_aug_list.append(tf.keras.layers.RandomZoom(args['zoom_height'], args['zoom_width'], fill_mode = 'constant', name = 'Zoom'))
             
         data_augmentation = Sequential(data_aug_list, name = 'Data_Augmentation')
         tensor = data_augmentation(tensor)
@@ -764,6 +782,9 @@ def model_cnn(args):
             # Skip connections will be placed right before downscaling/right after upscaling
             skip_connections.append(tensor)
             
+            #tensor = MaxPooling1D(pool_size = psh, 
+            #                      strides = psh,
+            #                      name = 'MAX%d'%(n+1))(tensor)
             tensor = MaxPooling2D(pool_size = (psv, psh), 
                                   strides = (psv, psh),
                                   name = 'MAX%d'%(n+1))(tensor)
@@ -772,6 +793,7 @@ def model_cnn(args):
     if args['variational']:
         x = tensor.shape[1]
         y = tensor.shape[2]
+        #filters = tensor.shape[2]
         filters = tensor.shape[3]
         
         # Flattern the tensor
@@ -798,6 +820,8 @@ def model_cnn(args):
                                                  reversed(args['pool_size_vertical']))):
         # Upsample?
         if (ush > 1) | (usv > 1):
+            #tensor = UpSampling1D(size = ush, 
+            #                      name = 'UpSample%d'%(n+1))(tensor)
             tensor = UpSampling2D(size = (usv, ush), 
                                   name = 'UpSample%d'%(n+1))(tensor)
 
@@ -961,6 +985,135 @@ def build_rnn_model(args, shape):
                              tf.keras.metrics.Recall(name = 'recall'), tf.keras.metrics.AUC(name = 'auc')], sample_weight_mode = mode)
     
     return model
+
+
+#%%
+##############################################
+
+# Function to make a CNN-RNN model
+def build_cnn_rnn_model(args, shape):
+    '''
+    Construct an CNN-RNN network model using keras. The begins with a convolutional network, then goes to into a RNN.
+    
+    :Inputs:
+    :param args: Argparse arguments
+    :param shape: The shape of the training data (time x map shape/N samples x n_variables)
+    
+    :Outputs:
+    :param model: Recurrent/Recursive NN model
+    '''
+    # Define the regularizer
+    if args.L1_regularization is not None:
+        regularizer = keras.regularizers.l1(args.L1_regularization)
+    elif args.L2_regularization is not None:
+        regularizer = keras.regularizers.l2(args.L2_regularization)
+    else:
+        regularizer = None # Define the regularizar for the model, but set to 0 to not use it
+        
+    # Create the model
+    model = Sequential()
+
+    # Add the embedding layer layer
+    model.add(InputLayer(input_shape = (None, shape[2]), name = 'Input'))
+    
+    # Add the convolutional layer(s)
+    for n, (nf, k, s) in enumerate(zip(args.nfilters, 
+                                       args.kernel_size, 
+                                       args.strides)):
+        
+        # Add the convolutional layer(s)
+        model.add(Conv1D(kernel_size = k,
+                         filters = nf, 
+                         strides = s,
+                         activation = args.activation[n],
+                         padding = 'same',
+                         use_bias = True,
+                         kernel_initializer = 'random_uniform',
+                         bias_initializer = 'zeros',
+                         kernel_regularizer = regularizer,
+                         name = 'C%d'%(n+1)))
+        
+        # Add dropout?
+        if args.dropout is not None:
+            model.add(SpatialDropout1D(rate = args.dropout, name = 'Spatial_Dropout_Down%d'%(n+1)))
+            
+            
+    # Add recurrent layers
+    for n, (unit, activation, model_type) in enumerate(zip(args.rnn_units, args.rnn_activation, args.rnn_model)):
+        # Add a GRU layer?
+        if model_type == 'GRU': # The local bash run did seem to acknowledge the literal 'is' here
+            model.add(GRU(unit,
+                          activation = activation,
+                          use_bias = True,
+                          return_sequences = True,
+                          kernel_initializer = 'random_uniform',
+                          bias_initializer = 'random_uniform',
+                          kernel_regularizer = regularizer,
+                          dropout = args.dropout,
+                          name = 'GRU_layer%d'%(n+1)))
+
+        # Add an LSTM?
+        elif model_type == 'LSTM':
+            model.add(LSTM(unit,
+                           activation = activation,
+                           use_bias = True,
+                           return_sequences = True,
+                           kernel_initializer = 'random_uniform',
+                           bias_initializer = 'random_uniform',
+                           kernel_regularizer = regularizer,
+                           dropout = args.dropout,
+                           name = 'LSTM_layer%d'%(n+1)))
+
+        # If another layer is specified, add a simple RNN layer instead
+        else:
+            model.add(SimpleRNN(unit,
+                                activation = activation,
+                                use_bias = True,
+                                return_sequences = True,
+                                kernel_initializer = 'random_uniform',
+                                bias_initializer = 'random_uniform',
+                                kernel_regularizer = regularizer,
+                                dropout = args.dropout,
+                                name = 'sRNN_layer%d'%(n+1)))
+    
+    # Add dense layers
+    for n, unit in enumerate(args.units):
+        model.add(Dense(unit, 
+                        use_bias = True,
+                        kernel_initializer = 'random_uniform',
+                        bias_initializer = 'zeros',
+                        activation = args.activation[n],
+                        name = 'D%d'%(n+1), 
+                        kernel_regularizer = regularizer))
+        
+        # Add dropout?
+        if args.dropout is not None:
+            model.add(Dropout(rate = args.dropout, name = 'D%d_dropout'%(n+1)))
+            
+    # Add the output layer
+    # Activation for the output layer must be softmax
+    model.add(Dense(3, 
+                    use_bias = True, 
+                    activation = args.output_activation, 
+                    kernel_initializer = 'random_uniform',
+                    bias_initializer = 'zeros',
+                    name = 'Output'))
+    
+    # Define the optimizer
+    # NOTE: In newer versions of TF, the decay parameter is weight_decay
+    # Likewise, None is not a valid entry in newer versions; epsilon = 1e-7 (default) needed instead
+    opt = tf.keras.optimizers.Adam(learning_rate = args.lrate, beta_1 = 0.9, beta_2 = 0.999,
+                                   epsilon = 1e-7, weight_decay = 0.0, amsgrad = False)
+    
+    # Build the model and define the loss function
+    mode = 'temporal' if np.invert(args.class_weight == None) else None
+    
+    model.compile(loss = args.loss, optimizer = opt, 
+                  metrics = ['categorical_accuracy', tf.keras.metrics.Precision(name = 'precision'), 
+                             tf.keras.metrics.Recall(name = 'recall'), tf.keras.metrics.AUC(name = 'auc')], sample_weight_mode = mode)
+    
+    return model
+
 
 #%%
 ##############################################
