@@ -673,6 +673,159 @@ def display_case_study_maps(data, lon, lat, time, year_list, method, label, data
 #%%
 ##############################################
     
+# Function to generate a generic time series
+def make_map(var, lat, lon, var_name = 'tmp', model = 'narr', globe = False, path = './Figures/', savename = 'timeseries.png'):
+    '''
+    Create a save a generic map of var
+    
+    Inputs:
+    :param var: 2D array of the variable to be mapped
+    :param lat: 2D array of latitudes
+    :param lon: 2D array of longitudes
+    :param var_name: String. Name of the variable being plotted
+    :param model: String. Name of the reanalysis model the data comes from
+    :param globe: Bool. Indicates whether the map will be a global one or not (non-global maps are fixed on the U.S.)
+    :param path: String. Output path to where the figure will be saved
+    :param savename: String. Filename the figure will be saved as
+    '''
+    
+    # Set colorbar information
+    cmin = 0; cmax = 1; cint = 0.05
+    clevs = np.arange(cmin, cmax + cint, cint)
+    nlevs = len(clevs)
+    
+    cname = 'Reds'
+    cmap  = plt.get_cmap(name = cname, lut = nlevs)
+    
+    # Lonitude and latitude tick information
+    if np.invert(globe):
+        lat_int = 10
+        lon_int = 20
+    else:
+        lat_int = 30
+        lon_int = 60
+    
+    LatLabel = np.arange(-90, 90, lat_int)
+    LonLabel = np.arange(-180, 180, lon_int)
+    
+    LonFormatter = cticker.LongitudeFormatter()
+    LatFormatter = cticker.LatitudeFormatter()
+    
+    # Projection information
+    data_proj = ccrs.PlateCarree()
+    fig_proj  = ccrs.PlateCarree()
+    
+    # Collect shapefile information for the U.S. and other countries
+    # ShapeName = 'Admin_1_states_provinces_lakes_shp'
+    if np.invert(globe):
+        ShapeName = 'admin_0_countries'
+        CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+
+        CountriesReader = shpreader.Reader(CountriesSHP)
+
+        USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+        NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+        
+    # Create the plots
+    fig = plt.figure(figsize = [12, 10])
+
+
+    # Flash Drought plot
+    ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+
+    # Set the flash drought title
+    ax.set_title('%s for %s'%(var_name,model), size = 22)
+
+    # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+    ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    if np.invert(globe):
+        # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+        ax.add_feature(cfeature.STATES)
+        ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+        ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    else:
+        # Ocean covers and "masks" data outside the U.S.
+        ax.coastlines(edgecolor = 'black', zorder = 3)
+        ax.add_feature(cfeature.BORDERS, facecolor = 'none', edgecolor = 'black', zorder = 3)
+
+    # Adjust the ticks
+    ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
+    ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
+
+    ax.set_yticklabels(LatLabel, fontsize = 20)
+    ax.set_xticklabels(LonLabel, fontsize = 20)
+
+    ax.xaxis.set_major_formatter(LonFormatter)
+    ax.yaxis.set_major_formatter(LatFormatter)
+
+    # Plot the flash drought data
+    cs = ax.pcolormesh(lon, lat, var, vmin = cmin, vmax = cmax,
+                       cmap = cmap, transform = data_proj, zorder = 1)
+
+    # Set the map extent to the U.S.
+    if np.invert(globe):
+        ax.set_extent([-130, -65, 23.5, 48.5])
+    else:
+        ax.set_extent([-179, 179, -65, 80])
+
+
+    # Set the colorbar size and location
+    if np.invert(globe):
+        cbax = fig.add_axes([0.925, 0.30, 0.020, 0.40])
+    else:
+        cbax = fig.add_axes([0.925, 0.32, 0.020, 0.36])
+    cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
+    cbar.ax.set_ylabel(var_name, fontsize = 22)
+
+    # Set the colorbar ticks
+    for i in cbar.ax.yaxis.get_ticklabels():
+        i.set_size(20)
+        
+        
+    # Save the figure
+    plt.savefig('%s/%s'%(path, savename), bbox_inches = 'tight')
+    plt.show(block = False)
+
+
+# Function to generate a generic map
+def make_timeseries(var, time, var_name = 'tmp', model = 'narr', path = './Figures/', savename = 'timeseries.png'):
+    '''
+    Create and save a generic time series plot for some variable var
+    
+    Inputs:
+    :param var: Vector/1D array of the variable to be plotted
+    :param time: 1D array of datetimes of time stamps for var
+    :param var_name: String. Name of the variable being plotted
+    :param model: String. Name of the reanalysis model the data comes from
+    :param path: String. Output path to where the figure will be saved
+    :param savename: String. Filename the figure will be saved as
+    '''
+    # Plot the figure
+    fig, ax = plt.subplots(figsize = [12, 8])
+    
+    # Set the title
+    ax.set_title('Time Series of the %s for the %s'%(var_name, model), fontsize = 22)
+    
+    # Make the plots
+    ax.plot(time, var, 'r-', linewidth = 2)
+
+    
+    # Set the labels
+    ax.set_ylabel(var_name, fontsize = 22)
+    ax.set_xlabel('Time', fontsize = 22)
+    
+    # Set the ticks
+    ax.xaxis.set_major_formatter(DateFormatter('%Y'))
+    
+    # Set the tick sizes
+    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+        i.set_size(20)
+        
+    # Save the figure
+    plt.savefig('%s/%s'%(path, savename), bbox_inches = 'tight')
+    plt.show(block = False)
+    
+    
 # Function to calculate the threat score
 def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label = 'christian', globe = False, path = './Figures/'):
     '''
@@ -744,220 +897,27 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     
     ets_t = (hits_t - hits_rand_t)/(hits_t + misses_t + false_alarms_t - hits_rand_t)
         
-        
-    # Plot the threat scores in time
-    fig, ax = plt.subplots(figsize = [12, 8])
-    
-    # Set the title
-    ax.set_title('Time Series of the threat score for the %s'%(model), fontsize = 22)
-    
-    # Make the plots
-    ax.plot(time, ts_s, 'r-', linewidth = 2, label = 'True values')
 
-    
-    # Set the labels
-    ax.set_ylabel('Threat Score', fontsize = 22)
-    ax.set_xlabel('Time', fontsize = 22)
-    
-    # Set the ticks
-    ax.xaxis.set_major_formatter(DateFormatter('%Y'))
-    
-    # Set the tick sizes
-    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-        i.set_size(20)
         
-    # Save the figure
+    # Create and save a threat scores time series
     filename = 'threat_score_%s_time_series.png'%(label)
-    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
-    plt.show(block = False)
+    make_timeseries(ts_s, time, var_name = 'Threat Score', model = model, path = path, savename = filename)
     
-    
-    # Plot the ETS
-    fig, ax = plt.subplots(figsize = [12, 8])
-    
-    # Set the title
-    ax.set_title('Time Series of the equitable threat score for the %s'%(model), fontsize = 20)
-    
-    # Make the plots 
-    ax.plot(time, ets_s, 'r-', linewidth = 2, label = 'True values')
-
-    
-    # Set the labels
-    ax.set_ylabel('Equitable Threat Score', fontsize = 22)
-    ax.set_xlabel('Time', fontsize = 22)
-    
-    # Set the ticks
-    ax.xaxis.set_major_formatter(DateFormatter('%Y'))
-    
-    # Set the tick sizes
-    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-        i.set_size(20)
         
-    # Save the figure
+    # Create and save an equitable threat scores time series
     filename = 'equitable_threat_score_%s_time_series.png'%(label)
-    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
-    plt.show(block = False)
+    make_timeseries(ets_s, time, var_name = 'Equitable Threat Score', model = model, path = path, savename = filename)
+
     
-    # Plot the threat scores in space
-    
-    # Set colorbar information
-    cmin = 0; cmax = 1; cint = 0.05
-    clevs = np.arange(cmin, cmax + cint, cint)
-    nlevs = len(clevs)
-    
-    cname = 'Reds'
-    cmap  = plt.get_cmap(name = cname, lut = nlevs)
-    
-    # Lonitude and latitude tick information
-    if np.invert(globe):
-        lat_int = 10
-        lon_int = 20
-    else:
-        lat_int = 30
-        lon_int = 60
-    
-    LatLabel = np.arange(-90, 90, lat_int)
-    LonLabel = np.arange(-180, 180, lon_int)
-    
-    LonFormatter = cticker.LongitudeFormatter()
-    LatFormatter = cticker.LatitudeFormatter()
-    
-    # Projection information
-    data_proj = ccrs.PlateCarree()
-    fig_proj  = ccrs.PlateCarree()
-    
-    # Collect shapefile information for the U.S. and other countries
-    # ShapeName = 'Admin_1_states_provinces_lakes_shp'
-    if np.invert(globe):
-        ShapeName = 'admin_0_countries'
-        CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
-
-        CountriesReader = shpreader.Reader(CountriesSHP)
-
-        USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
-        NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
-        
-    # Create the plots
-    fig = plt.figure(figsize = [12, 10])
-
-
-    # Flash Drought plot
-    ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
-
-    # Set the flash drought title
-    ax.set_title('Threat Score for %s'%model, size = 22)
-
-    # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
-    ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
-    if np.invert(globe):
-        # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
-        ax.add_feature(cfeature.STATES)
-        ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
-        ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
-    else:
-        # Ocean covers and "masks" data outside the U.S.
-        ax.coastlines(edgecolor = 'black', zorder = 3)
-        ax.add_feature(cfeature.BORDERS, facecolor = 'none', edgecolor = 'black', zorder = 3)
-
-    # Adjust the ticks
-    ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
-    ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
-
-    ax.set_yticklabels(LatLabel, fontsize = 20)
-    ax.set_xticklabels(LonLabel, fontsize = 20)
-
-    ax.xaxis.set_major_formatter(LonFormatter)
-    ax.yaxis.set_major_formatter(LatFormatter)
-
-    # Plot the flash drought data
-    cs = ax.pcolormesh(lon, lat, ts_t, vmin = cmin, vmax = cmax,
-                       cmap = cmap, transform = data_proj, zorder = 1)
-
-    # Set the map extent to the U.S.
-    if np.invert(globe):
-        ax.set_extent([-130, -65, 23.5, 48.5])
-    else:
-        ax.set_extent([-179, 179, -65, 80])
-
-
-    # Set the colorbar size and location
-    if np.invert(globe):
-        cbax = fig.add_axes([0.925, 0.30, 0.020, 0.40])
-    else:
-        cbax = fig.add_axes([0.925, 0.32, 0.020, 0.36])
-    cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
-    cbar.ax.set_ylabel('Threat Score', fontsize = 22)
-
-    # Set the colorbar ticks
-    for i in cbar.ax.yaxis.get_ticklabels():
-        i.set_size(20)
-        
-        
-    # Save the figure
+    # Plot the threat scores in space and save the plot
     filename = 'threat_score_%s_map.png'%(label)
-    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
-    plt.show(block = False)
+    make_map(ts_t, lat, lon, var_name = 'Threat Score', model = model, globe = globe, path = path, savename = filename)
         
-        
-    # Create the plots
-    fig = plt.figure(figsize = [12, 10])
 
-
-    # Flash Drought plot
-    ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
-
-    # Set the flash drought title
-    ax.set_title('Equitable Threat Score for %s'%model, size = 22)
-
-    # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
-    ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
-    if np.invert(globe):
-        # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
-        ax.add_feature(cfeature.STATES)
-        ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
-        ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
-    else:
-        # Ocean covers and "masks" data outside the U.S.
-        ax.coastlines(edgecolor = 'black', zorder = 3)
-        ax.add_feature(cfeature.BORDERS, facecolor = 'none', edgecolor = 'black', zorder = 3)
-
-    # Adjust the ticks
-    ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
-    ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
-
-    ax.set_yticklabels(LatLabel, fontsize = 20)
-    ax.set_xticklabels(LonLabel, fontsize = 20)
-
-    ax.xaxis.set_major_formatter(LonFormatter)
-    ax.yaxis.set_major_formatter(LatFormatter)
-
-    # Plot the flash drought data
-    cs = ax.pcolormesh(lon, lat, ets_t, vmin = cmin, vmax = cmax,
-                       cmap = cmap, transform = data_proj, zorder = 1)
-
-    # Set the map extent to the U.S.
-    if np.invert(globe):
-        ax.set_extent([-130, -65, 23.5, 48.5])
-    else:
-        ax.set_extent([-179, 179, -65, 80])
-
-
-    # Set the colorbar size and location
-    if np.invert(globe):
-        cbax = fig.add_axes([0.925, 0.30, 0.020, 0.40])
-    else:
-        cbax = fig.add_axes([0.925, 0.32, 0.020, 0.36])
-    cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
-    cbar.ax.set_ylabel('Equitable Threat Score', fontsize = 22)
-
-    # Set the colorbar ticks
-    for i in cbar.ax.yaxis.get_ticklabels():
-        i.set_size(20)
-        
-    # Save the figure
+    # Plot the equitable threat scores in space and save the plot
     filename = 'equitable_threat_score_%s_map.png'%(label)
-    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
-    plt.show(block = False)
+    make_map(ets_t, lat, lon, var_name = 'Equitable Threat Score', model = model, globe = globe, path = path, savename = filename)
+
     
     
 # Function to calculate the threat score
@@ -1013,133 +973,15 @@ def display_far(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     far_t = false_alarms_t/(hits_t + false_alarms_t)
         
         
-    # Plot the FAR scores in time
-    fig, ax = plt.subplots(figsize = [12, 8])
-    
-    # Set the title
-    ax.set_title('Time Series of the FAR score for the %s'%(model), fontsize = 22)
-    
-    # Make the plots
-    ax.plot(time, far_s, 'r-', linewidth = 2, label = 'True values')
-
-    
-    # Set the labels
-    ax.set_ylabel('FAR', fontsize = 22)
-    ax.set_xlabel('Time', fontsize = 22)
-    
-    # Set the ticks
-    ax.xaxis.set_major_formatter(DateFormatter('%Y'))
-    
-    # Set the tick sizes
-    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-        i.set_size(20)
-        
-    # Save the figure
+    # Create and save a FAR time series
     filename = 'far_%s_time_series.png'%(label)
-    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
-    plt.show(block = False)
+    make_timeseries(far_s, time, var_name = 'FAR', model = model, path = path, savename = filename)
     
-    
-    # Plot the FAR scores in space
-    
-    # Set colorbar information
-    cmin = 0; cmax = 1; cint = 0.05
-    clevs = np.arange(cmin, cmax + cint, cint)
-    nlevs = len(clevs)
-    
-    cname = 'Reds'
-    cmap  = plt.get_cmap(name = cname, lut = nlevs)
-    
-    # Lonitude and latitude tick information
-    if np.invert(globe):
-        lat_int = 10
-        lon_int = 20
-    else:
-        lat_int = 30
-        lon_int = 60
-    
-    LatLabel = np.arange(-90, 90, lat_int)
-    LonLabel = np.arange(-180, 180, lon_int)
-    
-    LonFormatter = cticker.LongitudeFormatter()
-    LatFormatter = cticker.LatitudeFormatter()
-    
-    # Projection information
-    data_proj = ccrs.PlateCarree()
-    fig_proj  = ccrs.PlateCarree()
-    
-    # Collect shapefile information for the U.S. and other countries
-    # ShapeName = 'Admin_1_states_provinces_lakes_shp'
-    if np.invert(globe):
-        ShapeName = 'admin_0_countries'
-        CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
-
-        CountriesReader = shpreader.Reader(CountriesSHP)
-
-        USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
-        NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
         
-    # Create the plots
-    fig = plt.figure(figsize = [12, 10])
-
-
-    # Flash Drought plot
-    ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
-
-    # Set the flash drought title
-    ax.set_title('FAR Score for %s'%model, size = 22)
-
-    # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
-    ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
-    if np.invert(globe):
-        # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
-        ax.add_feature(cfeature.STATES)
-        ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
-        ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
-    else:
-        # Ocean covers and "masks" data outside the U.S.
-        ax.coastlines(edgecolor = 'black', zorder = 3)
-        ax.add_feature(cfeature.BORDERS, facecolor = 'none', edgecolor = 'black', zorder = 3)
-
-    # Adjust the ticks
-    ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
-    ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
-
-    ax.set_yticklabels(LatLabel, fontsize = 20)
-    ax.set_xticklabels(LonLabel, fontsize = 20)
-
-    ax.xaxis.set_major_formatter(LonFormatter)
-    ax.yaxis.set_major_formatter(LatFormatter)
-
-    # Plot the flash drought data
-    cs = ax.pcolormesh(lon, lat, far_t, vmin = cmin, vmax = cmax,
-                       cmap = cmap, transform = data_proj, zorder = 1)
-
-    # Set the map extent to the U.S.
-    if np.invert(globe):
-        ax.set_extent([-130, -65, 23.5, 48.5])
-    else:
-        ax.set_extent([-179, 179, -65, 80])
-
-
-    # Set the colorbar size and location
-    if np.invert(globe):
-        cbax = fig.add_axes([0.925, 0.30, 0.020, 0.40])
-    else:
-        cbax = fig.add_axes([0.925, 0.32, 0.020, 0.36])
-    cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
-    cbar.ax.set_ylabel('FAR', fontsize = 22)
-
-    # Set the colorbar ticks
-    for i in cbar.ax.yaxis.get_ticklabels():
-        i.set_size(20)
-        
-        
-    # Save the figure
+    # Plot the FAR in space and save the plot
     filename = 'far_%s_map.png'%(label)
-    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
-    plt.show(block = False)
-    
+    make_map(far_t, lat, lon, var_name = 'FAR', model = model, globe = globe, path = path, savename = filename)
+
     
     
 # Function to calculate the threat score
@@ -1187,7 +1029,6 @@ def display_pod(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     pod_s = hits_s/(hits_s + misses_s)
     
     
-    
     # Determine the equitable threat score in time
     hits_t = np.nansum(hits, axis = 0)
     misses_t = np.nansum(misses, axis = 0)
@@ -1196,134 +1037,15 @@ def display_pod(true, pred, lat, lon, time, model = 'narr', label = 'christian',
     # Calculate the POD score in time for each grid point
     pod_t = hits_t/(hits_t + misses_t)
         
-        
-    # Plot the POD scores in time
-    fig, ax = plt.subplots(figsize = [12, 8])
-    
-    # Set the title
-    ax.set_title('Time Series of the POD for the %s'%(model), fontsize = 22)
-    
-    # Make the plots
-    ax.plot(time, pod_s, 'r-', linewidth = 2, label = 'True values')
 
-    
-    # Set the labels
-    ax.set_ylabel('POD', fontsize = 22)
-    ax.set_xlabel('Time', fontsize = 22)
-    
-    # Set the ticks
-    ax.xaxis.set_major_formatter(DateFormatter('%Y'))
-    
-    # Set the tick sizes
-    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
-        i.set_size(20)
-        
-    # Save the figure
+    # Create and save a POD time series
     filename = 'pod_%s_time_series.png'%(label)
-    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
-    plt.show(block = False)
+    make_timeseries(pod_s, time, var_name = 'POD', model = model, path = path, savename = filename)
     
-    
-    
-    # Plot the POD scores in space
-    
-    # Set colorbar information
-    cmin = 0; cmax = 1; cint = 0.05
-    clevs = np.arange(cmin, cmax + cint, cint)
-    nlevs = len(clevs)
-    
-    cname = 'Reds'
-    cmap  = plt.get_cmap(name = cname, lut = nlevs)
-    
-    # Lonitude and latitude tick information
-    if np.invert(globe):
-        lat_int = 10
-        lon_int = 20
-    else:
-        lat_int = 30
-        lon_int = 60
-    
-    LatLabel = np.arange(-90, 90, lat_int)
-    LonLabel = np.arange(-180, 180, lon_int)
-    
-    LonFormatter = cticker.LongitudeFormatter()
-    LatFormatter = cticker.LatitudeFormatter()
-    
-    # Projection information
-    data_proj = ccrs.PlateCarree()
-    fig_proj  = ccrs.PlateCarree()
-    
-    # Collect shapefile information for the U.S. and other countries
-    # ShapeName = 'Admin_1_states_provinces_lakes_shp'
-    if np.invert(globe):
-        ShapeName = 'admin_0_countries'
-        CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
-
-        CountriesReader = shpreader.Reader(CountriesSHP)
-
-        USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
-        NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
         
-    # Create the plots
-    fig = plt.figure(figsize = [12, 10])
-
-
-    # Flash Drought plot
-    ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
-
-    # Set the flash drought title
-    ax.set_title('POD for %s'%model, size = 22)
-
-    # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
-    ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
-    if np.invert(globe):
-        # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
-        ax.add_feature(cfeature.STATES)
-        ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
-        ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
-    else:
-        # Ocean covers and "masks" data outside the U.S.
-        ax.coastlines(edgecolor = 'black', zorder = 3)
-        ax.add_feature(cfeature.BORDERS, facecolor = 'none', edgecolor = 'black', zorder = 3)
-
-    # Adjust the ticks
-    ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
-    ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
-
-    ax.set_yticklabels(LatLabel, fontsize = 20)
-    ax.set_xticklabels(LonLabel, fontsize = 20)
-
-    ax.xaxis.set_major_formatter(LonFormatter)
-    ax.yaxis.set_major_formatter(LatFormatter)
-
-    # Plot the flash drought data
-    cs = ax.pcolormesh(lon, lat, pod_t, vmin = cmin, vmax = cmax,
-                       cmap = cmap, transform = data_proj, zorder = 1)
-
-    # Set the map extent to the U.S.
-    if np.invert(globe):
-        ax.set_extent([-130, -65, 23.5, 48.5])
-    else:
-        ax.set_extent([-179, 179, -65, 80])
-
-
-    # Set the colorbar size and location
-    if np.invert(globe):
-        cbax = fig.add_axes([0.925, 0.30, 0.020, 0.40])
-    else:
-        cbax = fig.add_axes([0.925, 0.32, 0.020, 0.36])
-    cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, orientation = 'vertical')
-    cbar.ax.set_ylabel('POD', fontsize = 22)
-
-    # Set the colorbar ticks
-    for i in cbar.ax.yaxis.get_ticklabels():
-        i.set_size(20)
-        
-        
-    # Save the figure
+    # Plot the POD in space and save the plot
     filename = 'pod_%s_map.png'%(label)
-    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
-    plt.show(block = False)
-        
-        
+    make_map(pod_t, lat, lon, var_name = 'POD', model = model, globe = globe, path = path, savename = filename)
+    
+
     
