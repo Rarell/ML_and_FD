@@ -5,7 +5,7 @@ Created on Sat Oct 2 17:52:45 2021
 
 ##############################################################
 # File: ML_and_FD.py
-# Version: 3.4.0
+# Version: 3.5.0
 # Author: Stuart Edris (sgedris@ou.edu)
 # Description:
 #     This is the main script for the employment of machine learning to identify flash drought study.
@@ -67,7 +67,7 @@ Created on Sat Oct 2 17:52:45 2021
 #
 # Notes:
 #   - See tf_environment.yml for a list of all packages and versions. netcdf4 and cartopy must be downloaded seperately.
-#   - This script assumes it is being running in the 'ML_and_FD_in_NARR' directory
+#   - This script assumes it is being running in the 'ML_and_FD' directory
 #   - Several of the comments for this program are based on the Spyder IDL, which can separate the code into different blocks of code, or 'cells' using '#%%'
 #
 ###############################################################
@@ -250,8 +250,8 @@ def create_ml_parser():
     parser.add_argument('--nfilters', nargs='+', type=int, default = [20,20,20], help = 'Number of filters in each convolutional per layer (sequence of ints) for the encoder (reverse order for the decoder)')
     parser.add_argument('--kernel_size', nargs='+', type=int, default = [3,3,3], help = 'CNN kernel size per layer (sequence of ints) for the encoder (reverse order for the decoder)')
     parser.add_argument('--strides', nargs='+', type=int, default = [1,1,1], help = 'CNN strides per layer (sequence of ints) for the encoder (reverse order for the decoder)')
-    parser.add_argument('--pool_size_horizontal', nargs='+', type=int, default=[2,2,2], help='Horizontal max pooling size per CNN layer (1=None) for the encoder (reverse order for the UpSample decoder)')
-    parser.add_argument('--pool_size_vertical', nargs='+', type=int, default=[2,2,2], help='vertical max pooling size per CNN layer (1=None) for the encoder (reverse order for the UpSample decoder)')
+    parser.add_argument('--pool_size_horizontal', nargs='+', type=int, default=[1,1,2], help='Horizontal max pooling size per CNN layer (1=None) for the encoder (reverse order for the UpSample decoder)')
+    parser.add_argument('--pool_size_vertical', nargs='+', type=int, default=[1,1,2], help='vertical max pooling size per CNN layer (1=None) for the encoder (reverse order for the UpSample decoder)')
     
     # Recurrent Neural Network
     parser.add_argument('--rnn_units', nargs='+', type=int, default = [10, 10], help = 'Number of hidden units in the RNN layers, per layer (sequence of ints)')
@@ -804,8 +804,10 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     :param results: Dictionary results from the ML model, including predictions, performance metrics, and learning curves
     '''
     
-    # Limit how much CPU TF takes                                               
-    #os.environ['OMP_NUM_THREADS'] = "10"                                  
+    # Limit how much CPU TF takes
+    #os.environ['OMP_NUM_THREADS'] = "10"
+    #os.environ['TF_NUM_INTEROP_THREADS'] = 1
+    #os.environ['TF_NUM_INTRAOP_THREADS'] = 1
     #tf.config.threading.set_inter_op_parallelism_threads(1)
     #tf.config.threading.set_intra_op_parallelism_threads(1)
     
@@ -1006,7 +1008,11 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         
         
         # Turn the data into a dataset
-        train_dataset = tf.data.Dataset.from_tensor_slices((train_in, tmp_train_out))#, weights))
+        if (args.ml_model.lower() == 'attention') | (args.ml_model.lower() == 'transformer'):
+            # The attention networks in TF_models does not accept a third part to the dataset
+            train_dataset = tf.data.Dataset.from_tensor_slices((train_in, tmp_train_out)) 
+        else:
+            train_dataset = tf.data.Dataset.from_tensor_slices((train_in, tmp_train_out, weights))
         valid_dataset = tf.data.Dataset.from_tensor_slices((valid_in, tmp_valid_out))
         test_dataset  = tf.data.Dataset.from_tensor_slices((test_in))
         full_dataset  = tf.data.Dataset.from_tensor_slices((data_in))
@@ -1964,6 +1970,9 @@ if __name__ == '__main__':
     # Parse and check incoming arguments
     parser = create_ml_parser()
     args = parser.parse_args()
+    
+    # Silence warnings
+    warnings.simplefilter('ignore')
     
     # Execute the experiments?
     if np.invert(args.nogo):

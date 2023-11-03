@@ -1,4 +1,4 @@
 -vv
---dataset=/Users/stuartedris/desktop/PhD_Research_ML_and_FD/ML_and_FD_in_NARR/Data
+--dataset=./Data
 --input_data_fname=fd_input_features.pkl
 --output_data_fname=fd_output_labels.pkl

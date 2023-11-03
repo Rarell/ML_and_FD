@@ -40,7 +40,7 @@ import matplotlib.colors as mcolors
 from matplotlib import colorbar as mcolorbar
 import tensorflow as tf
 from tensorflow import keras
-import tensorflow_models as tfm
+#import tensorflow_models as tfm
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import cartopy.mpl.ticker as cticker
@@ -66,7 +66,7 @@ from tensorflow.keras.layers import InputLayer, Dense, Dropout, Reshape, Masking
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, SpatialDropout2D, Concatenate
 from tensorflow.keras.layers import Conv1D, MaxPooling1D, UpSampling1D, SpatialDropout1D
 from tensorflow.keras.layers import SimpleRNN, LSTM, GRU
-from tensorflow_models.nlp import layers
+#from tensorflow_models.nlp import layers
 #from tensorflow_models.nlp.layers import TransformerEncoderBlock, TransformerDecoderBlock
 from tensorflow.keras.models import Sequential, Model
 
@@ -909,6 +909,21 @@ def build_rnn_model(args, shape):
 
     # Add the embedding layer layer
     model.add(InputLayer(input_shape = (None, shape[2]), name = 'Input'))
+    
+    #for n, (nf, k, s) in enumerate(zip(args.nfilters, 
+        #                               args.kernel_size, 
+        #                               args.strides)):
+        #if k > 5:
+        #    model.add(Conv1D(kernel_size = k,
+        #                     filters = nf, 
+        #                     strides = s,
+        #                     activation = args.activation[n],
+        #                     padding = 'same',
+        #                     use_bias = True,
+        #                     kernel_initializer = 'random_uniform',
+        #                     bias_initializer = 'zeros',
+        #                     kernel_regularizer = regularizer,
+        #                     name = 'C%d'%(n+1)))
               
     # Add recurrent layers
     for n, (unit, activation, model_type) in enumerate(zip(args.rnn_units, args.rnn_activation, args.rnn_model)):
@@ -1022,6 +1037,7 @@ def build_cnn_rnn_model(args, shape):
                                        args.strides)):
         
         # Add the convolutional layer(s)
+        #if k > 1:
         model.add(Conv1D(kernel_size = k,
                          filters = nf, 
                          strides = s,
@@ -1032,49 +1048,49 @@ def build_cnn_rnn_model(args, shape):
                          bias_initializer = 'zeros',
                          kernel_regularizer = regularizer,
                          name = 'C%d'%(n+1)))
-        
+
         # Add dropout?
         if args.dropout is not None:
             model.add(SpatialDropout1D(rate = args.dropout, name = 'Spatial_Dropout_Down%d'%(n+1)))
             
             
     # Add recurrent layers
-    for n, (unit, activation, model_type) in enumerate(zip(args.rnn_units, args.rnn_activation, args.rnn_model)):
-        # Add a GRU layer?
-        if model_type == 'GRU': # The local bash run did seem to acknowledge the literal 'is' here
-            model.add(GRU(unit,
-                          activation = activation,
-                          use_bias = True,
-                          return_sequences = True,
-                          kernel_initializer = 'random_uniform',
-                          bias_initializer = 'random_uniform',
-                          kernel_regularizer = regularizer,
-                          dropout = args.dropout,
-                          name = 'GRU_layer%d'%(n+1)))
+    #for n, (unit, activation, model_type) in enumerate(zip(args.rnn_units, args.rnn_activation, args.rnn_model)):
+    #    # Add a GRU layer?
+    #    if model_type == 'GRU': # The local bash run did seem to acknowledge the literal 'is' here
+    #        model.add(GRU(unit,
+    #                      activation = activation,
+    #                      use_bias = True,
+    #                      return_sequences = True,
+    #                      kernel_initializer = 'random_uniform',
+    #                      bias_initializer = 'random_uniform',
+    #                      kernel_regularizer = regularizer,
+    #                      dropout = args.dropout,
+    #                      name = 'GRU_layer%d'%(n+1)))
 
-        # Add an LSTM?
-        elif model_type == 'LSTM':
-            model.add(LSTM(unit,
-                           activation = activation,
-                           use_bias = True,
-                           return_sequences = True,
-                           kernel_initializer = 'random_uniform',
-                           bias_initializer = 'random_uniform',
-                           kernel_regularizer = regularizer,
-                           dropout = args.dropout,
-                           name = 'LSTM_layer%d'%(n+1)))
+    #    # Add an LSTM?
+    #    elif model_type == 'LSTM':
+    #        model.add(LSTM(unit,
+    #                       activation = activation,
+    #                       use_bias = True,
+    #                       return_sequences = True,
+    #                       kernel_initializer = 'random_uniform',
+    #                       bias_initializer = 'random_uniform',
+    #                       kernel_regularizer = regularizer,
+    #                       dropout = args.dropout,
+    #                       name = 'LSTM_layer%d'%(n+1)))
 
-        # If another layer is specified, add a simple RNN layer instead
-        else:
-            model.add(SimpleRNN(unit,
-                                activation = activation,
-                                use_bias = True,
-                                return_sequences = True,
-                                kernel_initializer = 'random_uniform',
-                                bias_initializer = 'random_uniform',
-                                kernel_regularizer = regularizer,
-                                dropout = args.dropout,
-                                name = 'sRNN_layer%d'%(n+1)))
+    #    # If another layer is specified, add a simple RNN layer instead
+    #    else:
+    #        model.add(SimpleRNN(unit,
+    #                            activation = activation,
+    #                            use_bias = True,
+    #                            return_sequences = True,
+    #                            kernel_initializer = 'random_uniform',
+    #                            bias_initializer = 'random_uniform',
+    #                            kernel_regularizer = regularizer,
+    #                            dropout = args.dropout,
+    #                            name = 'sRNN_layer%d'%(n+1)))
     
     # Add dense layers
     for n, unit in enumerate(args.units):
@@ -1109,8 +1125,9 @@ def build_cnn_rnn_model(args, shape):
     mode = 'temporal' if np.invert(args.class_weight == None) else None
     
     model.compile(loss = args.loss, optimizer = opt, 
-                  metrics = ['categorical_accuracy', tf.keras.metrics.Precision(name = 'precision'), 
-                             tf.keras.metrics.Recall(name = 'recall'), tf.keras.metrics.AUC(name = 'auc')], sample_weight_mode = mode)
+                  metrics = ['categorical_accuracy', tf.keras.metrics.AUC(name = 'auc')], sample_weight_mode = mode)
+                             #tf.keras.metrics.Precision(name = 'precision'), 
+                             #tf.keras.metrics.Recall(name = 'recall'), tf.keras.metrics.AUC(name = 'auc')], sample_weight_mode = mode)
     
     return model
 
