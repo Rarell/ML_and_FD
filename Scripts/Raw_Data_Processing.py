@@ -22,6 +22,19 @@ TODO:
 - Update soil moisture calculations to include arbitrary layers between 0 and 40 cm
 """
 
+        
+        #
+        # land_new = land[0,:,:]
+        # land_lat = np.nanmean(land_new, axis = 0)
+        # ind = np.where(land_lat <= 0.055)[0]
+        # data = np.delete(data, ind, axis = -1)
+        # lat = np.delete(lat, ind, axis = -1)
+        # lon = np.delete(lon, ind, axis = -1)
+        # land = np.delete(land, ind, axis = -1)
+        #
+        
+
+
 #%%
 ##############################################
 
@@ -111,11 +124,22 @@ def load_raw_nc(SName, filename, sm = False, model = 'narr', path = './Data/Raw/
         X['lon'] = lon
         
         # Collect the time information
-        time = nc.variables['time'][:]
+        if model == 'narr':
+            time = nc.variables['time'][:]
+        else:
+            time = nc.variables['date'][:]
         X['time'] = time
+        
+        dates = np.asarray([datetime.strptime(time[d], DateFormat) for d in range(len(time))])
+        
+        X['date'] = dates
+        X['year']  = np.asarray([d.year for d in dates])
+        X['month'] = np.asarray([d.month for d in dates])
+        X['day']   = np.asarray([d.day for d in dates])
+        X['ymd']   = np.asarray([datetime(d.year, d.month, d.day) for d in dates])
 
         # Collect the data itself
-        if sm is True:
+        if (sm is True) & (model == 'narr'):
             X[str(SName)] = nc.variables[str(SName)][:,:,:,:]
             X['level']    = nc.variables['level'][:]
         else:
@@ -221,7 +245,7 @@ def load_mask(model):
     
     # Determine model specific variables
     if model == 'narr':
-        path = '/Users/stuartedris/Desktop/PhD_Research_ML_and_FD/ML_and_FD_in_NARR/Data/narr'
+        path = './Data/narr'
         filename = 'land.nc'
         sname = 'land'
         
@@ -234,6 +258,35 @@ def load_mask(model):
         LonMin = -130
         LonMax = -65
         
+    elif model == 'nldas':
+        path = './Data/nldas'
+        filename = 'land.nc'
+        sname = 'land'
+        
+        lat_fname = 'lat_nldas.nc'
+        lon_fname = 'lon_nldas.nc'
+        
+        subset = True
+        LatMin = 25
+        LatMax = 50
+        LonMin = -130
+        LonMax = -65
+        
+    elif model == 'era5':
+        path = './Data/era5'
+        filename = 'land.nc'
+        sname = 'lsm'
+        
+        lat_fname = 'lat_era5.nc'
+        lon_fname = 'lon_era5.nc'
+    
+        # Subset to remove parts of the globe that are not necessary for FD
+        subset = True
+        LatMin = -60
+        LatMax = 74.8 # This value  over 75N for a more even grid
+        LonMin = 0
+        LonMax = 360
+        
     # Load in the data and lat and lon
     mask = load2D_nc(filename, sname, path = path)
     lat = load2D_nc(lat_fname, 'lat', path = path) # Dataset is lat x lon
@@ -241,10 +294,21 @@ def load_mask(model):
     
     # Subset the mask?
     if subset == True:
-        mask, _, _ = subset_data(mask, lat, lon, LatMin = LatMin, LatMax = LatMax,
-                                                 LonMin = LonMin, LonMax = LonMax)
+        mask, lat, lon = subset_data(mask, lat, lon, LatMin = LatMin, LatMax = LatMax,
+                                                     LonMin = LonMin, LonMax = LonMax)
+                                                 
+    # For the ERA5 mask, reduce it to the same size as the spatially reduced dataset
+    if (model == 'era5') | (model == 'nldas'):
+        if model == 'era5':
+            reverse = True
+        else:
+            reverse = False
+            
+        mask, _, _ = reduce_space_scale(mask[0,:,:], lat[:,0], lon[0,:], mask = True, reduction_scale = 2, reverse = reverse)
+    else:
+        mask = mask[0,:,:]
         
-    return mask[0,:,:]
+    return mask
 
 
 #%%
@@ -426,6 +490,9 @@ def subset_data(X, lat, lon, LatMin, LatMax, LonMin, LonMax):
     XSub = XSub.reshape(T, Isub, Jsub, order = 'F')
     LatSub = LatSub.reshape(Isub, Jsub, order = 'F')
     LonSub = LonSub.reshape(Isub, Jsub, order = 'F')
+    
+    # Compress the subsetted data
+    XSub = XSub.astype(np.float32)
     
     # Return the the subsetted data
     return XSub, LatSub, LonSub
@@ -631,6 +698,10 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
     months = np.asarray([date.month for date in dates])
     days   = np.asarray([date.day for date in dates])
     
+    # Remove leap days from dates
+    ind = np.where( (months == 2) & (days == 29) )[0]
+    dates = np.delete(dates, ind, axis = 0)
+    
     # Determine information specific to the variable
     print('Collecting variable specific information')
     
@@ -700,7 +771,12 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
         summation = True
 
     elif data_name == 'soil_moisture':
-        level = '0-40cm'
+        if model == 'narr':
+            level = '0-40cm'
+        elif model == 'nldas':
+            level = '50cm'
+        elif model == 'era5':
+            level = '0-28cm'
         
         input_path = '%s/%s/%s/'%(path, 'Raw', 'Liquid_VSM')
         output_path = '%s/%s/'%(path, 'Processed_Data')
@@ -799,15 +875,34 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
             else: # NARR datafiles other than soil moisture are in yearly files
                 fn = '%s.%s.nc'%(fname_base, year)
                 filenames.append(fn)
+                
+    # NLDAS and ERA5 data have already been preprocessed into daily data and saved as yearly data
+    else:
+        fn2 = []
+        for year in np.unique(years):
+            fn = '%s%s.nc'%(fname_base, year)
+            filenames.append(fn)
+            
+            if (model == 'era5') & (data_name == 'soil_moisture'):
+                fn2.append('volumetric_soil_water_layer_2%s.nc'%year)
 
-        # NARR data is subsetted to the U.S.
+    if np.invert(model == 'era5'):
+        # Subset to the U.S.
         subset = True
         LatMin = 25
         LatMax = 50
         LonMin = -130
         LonMax = -65
+    else:
+        # Subset to remove parts of the globe that are not necessary for FD
+        subset = True
+        LatMin = -60
+        LatMax = 74.8 # This value  over 75N for a more even grid
+        LonMin = 0
+        LonMax = 360
                 
 
+    if model == 'narr':
         # Main description for the output .nc file
         main_description = 'This file contains the' + data_name + ' data from the ' +\
                            'North American Regional Reanalysis dataset. The data is ' +\
@@ -815,41 +910,64 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
                            'the pentad timescale. Data ranges form Jan. 1 1979 to ' +\
                            'Dec. 31 2020. Variables are:\n'
                            
-                           
-    ####### NOTE: ADD other reanalysis models
+    elif model == 'nldas':
+        main_description = 'This file contains the' + data_name + ' data from the ' +\
+                           'North American Land Data Assimilation dataset. The data is ' +\
+                           'subsetted to focus on the contential U.S., and averaged to ' +\
+                           'the pentad timescale. Data ranges form Jan. 1 1979 to ' +\
+                           'Dec. 31 2020. Variables are:\n'
     else:
-        pass
+        main_description = 'This file contains the' + data_name + ' data from the ' +\
+                           'ECMWF Reanalysis, generation 5 (ERA5) dataset. The data is ' +\
+                           'subsetted to focus on the contential U.S., and averaged to ' +\
+                           'the pentad timescale. Data ranges form Jan. 1 1979 to ' +\
+                           'Dec. 31 2022. Variables are:\n'
         
     
     
     
     # Put together the output description
     description = main_description + var_descrip +\
-                  'lat: 2D latitude corresponding to the grid for temp. ' +\
+                  'lat: 2D latitude corresponding to the grid for the variable. ' +\
                   'Variable format is x by y.\n' +\
-                  'lon: 2D longitude corresponding to the grid for temp. ' +\
+                  'lon: 2D longitude corresponding to the grid for variable. ' +\
                   'Variable format is x by y.\n' +\
                   'date: List of strings containing dates corresponding to the ' +\
-                  'start of the week for the corresponding time point in temp. Dates ' +\
+                  'start of the week for the corresponding time point in the variable. Dates ' +\
                   'are in %Y-%m-%d format. Leap days were excluded for ' +\
                   'simplicity. Variable format is time.'
        
                   
        
     
-    # Load a sample file to get dimesions
-    examp = load_raw_nc(SName = 'soill', filename = 'soill.197901.nc', sm = True, path = './Data/%s/Raw/Liquid_VSM/'%model, meta_path = path)
-    T, l, I, J = examp['soill'].shape
+    # Load a sample file to get dimensions
+    if model == 'narr':
+        examp = load_raw_nc(SName = 'soill', filename = 'soill.197901.nc', sm = True, model = model, path = './Data/%s/Raw/Liquid_VSM/'%model, meta_path = path)
+        T, l, I, J = examp['soill'].shape
+    elif model == 'nldas':
+        examp = load_raw_nc(SName = 'soilm', filename = 'root_zone_soil_moisture_1979.nc', sm = True, model = model, path = './Data/%s/Raw/Liquid_VSM/'%model, meta_path = path)
+        T, I, J = examp['soilm'].shape
+    elif model == 'era5':
+        examp = load_raw_nc(SName = 'soilm', filename = 'volumetric_soil_water_layer_11979.nc', sm = True, model = model, path = './Data/%s/Raw/Liquid_VSM/'%model, meta_path = path)
+        
+        # Subset the data?
+        if subset == True:
+            examp['soilm'], lat, lon = subset_data(examp['soilm'], examp['lat'], examp['lon'], 
+                                                   LatMin = LatMin, LatMax = LatMax, 
+                                                   LonMin = LonMin, LonMax = LonMax)
+        
+        T, I, J = examp['soilm'].shape
+        
     T = dates.size
 
     # Initialize the combined data
-    raw_data = np.ones((T, I, J)) * np.nan
+    data = np.ones((int(T/5), I, J), dtype = np.float32) * np.nan
 
     print(T)
     # Load all the data for the chosen variable and reduce it to the daily timescale.
     print('Loading raw data')
     t = 0
-    for fn in filenames:
+    for n, fn in enumerate(filenames):
         
         # Load the raw data
         x_raw = load_raw_nc(SName = raw_sname, filename = fn, sm = sm, model = model, path = input_path, meta_path = path)
@@ -858,60 +976,99 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
         if fnmatch(data_name, 'soil_moisture?0'):
             x = x_raw[str(raw_sname)][:,depth,:,:]
         elif fnmatch(data_name, 'soil_moisture'):
-            x = np.nanmean(x_raw[str(raw_sname)][:,depth,:,:], axis = 1)
+            if model == 'era5':
+                # data for the ERA5 soil moisture needs to be averaged together
+                ##### May need to do this after pentad calculation, so the computer does not have to deal with 2 3 GB and a 6 GB arrays
+                tmp = load_raw_nc(SName = raw_sname, filename = fn2[n], sm = sm, model = model, path = input_path, meta_path = path)
+                tmp[str(raw_sname)] = tmp[str(raw_sname)].astype(np.float32)
+                x = np.nanmean(np.stack([x_raw[str(raw_sname)], tmp[str(raw_sname)]], axis = -1), axis = -1)
+                x = x.astype(np.float32)
+                del tmp # Remove the tmp once finished to ease some of the memory requirements
+                gc.collect()
+            elif model == 'nldas':
+                # The NLDAS2 data will not have an extra dimension for depth
+                x = x_raw[str(raw_sname)][:,:,:]
+            else:
+                x = np.nanmean(x_raw[str(raw_sname)][:,depth,:,:], axis = 1)
         else:
             x = x_raw[str(raw_sname)][:,:,:]
-            
-        daily_x = daily_compression(x, summation = summation, N_per_day = N_per_day)
+        
+        if model == 'narr': #NLDAS and ERA was already compressed to daily data in the download step
+            x = daily_compression(x, summation = summation, N_per_day = N_per_day)
 
-        var_T = daily_x.shape[0]
+        # Delete leap days for simplicity
+        print('Removing leap days')
+        
+        ind = np.where( (x_raw['month'] == 2) & (x_raw['day'] == 29) )[0]
+        x = np.delete(x, ind, axis = 0)
+        
+        # Average or sum data to a pentad timescale.
+        print('Reducing data to pentad timescale')
+        x = pentad_compression(x, summation = summation)
+        
+        # Subset the data
+        if (subset == True) & (model == 'era5'):
+            print('Subsetting data')
+            x, x_raw['lat'], x_raw['lon'] = subset_data(x, x_raw['lat'], x_raw['lon'], 
+                                                        LatMin = LatMin, LatMax = LatMax, 
+                                                        LonMin = LonMin, LonMax = LonMax)
+    
+
+        var_T = x.shape[0]
         print(fn)
-        raw_data[t:t+var_T,:,:] = daily_x[:,:,:]
+        data[t:t+var_T,:,:] = x[:,:,:].astype(np.float32)
         
         t = t + var_T
         
-        
-        
-    # Delete leap days for simplicity
-    print('Removing leap days')
-        
-    ind = np.where( (months == 2) & (days == 29) )[0]
-    raw_data = np.delete(raw_data, ind, axis = 0)
-    dates = np.delete(dates, ind, axis = 0)
-    T = dates.size
-
-
-    # Average or sum data to a pentad timescale.
-    print('Reducing data to pentad timescale')
-    data_pentad = pentad_compression(raw_data, summation = summation)
     
     
+    # At this point remove some large datasets
+    del x
+    gc.collect()
     
     # Subset the data?
-    if subset == True:
+    if (subset == True) & np.invert(model == 'era5'):
+        # Note the code runs a little more efficiently this way, but is not feasible for the larger era5 dataset (which has to be subsetted piece-meal)
         print('Subsetting data')
-        data_processed, lat, lon = subset_data(data_pentad, x_raw['lat'], x_raw['lon'], 
-                                                       LatMin = LatMin, LatMax = LatMax, 
-                                                       LonMin = LonMin, LonMax = LonMax)
+        data, lat, lon = subset_data(data, x_raw['lat'], x_raw['lon'], 
+                                     LatMin = LatMin, LatMax = LatMax, 
+                                     LonMin = LonMin, LonMax = LonMax)
         
     else:
-        data_processed = data_pentad
+        data = data
         lat = x_raw['lat']; lon = x_raw['lon']
 
+    # For the larger ERA5 dataset, the spatial scale needs to be reduced to make the data size smaller
+    if (model == 'era5') | (model == 'nldas'):
+        if model == 'era5':
+            reverse = True
+        else:
+            reverse = False
+        
+        data, lat, lon = reduce_space_scale(data, lat[:,0], lon[0,:], mask = False, reduction_scale = 2, reverse = reverse)
+        # Re-grid the lat/lon
+        lon, lat = np.meshgrid(lon, lat)
+
+    # For NLDAS, apply the mask
+    if model == 'nldas':
+        data[data >= 1e10] = np.nan
+
+    # Reduce the data size
+    data = data.astype(np.float32)
 
     # Write the data to a file.
     print('Writing data')
-    write_nc(data_processed, lat, lon, dates[::5], filename = output_filename, sm = sm, 
+    write_nc(data, lat, lon, dates[::5], filename = output_filename, sm = sm, 
              VarSName = output_sname, description = description, path = output_path)
     
     
     # Plot the data?
     if plot:
-        test_map(data_processed, lat, lon, dates[::5], data_name)
+        test_map(data, lat, lon, dates[::5], data_name)
     
     
     # Since some of these files are large, remove them from the namespace to ensure conserve memory
-    del examp, x_raw, x, raw_data, daily_x, data_pentad, data_processed
+    del examp, x_raw, data
     gc.collect() # Clears deleted variables from memory 
 
 
@@ -920,7 +1077,7 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
 
 # data parsing function(s)
 
-def parse_data(data, dates, path, fname, years = None, months = None, days = None):
+def parse_data(data, lat, lon, dates, path, fname, model, mask, years = None, months = None, days = None):
     '''
     Parse a list 3D time x lat x space datasets into time x space x folds datasets, with each
     fold being 1 growing season. The data is then saved to a cdf (.nc) file for later use.
@@ -930,6 +1087,8 @@ def parse_data(data, dates, path, fname, years = None, months = None, days = Non
     :param dates: Array of datetimes corresponding to the timestamps in data.
     :param path: Path leadind to where the  parsed dataset will be saved.
     :param fname: The filename the parsed data will be saved to
+    :param model: Reanalysis model being processed. Some extra steps for the era5 model.
+    :param mask: Land-sea mask for data. If model is era5, the mask is also saved because it is different from the other processed data.
     :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
     :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
     :param days: Array of intergers corresponding to the dates.day. If None, it is made from dates
@@ -952,21 +1111,202 @@ def parse_data(data, dates, path, fname, years = None, months = None, days = Non
     
     data_stacked = data_stacked.reshape(Nf, T, I*J, order = 'F')
     
-    Nyears = np.unique(years)
+    lat = lat.reshape(I*J, order = 'F')
+    lon = lon.reshape(I*J, order = 'F')
+
+    if model == 'era5':
+        # The global dataset will extend into the summer of the next year for the Southern Hemisphere; exclude that year
+        Nyears = np.unique(years)[:-1]
+    else:
+        Nyears = np.unique(years)
     
-    data_parsed = []
-    for ny in Nyears:
-        ind = np.where( (months >= 4) & (months <= 10) & (years == ny))[0]
+    
+    # Growing season is Apr - Oct for lat >= 0, and Sept - Apr for lat < 0
+    data_parsed_north = []
+    data_parsed_south = []
+    ind_lat_north = np.where(lat >= 0)[0]
+    ind_lat_south = np.where(lat < 0)[0]
+    
+    # Cannot index two axes at once; create a temporary variable to index one axis at a time
+    tmp_north = data_stacked[:,:,ind_lat_north]
+    
+    if len(ind_lat_south) >= 1:
+        tmp_south = data_stacked[:,:,ind_lat_south]
         
-        data_parsed.append(data_stacked[:,ind,:])
+    for ny in Nyears:
+        # Index the growing season
+        ind_north = np.where( (months >= 4) & (months <= 10) & (years == ny))[0]
+        
+        data_parsed_north.append(tmp_north[:,ind_north,:])
+        if len(ind_lat_south) >= 1:
+            #ind_south = np.where( ((months >= 9) & (years == ny)) | ((months <= 4) & (days <= 5) & (years == (ny+1))))[0]
+            # The above version did not work; needed to use date times to select out the growing season for the southern hemisphere
+            # The end date of April 5 is to make the growing season as the same number of pentads as the northern hemisphere (for concatenation later)
+            ind_south = np.where( (dates >= datetime(ny, 9, 1)) & (dates <= datetime(ny+1, 4, 5)))[0]
+        
+            data_parsed_south.append(tmp_south[:,ind_south,:])
         
     # Stack the folds into a new axis
-    data_parsed = np.stack(data_parsed, axis = -1)
+    if len(ind_lat_south) < 1:
+        data_parsed = np.stack(data_parsed_north, axis = -1)
+    else:
+        data_parsed_north = np.stack(data_parsed_north, axis = -1)
+        data_parsed_south = np.stack(data_parsed_south, axis = -1)
+        
+        # Concatenate the north and south hemispheric data along the space axis (axis 2)
+        data_parsed = np.concatenate([data_parsed_north, data_parsed_south], axis = 2)
+
+    # Halve the datasize for easier use
+    data_parsed = data_parsed.astype(np.float32)
     
     # Write the data
     with open("%s/%s"%(path, fname), "wb") as fp:
         pickle.dump(data_parsed, fp)
+        
+        # Dump the modified lat and lon for the global data
+        if model == 'era5':
+            pickle.dump(lat, fp)
+            pickle.dump(lon, fp)
+            pickle.dump(mask, fp)
     
+
+def reduce_space_scale(data, latitude, longitude, mask = False, reduction_scale = 2, reverse = False):
+    '''
+    Reduce the spatial scale of a dataset
+    
+    Inputs:
+    :param data: Data to be reduced. Assumed to be in a time x lat x lon/lat x lon
+    :param latitude: Latitude of the dataset. 1D array.
+    :param longitude: Longitude of the dataset. 1D array. Assumed to be monotonically increasing.
+    :param mask: Boolean. Indicates whether data is a mask or set of boolean values
+    :param reduction_scale: Scale to reduce the data by (by 2 = reduce spatial scale bt 1/2, 3 = reduce spatial scale by 1/3, etc.)
+    :param reverse: Boolean indicating whether to reverse the order of latitude order.
+    
+    Outputs:
+    :param data_reduced: The dataset at the reduced spatial scale
+    :param lat_reduced: Latitude at the reduced spatial scale
+    :param lon_reduced: Longitude at the reduced spatial scale
+    '''
+    
+    # Flip the latitude to be monotonically increasing
+    if reverse:
+        latitude = latitude[::-1]
+    
+    # Reduce the latitude and longitudes
+    lat_reduced = latitude[::reduction_scale]
+    lon_reduced = longitude[::reduction_scale]
+    
+    # Collect the spatial scales
+    I = lat_reduced.size
+    J = lon_reduced.size
+    
+    # If data is a mask, then it is only 2D
+    if mask == True:
+        data_reduced = np.zeros((I, J))
+    else:
+        # Collect the time dimension
+        T = data.shape[0]
+        
+        data_reduced = np.ones((T, I, J)) * np.nan
+    
+    # Collect the average value of the data for the reduced set
+    for j in range(J):
+        
+        if j == (J-1):
+            # At the end of the grid, collect all longitude points that remain
+            ind_lon = np.where(longitude >= lon_reduced[j])[0]
+        else:
+            # Collect all longitude points between the two sets of reduced grids
+            ind_lon = np.where((longitude >= lon_reduced[j]) & (longitude < lon_reduced[j+1]))[0]
+        
+        # Average over the set of longitude points
+        if mask == True:
+            tmp = np.nanmean(data[:,ind_lon], axis = -1)
+        else:
+            tmp = np.nanmean(data[:,:,ind_lon], axis = -1)
+            
+        for i in range(I):
+        
+            if i == (I-1):
+                # At the end of the grid, collect all latitude points that remain
+                ind_lat = np.where(latitude >= lat_reduced[i])[0]
+            else:
+                # Collect all latitude points between the two sets of reduced grids
+                ind_lat = np.where((latitude >= lat_reduced[i]) & (latitude < lat_reduced[i+1]))[0]
+                
+            # The average all lat and lon points between the reduced grids makes the average value between the reduced grid
+            if mask == True:
+                data_reduced[i,j] = np.nanmean(tmp[ind_lat])
+            else:
+                data_reduced[:,i,j] = np.nanmean(tmp[:,ind_lat], axis = -1)
+    
+    # If data is a mask, restore it to 1s and 0s (1 if more than 50% was on land and 0 otherwise)
+    if mask == True:      
+        data_reduced[data_reduced >= 0.5] = 1
+        data_reduced[data_reduced < 0.5] = 0
+        
+    # Return the results (restoring latitude to its original format)
+    if reverse:
+        lat_reduced = lat_reduced[::-1]
+            
+    return data_reduced, lat_reduced, lon_reduced
+    
+def remove_sea(data, lat, lon, mask):
+    '''
+    Remove sea values from a gridded dataset. This is done exclusively for the ERA5 data due to the large size of the dataset(s).
+    
+    Reason behind removing sea values: CNNs and spatial U-Nets have not been found to be useful. 
+    As such, the grid does not need remain even and removing sea values for a global dataset removes 70% - 80% data size.
+    
+    Inputs:
+    :param data: Dataset to be reduced. 3D array (time by lat by lon)
+    :param lat: 2D array of latitudes for data
+    :param lon: 2D array of longitudes for data
+    :param mask: Land-sea mask for data. 0 == sea, 1 == land.
+    
+    Outputs:
+    :param data: Dataset with sea values removed. In shape of time by 109 by 2447
+    :param lat: 2D array of latitudes for data. In shape of 109 by 2447
+    :param lon: 2D array of longitudes for data. In shape of 109 by 2447
+    :param mask: Land-sea mask without sea values. In shape of 109 by 2447
+    '''
+    
+    # After removing sea values, era5 space dimension is 266723, which has primes of 109 and 2447
+    ### Unreduced data
+    
+    # For the spatially reduced data, some primes are 3, 3, 67, 97 (3 * 67 = 201)
+    lat_dim = 201
+    
+    # Get the shape
+    T, I, J = data.shape
+    
+    # Reshape data to time x space and space vectors
+    data = data.reshape(T, I*J, order = 'F')
+    lat = lat.reshape(I*J)
+    lon = lon.reshape(I*J)
+    
+    mask = mask.reshape(I*J)
+    
+    # Find the indices where there are sea
+    ind = np.where(mask == 0)[0]
+    
+    # Remove indices with sea
+    data = np.delete(data, ind, axis = -1)
+    lat = np.delete(lat, ind, axis = -1)
+    lon = np.delete(lon, ind, axis = -1)
+    mask = np.delete(mask, ind, axis = -1)
+    
+    # Find the lon dimension (should be 2447)
+    lon_dim = int(data.shape[1]/lat_dim)
+    
+    # Reshape data back into 3D/2D array
+    data = data.reshape(T, lat_dim, lon_dim, order = 'F')
+    lat = lat.reshape(lat_dim, lon_dim, order = 'F')
+    lon = lon.reshape(lat_dim, lon_dim, order = 'F')
+    mask = mask.reshape(lat_dim, lon_dim, order = 'F')
+    
+    
+    return data, lat, lon, mask
     
 
 #%%
@@ -993,7 +1333,7 @@ def create_data_process_parser():
     
     parser.add_argument('--make_features', action='store_true', help='Make the features dataset and split it into folds for future ML')
     
-    parser.add_argument('--dataset', type=str, default='/Users/stuartedris/desktop/PhD_Research_ML_and_FD/ML_and_FD_in_NARR/Data', help='Data set directory')
+    parser.add_argument('--dataset', type=str, default='./Data', help='Data set directory')
     parser.add_argument('--model', type=str, default='narr', help='Reanalysis model the dataset(s) came from')
     
     # CPU/GPU
@@ -1043,32 +1383,64 @@ if __name__ == '__main__':
         
         feature_fname = 'fd_input_features.pkl'
         
+        # Load the land-sea mask
+        mask = load_mask(model = args.model)
+        
         # Check if output processed file already exists
         if os.path.exists('%s/%s'%(dataset_dir, feature_fname)):
             # Processed file does exist: exit
             print("File %s already exists"%feature_fname)
         
         else:
+        	# Determine the soil moisture level
+            if args.model == 'narr':
+                level = '0-40cm'
+            elif args.model == 'nldas':
+                level = '50cm'
+            elif args.model == 'era5':
+                level = '0-28cm'
+        	    
             # Load the data that will make up the input data
             temp = load_nc('temp', 'temperature.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
-            evap = load_nc('evap', 'evaporation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
+            # Process the era5 data further so the computer does not have to deal with multiple 10 GB files
+            if args.model == 'era5':
+                temp['temp'], temp['lat'], temp['lon'], _ = remove_sea(temp['temp'], temp['lat'], temp['lon'], mask)
+                
+            if args.model == 'era5':
+                # Account for an error that occurred in the initial preprocessing of ERA5 evap data
+                #evap_sname = 'temp'
+                evap_sname = 'evap'
+            else:
+                evap_sname = 'evap'
+            evap = load_nc(evap_sname, 'evaporation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
+            if args.model == 'era5':
+                evap[evap_sname], evap['lat'], evap['lon'], _ = remove_sea(evap[evap_sname], evap['lat'], evap['lon'], mask)
+                
             pevap = load_nc('pevap', 'potential_evaporation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
+            if args.model == 'era5':
+                pevap['pevap'], pevap['lat'], pevap['lon'], _ = remove_sea(pevap['pevap'], pevap['lat'], pevap['lon'], mask)
+                
             precip = load_nc('precip', 'precipitation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
-            soilm = load_nc('soilm', 'soil_moisture.0-40cm.%s.pentad.nc'%args.model, sm = True, path = '%s/Processed_Data/'%dataset_dir)
+            if args.model == 'era5':
+                precip['precip'], precip['lat'], precip['lon'], _ = remove_sea(precip['precip'], precip['lat'], precip['lon'], mask)
+                
+            soilm = load_nc('soilm', 'soil_moisture.%s.%s.pentad.nc'%(level, args.model), sm = True, path = '%s/Processed_Data/'%dataset_dir)
+            if args.model == 'era5':
+                soilm['soilm'], soilm['lat'], soilm['lon'], mask = remove_sea(soilm['soilm'], soilm['lat'], soilm['lon'], mask)
             
             # Initialize the change in ET/PET/SM variables
-            T, I, J = evap['evap'].shape
+            T, I, J = evap[evap_sname].shape
             
-            del_et = np.ones((T, I, J)) * np.nan
-            del_pet = np.ones((T, I, J)) * np.nan
-            del_sm = np.ones((T, I, J)) * np.nan
+            del_et = np.ones((T, I, J), dtype = np.float32) * np.nan
+            del_pet = np.ones((T, I, J), dtype = np.float32) * np.nan
+            del_sm = np.ones((T, I, J), dtype = np.float32) * np.nan
             
             # Perform a running mean of 1 month (6 pentads) long so the changes simulate something like a 1 month change
             runmean = 6
             
             for i in range(I):
                 for j in range(J):
-                    et_mean = np.convolve(evap['evap'][:,i,j], np.ones((runmean,))/runmean)[(runmean-1):]
+                    et_mean = np.convolve(evap[evap_sname][:,i,j], np.ones((runmean,))/runmean)[(runmean-1):]
                     pet_mean = np.convolve(pevap['pevap'][:,i,j], np.ones((runmean,))/runmean)[(runmean-1):]
                     sm_mean = np.convolve(soilm['soilm'][:,i,j], np.ones((runmean,))/runmean)[(runmean-1):]
 
@@ -1078,9 +1450,8 @@ if __name__ == '__main__':
                     del_sm[:-1,i,j] = sm_mean[1:] - sm_mean[:-1]
             
             # Parse and save the input data into a pickle file
-            parse_data([temp['temp'], evap['evap'], del_et, pevap['pevap'], del_pet, precip['precip'], soilm['soilm'], del_sm], 
-                       temp['ymd'], dataset_dir, feature_fname)
-        
+            parse_data([temp['temp'], evap[evap_sname], del_et, pevap['pevap'], del_pet, precip['precip'], soilm['soilm'], del_sm], 
+                       temp['lat'], temp['lon'], temp['ymd'], dataset_dir, feature_fname, args.model, mask)
     
     
 
