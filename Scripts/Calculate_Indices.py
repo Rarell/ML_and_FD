@@ -658,8 +658,8 @@ def calculate_eddi(pet, dates, mask, start_year = 1990, end_year = 2020, years =
         
         
     # Reorder data to reduce number of embedded loops
-    prob2d = prob.reshape(T, I*J, order = 'F')
-    eddi2d = eddi.reshape(T, I*J, order = 'F')
+    prob = prob.reshape(T, I*J, order = 'F')
+    eddi = eddi.reshape(T, I*J, order = 'F')
 
     # prob2d = 1 - prob2d
 
@@ -670,23 +670,23 @@ def calculate_eddi(pet, dates, mask, start_year = 1990, end_year = 2020, years =
             print('%d/%d'%(int(ij/1000), int(I*J/1000)))
         
         for t in range(T):
-            if prob2d[t,ij] <= 0.5:
-                prob2d[t,ij] = prob2d[t,ij]
+            if prob[t,ij] <= 0.5:
+                prob[t,ij] = prob[t,ij]
                 eddi_sign = 1
             else:
-                prob2d[t,ij] = 1 - prob2d[t,ij]
+                prob[t,ij] = 1 - prob[t,ij]
                 eddi_sign = -1
                 
-            W = np.sqrt(-2 * np.log(prob2d[t,ij]))
+            W = np.sqrt(-2 * np.log(prob[t,ij]))
             
-            eddi2d[t,ij] = eddi_sign * (W - (C0 + C1 * W + C2 * (W**2))/(1 + d1 * W + d2 * (W**2) + d3 * (W**3)))
+            eddi[t,ij] = eddi_sign * (W - (C0 + C1 * W + C2 * (W**2))/(1 + d1 * W + d2 * (W**2) + d3 * (W**3)))
         
         # for date in one_year:
         #     ind = np.where( (months == date.month) & (days == date.day) )[0]
         #     eddi2d[ind,ij] = stats.norm.ppf(prob2d[ind,ij], loc = 0, scale = 1)
             
     # Reorder the data back to 3D
-    eddi = eddi2d.reshape(T, I, J, order = 'F')
+    eddi = eddi.reshape(T, I, J, order = 'F')
 
     # eddi = transform_pearson3(pet, dates, climo = pet, start_year = start_year, end_year = end_year)
 
@@ -737,9 +737,13 @@ def caculate_smi(vsm, dates, mask, start_year = 1990, end_year = 2020, years = N
         
     
     # Collect the individual vsm data
-    vsm0 = vsm[0]
-    vsm10 = vsm[1]
-    vsm40 = vsm[2]
+    # Note: For the NARR, soil moisture is split into multiple layers while ERA5 and NLDAS has everything averaged into 1 layer
+    if len(vsm) > 1:
+        vsm0 = vsm[0]
+        vsm10 = vsm[1]
+        vsm40 = vsm[2]
+    else:
+        vsm0 = vsm[0]
     
     # Initialize some other variables
     T, I, J = vsm0.shape
@@ -757,35 +761,42 @@ def caculate_smi(vsm, dates, mask, start_year = 1990, end_year = 2020, years = N
     
     
     # Reshape arrays into 2D arrays
-    smi2d = smi.reshape(T, I*J, order = 'F')
+    smi = smi.reshape(T, I*J, order = 'F')
     
-    vsm0_2d = vsm0.reshape(T, I*J, order = 'F')
-    vsm10_2d = vsm10.reshape(T, I*J, order = 'F')
-    vsm40_2d = vsm40.reshape(T, I*J, order = 'F')
+    vsm0 = vsm0.reshape(T, I*J, order = 'F')
+    if len(vsm) > 1:
+        vsm10 = vsm10.reshape(T, I*J, order = 'F')
+        vsm40 = vsm40.reshape(T, I*J, order = 'F')
     
     
     # Calculate the SMI using the available water capacity based on the climatology period
     for ij in range(I*J):
         # First determine the wilting point and field capacity. This is done by examining 5th and 95th percentiles.
-        vsm0_wp  = stats.scoreatpercentile(vsm0_2d[grow_ind,ij], WP_percentile)
-        vsm10_wp = stats.scoreatpercentile(vsm10_2d[grow_ind,ij], WP_percentile)
-        vsm40_wp = stats.scoreatpercentile(vsm40_2d[grow_ind,ij], WP_percentile)
+        vsm0_wp  = stats.scoreatpercentile(vsm0[grow_ind,ij], WP_percentile)
+        if len(vsm) > 1:
+            vsm10_wp = stats.scoreatpercentile(vsm10[grow_ind,ij], WP_percentile)
+            vsm40_wp = stats.scoreatpercentile(vsm40[grow_ind,ij], WP_percentile)
         
-        vsm0_fc  = stats.scoreatpercentile(vsm0_2d[grow_ind,ij], FC_percentile)
-        vsm10_fc = stats.scoreatpercentile(vsm10_2d[grow_ind,ij], FC_percentile)
-        vsm40_fc = stats.scoreatpercentile(vsm40_2d[grow_ind,ij], FC_percentile)
+        vsm0_fc  = stats.scoreatpercentile(vsm0[grow_ind,ij], FC_percentile)
+        if len(vsm) > 1:
+            vsm10_fc = stats.scoreatpercentile(vsm10[grow_ind,ij], FC_percentile)
+            vsm40_fc = stats.scoreatpercentile(vsm40[grow_ind,ij], FC_percentile)
         
         # Determine the SMI at each level based on equation in section 1 of Hunt et al. 2009
-        smi0  = -5 + 10*(vsm0_2d[:,ij] - vsm0_wp)/(vsm0_fc - vsm0_wp)
-        smi10 = -5 + 10*(vsm10_2d[:,ij] - vsm10_wp)/(vsm10_fc - vsm10_wp)
-        smi40 = -5 + 10*(vsm40_2d[:,ij] - vsm40_wp)/(vsm40_fc - vsm40_wp)
+        smi0  = -5 + 10*(vsm0[:,ij] - vsm0_wp)/(vsm0_fc - vsm0_wp)
+        if len(vsm) > 1:
+            smi10 = -5 + 10*(vsm10[:,ij] - vsm10_wp)/(vsm10_fc - vsm10_wp)
+            smi40 = -5 + 10*(vsm40[:,ij] - vsm40_wp)/(vsm40_fc - vsm40_wp)
         
         # Average these values together to get the full SMI
-        smi_tmp = np.stack([smi0, smi10, smi40], axis = 0)
-        smi2d[:,ij] = np.nanmean(smi_tmp, axis = 0)
+        if len(vsm) > 1:
+            smi_tmp = np.stack([smi0, smi10, smi40], axis = 0)
+            smi[:,ij] = np.nanmean(smi_tmp, axis = 0)
+        else:
+            smi[:,ij] = smi0
         
     # Reshape data back to a 3D array.
-    smi = smi2d.reshape(T, I, J, order = 'F')
+    smi = smi.reshape(T, I, J, order = 'F')
 
     # Remove any sea data points
     smi = apply_mask(smi, mask)
@@ -860,20 +871,21 @@ def calculate_sodi(precip, et, pet, vsm, ro, dates, mask, start_year = 1990, end
     one_year = dates[ind]
     
     # Reshape data in 2D arrays
-    vsm2d = vsm.reshape(T, I*J, order = 'F')
-    awc2d = awc.reshape(I*J, order = 'F')
+    vsm = vsm.reshape(T, I*J, order = 'F')
+    awc = awc.reshape(I*J, order = 'F')
     
     for ij in range(I*J):
         # First determine the wilting point and field capacity. This is done by examining 5th and 95th percentiles.
-        vsm_wp = stats.scoreatpercentile(vsm2d[grow_ind,ij], WP_percentile)
+        vsm_wp = stats.scoreatpercentile(vsm[grow_ind,ij], WP_percentile)
         
-        vsm_fc = stats.scoreatpercentile(vsm2d[grow_ind,ij], FC_percentile)
+        vsm_fc = stats.scoreatpercentile(vsm[grow_ind,ij], FC_percentile)
         
         # The available water content is simply the difference between field capacity and wilting point
-        awc2d[ij] = vsm_fc - vsm_wp
+        awc[ij] = vsm_fc - vsm_wp
         
     # Convert AWC back to 2D data
-    awc = awc2d.reshape(I, J, order = 'F')
+    awc = awc.reshape(I, J, order = 'F')
+    vsm = vsm.reshape(T, I, J, order = 'F')
     
     
     # The soil moisture deficiency then becomes the difference between AWC and soil moisutre
@@ -899,31 +911,31 @@ def calculate_sodi(precip, et, pet, vsm, ro, dates, mask, start_year = 1990, end
     # Next, perform the Box-Car transformation and standardize the data to create SODI, according to equations 5 and 6 in Sohrabi et al. 2015
     sodi = np.ones((T, I, J)) * np.nan
 
-    sodi2d = sodi.reshape(T, I*J, order = 'F')
-    D2d    = D.reshape(T, I*J, order = 'F')
+    sodi = sodi.reshape(T, I*J, order = 'F')
+    D    = D.reshape(T, I*J, order = 'F')
     
     
     for ij in range(I*J):
         
         # Estimate the lambda1 parameter for the climatological period
-        if np.nanmin(D2d[climo_index,ij]) < 0: # Ensure the shift is positive
-            lambda2 = -1 * np.nanmin(D2d[climo_index,ij])
+        if np.nanmin(D[climo_index,ij]) < 0: # Ensure the shift is positive
+            lambda2 = -1 * np.nanmin(D[climo_index,ij])
     
         else:
-            lambda2 = np.nanmin(D2d[climo_index,ij])
+            lambda2 = np.nanmin(D[climo_index,ij])
             
-        y, lambda1 = stats.boxcox(D2d[climo_index,ij] + lambda2 + 0.001)
+        y, lambda1 = stats.boxcox(D[climo_index,ij] + lambda2 + 0.001)
         
         
         # From looking around at various features, it seems as if lambda2 in the Box-Car transformation is the minimum value of the data, so that all values are > 0.
-        if np.nanmin(D2d[:,ij]) < 0: # Ensure the shift is positive
-            lambda2 = -1 * np.nanmin(D2d[:,ij])
+        if np.nanmin(D[:,ij]) < 0: # Ensure the shift is positive
+            lambda2 = -1 * np.nanmin(D[:,ij])
     
         else:
-            lambda2 = np.nanmin(D2d[:,ij])
+            lambda2 = np.nanmin(D[:,ij])
         
         # Perform the Box-Car transformation. Note boxcar only accepts a vector, so this has to be done for 1 grid point at a time
-        y = stats.boxcox(D2d[:,ij] + lambda2 + 0.001, lmbda = lambda1) # 0.001 should have a small impact on values, but ensure D + lambda2 is not 0 at any point
+        y = stats.boxcox(D[:,ij] + lambda2 + 0.001, lmbda = lambda1) # 0.001 should have a small impact on values, but ensure D + lambda2 is not 0 at any point
         
         # Collect the climatology
         y_climo = collect_climatology(y, dates, start_year = start_year, end_year = end_year)
@@ -936,11 +948,11 @@ def calculate_sodi(precip, et, pet, vsm, ro, dates, mask, start_year = 1990, end
             ind = np.where( (date.month == months) & (date.day == days) )[0]
             
             for t in ind:
-                sodi2d[t,ij] = (y[t] - y_mean[n])/y_std[n]
+                sodi[t,ij] = (y[t] - y_mean[n])/y_std[n]
                 
     
     # Transform the data back into a 3D array
-    sodi = sodi2d.reshape(T, I, J, order = 'F')
+    sodi = sodi.reshape(T, I, J, order = 'F')
 
     sodi = np.where(sodi > 5, 5, sodi)
     sodi = np.where(sodi < -5, -5, sodi)
@@ -1004,29 +1016,45 @@ def calculate_fdii(vsm, dates, mask, start_year = 1990, end_year = 2020, years =
     
     # Reorder some data
     sm2d = vsm.reshape(T, I*J, order = 'F')
-    sm_per2d = sm_percentile.reshape(T, I*J, order = 'F')
+    sm_per = sm_percentile.reshape(T, I*J, order = 'F')
+    mask = mask.reshape(I*J, order = 'F')
     
     # Get the climatology months
     climo_index = np.where( (years >= start_year) & (years <= end_year) )[0]
 
     # Determine soil moisture percentiles
     for ij in range(I*J):
+        if (ij%1000) == 0:
+            print('%d/%d'%(int(ij/1000), int(I*J/1000)))
+            
+        # Ignore sea values
+        if mask[ij] == 0:
+            continue
+            
+            
         for t in range(T):
             ind = np.where( (days[t] == days[climo_index]) & (months[t] == months[climo_index]) )[0]
         
-            sm_per2d[t,ij] = stats.percentileofscore(sm2d[ind,ij], sm2d[t,ij])
+            sm_per[t,ij] = stats.percentileofscore(sm2d[ind,ij], sm2d[t,ij])
     
     
-    print(np.nanmin(sm_per2d), np.nanmax(sm_per2d))
-    print(np.nanmean(sm_per2d))
+    print(np.nanmin(sm_per), np.nanmax(sm_per))
+    print(np.nanmean(sm_per))
     
     print('Calculating rapid intensification of flash drought')
     # Determine the rapid intensification based on percentile changes based on equation 1 in Otkin et al. 2021 (and detailed in section 2.2 of the same paper)
     fd_int = np.ones((T, I, J)) * np.nan
-    fd_int2d = fd_int.reshape(T, I*J, order = 'F')
+    fd_int = fd_int.reshape(T, I*J, order = 'F')
 
     # Determine the intensification index
     for ij in range(I*J):
+        if (ij%1000) == 0:
+            print('%d/%d'%(int(ij/1000), int(I*J/1000)))
+            
+        # Ignore sea values
+        if mask[ij] == 0:
+            continue
+            
         for t in range(T-2): # Note the last two days are excluded as there is no change to examine
         
             obs = np.ones((9)) * np.nan # Note, the method detailed in Otkin et al. 2021 involves looking ahead 2 to 10 pentads (9 entries total)
@@ -1035,14 +1063,14 @@ def calculate_fdii(vsm, dates, mask, start_year = 1990, end_year = 2020, years =
                 if (t+npend) >= T: # If t + npend is in the future (beyond the dataset), break the loop and use NaNs for obs instead
                     break          # This should not effect results as this will only occur in November to December, outside of the growing season.
                 else:
-                    obs[npend-2] = (sm_per2d[t+npend,ij] - sm_per2d[t,ij])/npend # Note npend is the number of pentads the system is corrently looking ahead to.
+                    obs[npend-2] = (sm_per[t+npend,ij] - sm_per[t,ij])/npend # Note npend is the number of pentads the system is corrently looking ahead to.
             
             # If the maximum change in percentiles is less than the base change requirement (15 percentiles in 4 pentads), set FD_INT to 0.
             #  Otherwise, determine FD_INT according to eq. 1 in Otkin et al. 2021
             if np.nanmax(obs) < (PER_BASE/T_BASE):
-                fd_int2d[t,ij] = 0
+                fd_int[t,ij] = 0
             else:
-                fd_int2d[t,ij] = ((PER_BASE/T_BASE)**(-1)) * np.nanmax(obs)
+                fd_int[t,ij] = ((PER_BASE/T_BASE)**(-1)) * np.nanmax(obs)
                 
     
     
@@ -1050,49 +1078,57 @@ def calculate_fdii(vsm, dates, mask, start_year = 1990, end_year = 2020, years =
     print('Calculating drought severity')
     # Next determine the drought severity component using equation 2 in Otkin et al. 2021 (and detailed in section 2.2 of the same paper)
     dro_sev = np.ones((T, I, J)) * np.nan
-    dro_sev2d = dro_sev.reshape(T, I*J, order = 'F')
+    dro_sev = dro_sev.reshape(T, I*J, order = 'F')
 
-    dro_sev2d[0,:] = 0 # Initialize the first entry to 0, since there is no rapid intensification before it
+    dro_sev[0,:] = 0 # Initialize the first entry to 0, since there is no rapid intensification before it
 
     for ij in range(I*J):
+        if (ij%1000) == 0:
+            print('%d/%d'%(int(ij/1000), int(I*J/1000)))
+            
+        # Ignore sea values
+        if mask[ij] == 0:
+            continue
+            
         for t in range(1, T-1):
-            if (fd_int2d[t,ij] > 0):
+            if (fd_int[t,ij] > 0):
                 
                 dro_sum = 0
                 for npent in np.arange(0, 18+1, 1): # In Otkin et al. 2021, the DRO_SEV can look up to 18 pentads (90 days) in the future for its calculation
                     
                     if (t+npent) >= T:      # For simplicity, set DRO_SEV to 0 when near the end of the dataset (this should not impact anything as it is not in
-                        dro_sev2d[t,ij] = 0 # the growing season)
+                        dro_sev[t,ij] = 0 # the growing season)
                         break
                     else:
-                        dro_sum = dro_sum + (DRO_BASE - sm_per2d[t+npent,ij])
+                        dro_sum = dro_sum + (DRO_BASE - sm_per[t+npent,ij])
                         
-                        if sm_per2d[t+npent,ij] > DRO_BASE: # Terminate the summation and calculate DRO_SEV if SM is no longer below the base percentile for drought
+                        if sm_per[t+npent,ij] > DRO_BASE: # Terminate the summation and calculate DRO_SEV if SM is no longer below the base percentile for drought
                             if npent < 4:
                                 # DRO_SEV is set to 0 if drought was not consistent for at least 4 pentads after rapid intensificaiton (i.e., little to no impact)
-                                dro_sev2d[t,ij] = 0
+                                dro_sev[t,ij] = 0
                                 break
                             else:
-                                dro_sev2d[t,ij] = dro_sum/npent # Terminate the loop and determine the drought severity if the drought condition is broken
+                                dro_sev[t,ij] = dro_sum/npent # Terminate the loop and determine the drought severity if the drought condition is broken
                                 break
                             
                         elif (npent >= 18): # Calculate the drought severity of the loop goes out 90 days, but the drought does not end
-                            dro_sev2d[t,ij] = dro_sum/npent
+                            dro_sev[t,ij] = dro_sum/npent
                             break
                         else:
                             pass
             
             # In continuing consistency with Otkin et al. 2021, if the pentad does not immediately follow rapid intensification, drought is set 0
             else:
-                dro_sev2d[t,ij] = 0
+                dro_sev[t,ij] = 0
                 continue
     
     
     
     print('Calculating FDII')
     # Reorder the data back into 3D data
-    fd_int  = fd_int2d.reshape(T, I, J, order = 'F')
-    dro_sev = dro_sev2d.reshape(T, I, J, order = 'F')
+    fd_int  = fd_int.reshape(T, I, J, order = 'F')
+    dro_sev = dro_sev.reshape(T, I, J, order = 'F')
+    mask = mask.reshape(I, J, order = 'F')
     
     # Finally, FDII is the product of the components
     fdii = fd_int * dro_sev
@@ -1156,7 +1192,7 @@ def display_histogram(data, data_name, path = './Figures'):
     plt.savefig('%s/%s_histogram_example.png'%(path,data_name))
 
 
-def display_maximum_map(data, lat, lon, dates, examine_start, examine_end, data_name, path = './Figures', years = None, months = None, days = None):
+def display_maximum_map(data, lat, lon, dates, examine_start, examine_end, data_name, globe = False, path = './Figures', years = None, months = None, days = None):
     '''
     Display a map of the maximum value of input data over a specified period
     
@@ -1168,6 +1204,7 @@ def display_maximum_map(data, lat, lon, dates, examine_start, examine_end, data_
     :param examine_start: Datetime of the beginning of the period to be examined
     :param examine_end: Datetime of the end of the period to be examined
     :param data_name: String name of the data being plotted
+    :param globe: Boolean indicating whether the data is global or not
     :param path: Path the figure will be saved to
     :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
     :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
@@ -1189,8 +1226,12 @@ def display_maximum_map(data, lat, lon, dates, examine_start, examine_end, data_
 
 
     # Lonitude and latitude tick information
-    lat_int = 10
-    lon_int = 10
+    if globe:
+        lat_int = 15
+        lon_int = 40
+    else:
+        lat_int = 10
+        lon_int = 20
     
     lat_label = np.arange(-90, 90, lat_int)
     lon_label = np.arange(-180, 180, lon_int)
@@ -1226,7 +1267,8 @@ def display_maximum_map(data, lat, lon, dates, examine_start, examine_end, data_
     
     # Set borders
     ax.coastlines()
-    ax.add_feature(cfeature.STATES, edgecolor = 'black')
+    if np.invert(globe):
+        ax.add_feature(cfeature.STATES, edgecolor = 'black')
 
     # Set tick information
     ax.set_xticks(lon_label, crs = ccrs.PlateCarree())
@@ -1249,7 +1291,10 @@ def display_maximum_map(data, lat, lon, dates, examine_start, examine_end, data_
     cbar = fig.colorbar(cs, cax = cbax)
     
     # Set the extent
-    ax.set_extent([-130, -65, 25, 50], crs = fig_proj)
+    if globe:
+        ax.set_extent([-179, 179, -60, 75], crs = fig_proj)
+    else:
+       ax.set_extent([-130, -65, 25, 50], crs = fig_proj)
     
     # Save the figure
     plt.savefig('%s/test_%s_max_map.png'%(path, data_name))

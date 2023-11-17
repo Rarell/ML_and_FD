@@ -26,6 +26,8 @@ Full citations for the referenced papers can be found at:
 
 TODO:
 - Modify map creation functions to include the whole world
+    - display_fd_climatology
+- remove sea points for era5
 - Add Li et al. 2020 Method
 """
 
@@ -62,7 +64,7 @@ from Calculate_Indices import *
 ##############################################
 
 # Create a function to make climatology maps for FD
-def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', path = './Figures', grow_season = False, years = None, months = None):
+def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', globe = False, path = './Figures', grow_season = False, years = None, months = None):
     '''
     Display the climatology of flash drought (percentage of years with flash drought)
     
@@ -73,6 +75,7 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', path = '
     :param dates: Array of datetimes corresponding to the timestamps in fd
     :param method: String describing the method used to calculate the flash drought
     :param model: String describing what reanalysis model the data comes from. Used to name the figure
+    :param globe: Boolean indicating whether the data is global
     :param path: Path the figure will be saved to
     :param grow_season: Boolean indicating whether fd has already been set into growing seasons.
     :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
@@ -145,17 +148,22 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', path = '
     
     # Shapefile information
     # ShapeName = 'Admin_1_states_provinces_lakes_shp'
-    ShapeName = 'admin_0_countries'
-    CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+    if np.invert(globe):
+        ShapeName = 'admin_0_countries'
+        CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
     
-    CountriesReader = shpreader.Reader(CountriesSHP)
+        CountriesReader = shpreader.Reader(CountriesSHP)
     
-    USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
-    NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+        USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+        NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
     
     # Lonitude and latitude tick information
-    lat_int = 10
-    lon_int = 20
+    if globe:
+        lat_int = 15
+        lon_int = 40
+    else:
+        lat_int = 10
+        lon_int = 20
     
     LatLabel = np.arange(-90, 90, lat_int)
     LonLabel = np.arange(-180, 180, lon_int)
@@ -181,9 +189,12 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', path = '
     
     # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
     ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
-    ax.add_feature(cfeature.STATES)
-    ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
-    ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    if np.invert(globe):
+        ax.add_feature(cfeature.STATES)
+        ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+        ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    else:
+        ax.coastlines(edgecolor = 'black', zorder = 3)
     
     # Adjust the ticks
     ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
@@ -196,15 +207,25 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', path = '
     ax.yaxis.set_major_formatter(LatFormatter)
     
     # Plot the flash drought data
-    cs = ax.pcolormesh(lon, lat, per_ann_fd*100, vmin = cmin, vmax = cmax,
-                       cmap = cmap, transform = data_proj, zorder = 1)
+    if globe:
+        cs = ax.contourf(lon, lat, per_ann_fd*100, levels = 20, vmin = cmin, vmax = cmax,
+                         cmap = cmap, transform = data_proj, zorder = 1)
+    else:
+        cs = ax.pcolormesh(lon, lat, per_ann_fd*100, vmin = cmin, vmax = cmax,
+                           cmap = cmap, transform = data_proj, zorder = 1)
     
     # Set the map extent to the U.S.
-    ax.set_extent([-130, -65, 23.5, 48.5])
+    if globe:
+        ax.set_extent([-179, 179, -60, 75])
+    else:
+        ax.set_extent([-130, -65, 23.5, 48.5])
     
     
     # Set the colorbar size and location
-    cbax = fig.add_axes([0.915, 0.29, 0.025, 0.425])
+    if globe:
+        cbax = fig.add_axes([0.92, 0.375, 0.02, 0.25])
+    else:
+        cbax = fig.add_axes([0.915, 0.29, 0.025, 0.425])
     
     # Create the colorbar
     cbar = mcolorbar.ColorbarBase(cbax, cmap = ColorMap, norm = norm, orientation = 'vertical')
@@ -223,6 +244,99 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', path = '
     filename = '%s_%s_flash_drought_climatology.png'%(model, method)
     plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
     plt.show(block = False)
+
+
+#%%
+##############################################
+
+# Create a function to create an Aridity Index (AI) mask as defined in Christian et a. 2023
+def create_ai_mask(precip, pet, lat, mask, dates, start_year = 1990, end_year = 2020, years = None, months = None, days = None):
+    '''
+    Create a mask from the aridity index (AI) specified in Christian et al. 2023
+    
+    Inputs:
+    :param precip: Precipitation data. Time x lat x lon format
+    :param pet: Potential evaporation data. Time x lat x lon format. Should be in the same units as precip
+    :param lat: Vector latitude values corresponding to data
+    :param mask: Land-sea mask for the et and pet variables. A a value of none can be provided to not use a mask
+    :param dates: Array of datetimes corresponding to the timestamps in precip and pet
+    :param start_year: The start year in the climatological period used
+    :param end_year: The last year in the climatological period used
+    :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
+    :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
+    :param days: Array of intergers corresponding to the dates.day. If None, it is made from dates
+    
+    Outputs:
+    :param ai_mask:
+    '''
+    
+    # Make the years, months, and/or days variables?
+    if years == None:
+        years = np.array([date.year for date in dates])
+        
+    if months == None:
+        months = np.array([date.month for date in dates])
+        
+    if days == None:
+        days = np.array([date.day for date in dates])
+    
+    # Determine the annual precipitation and PET
+    T, I, J = pet.shape
+    
+    pet = np.abs(pet)
+    
+    climo_years = np.arange(start_year, end_year+1)
+    
+    print('Calculating the Aridity Index...')
+    p_annual = np.ones((climo_years.size, I, J), dtype = np.float32) * np.nan
+    pet_annual = np.ones((climo_years.size, I, J), dtype = np.float32) * np.nan
+    
+    for t, year in enumerate(climo_years):
+        ind = np.where(year == years)[0]
+        p_annual[t,:,:] = np.nansum(precip[ind,:,:], axis = 0)
+        pet_annual[t,:,:] = np.nansum(pet[ind,:,:], axis = 0)
+    
+    # Calculate the aridity index (ratio of the average annual precip and PET)
+    ai = np.nanmean(p_annual, axis = 0)/np.nanmean(pet_annual, axis = 0)
+    
+    # Note moisture units are kg m^-2, but one of the mask requirements is PET < 1 mm/day, so some unit conversion is necessary
+    # For unit conversion, divide by the density of water (m), convert m to mm (multiply by 1000; mm)
+    print('Calculating daily mean PET...')
+    pet = pet * 1000 / (1000)
+    pet = pet.astype(np.float32)
+    
+    climo_index = np.where( (years >= start_year) & (years <= end_year) )[0]
+    months = months[climo_index]
+
+    # Collect the growing season for the northern and southern hemispheres
+    ind_north = np.where(lat >= 0)[0]
+    ind_south = np.where(lat < 0)[0]
+    
+    pet_north = pet[:,ind_north,:]
+    pet_south = pet[:,ind_south,:]
+    
+    ind_north = np.where( (months >= 4) & (months <= 10) )[0]
+    ind_south = np.where( (months >= 9) | (months <= 4) )[0]
+    ind_south = ind_south[:len(ind_north)] # Select up to the same number of pentads as ind_north (for concatenating); should be to about April 5
+    
+    # Determine the average daily PET in mm day^-1 (215 days in a growing season)
+    pet_north = np.nansum(pet_north[ind_north,:,:], axis = 0)/(len(ind_north)*5) # len(ind_north)*5 is the number of days in all the growing seasons
+    pet_south = np.nansum(pet_south[ind_south,:,:], axis = 0)/(len(ind_south)*5)
+    
+    pet_daily_mean = np.concatenate([pet_north, pet_south], axis = 0)
+    
+    print('Collecting the mask...')
+    # Masked grids are highly arid locations (AI < 0.2, and average daily PET < 1 mm day^-1)
+    ai_mask = np.where( ((ai < 0.2) | (pet_daily_mean < 1) | (mask == 0)), 0, 1)
+    
+    # Make sure tropics are not masked
+    ind = np.where((lat >= -10) & (lat <= 10))[0]
+    ai_mask[ind,:] = 1
+    ai_mask[mask == 0] = 0
+    
+    print('Done')
+    return ai_mask
+
     
 
 #%%
@@ -235,13 +349,13 @@ def christian_fd(sesr, mask, dates, start_year = 1990, end_year = 2020, years = 
     '''
     Calculate the flash drought using an updated version of the method described in Christian et al. 2019
     (https://doi.org/10.1175/JHM-D-18-0198.1). This method uses the evaporative stress ratio (SESR) to 
-    identify flash drought.
+    identify flash drought. Updates to the method are details (for LSWI) in Christian et al. 2022
+    (https://doi.org/10.1016%2Fj.rsase.2022.100770).
     
     Inputs:
     :param sesr: Input SESR values, time x lat x lon format
-    :param mask: Land-sea mask for the et and pet variables
+    :param mask: Land-sea mask for the et and pet variables. A a value of none can be provided to not use a mask
     :param dates: Array of datetimes corresponding to the timestamps in et and pet
-    :param mask: Land-sea mask for the et and pet variables
     :param start_year: The start year in the climatological period used
     :param end_year: The last year in the climatological period used
     :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
@@ -262,6 +376,8 @@ def christian_fd(sesr, mask, dates, start_year = 1990, end_year = 2020, years = 
     if days == None:
         days = np.array([date.day for date in dates])
         
+    # Is a mask provided?
+    mask_provided = mask is not None
         
 
     # Initialize some variables
@@ -269,13 +385,16 @@ def christian_fd(sesr, mask, dates, start_year = 1990, end_year = 2020, years = 
     sesr_inter = np.ones((T, I, J)) * np.nan
     sesr_filt  = np.ones((T, I, J)) * np.nan
     
-    sesr2d = sesr.reshape(T, I*J, order = 'F')
-    sesr_inter2d = sesr_inter.reshape(T, I*J, order = 'F')
-    sesr_filt2d  = sesr_filt.reshape(T, I*J, order = 'F')
+    climo_index = np.where( (years >= start_year) & (years <= end_year) )[0]
     
-    mask2d = mask.reshape(I*J, order = 'F')
+    sesr = sesr.reshape(T, I*J, order = 'F')
+    sesr_inter = sesr_inter.reshape(T, I*J, order = 'F')
+    sesr_filt  = sesr_filt.reshape(T, I*J, order = 'F')
     
-    x = np.arange(-6.5, 6.5, (13/T))[:-1] # a variable covering the range of SESR with 1 entry for each time step
+    if mask_provided:
+        mask = mask.reshape(I*J, order = 'F')
+    
+    x = np.arange(-6.5, 6.5, (13/T))[:-1] # a variable covering the range of all SESR values with 1 entry for each time step
     print(x.size, T)
     
     # Parameters for the filter
@@ -285,61 +404,46 @@ def christian_fd(sesr, mask, dates, start_year = 1990, end_year = 2020, years = 
     # Perform a basic linear interpolation for NaN values and apply a SG filter
     print('Applying interpolation and Savitzky-Golay filter to SESR')
     for ij in range(I*J):
-        if mask2d[ij] == 0:
-            continue
-        else:
-            pass
+        if mask_provided:
+            if mask[ij] == 0:
+                continue
+            else:
+                pass
         
         # Perform a linear interpolation to remove NaNs
-        ind = np.isfinite(sesr2d[:,ij])
+        ind = np.isfinite(sesr[:,ij])
         if np.nansum(ind) == 0:
             continue
         else:
             pass
         
         ind = np.where(ind == True)[0]
-        interp_func = interpolate.interp1d(x[ind], sesr2d[ind,ij], kind = 'linear', fill_value = 'extrapolate')
+        interp_func = interpolate.interp1d(x[ind], sesr[ind,ij], kind = 'linear', fill_value = 'extrapolate')
         
-        sesr_inter2d[:,ij] = interp_func(x)
+        sesr_inter[:,ij] = interp_func(x)
         
         # Apply the Savitzky-Golay filter to the interpolated SESR data
-        sesr_filt2d[:,ij] = signal.savgol_filter(sesr_inter2d[:,ij], WinLength, PolyOrder)
+        sesr_filt[:,ij] = signal.savgol_filter(sesr_inter[:,ij], WinLength, PolyOrder)
         
     # Reorder SESR back to 3D data
-    sesr_filt = sesr_filt2d.reshape(T, I, J, order = 'F')
+    sesr_filt = sesr_filt.reshape(T, I, J, order = 'F')
 
 
 
     # Determine the change in SESR
     print('Calculating the change in SESR')
     delta_sesr  = np.ones((T, I, J)) * np.nan
-    delta_sesr_z = np.ones((T, I, J)) * np.nan
     
     delta_sesr[1:,:,:] = sesr_filt[1:,:,:] - sesr_filt[:-1,:,:]
+
     
-    # Standardize the change in SESR
-    delta_sesr_climo = collect_climatology(delta_sesr, dates, start_year = start_year, end_year = end_year)
-    
-    delta_sesr_mean, delta_sesr_std = calculate_climatology(delta_sesr_climo, pentad = True)
-    
-    # Find the time stamps for a singular year
-    ind = np.where(years == 1999)[0] # Note, any non-leap year will do
-    one_year = dates[ind]
-
-    for n, date in enumerate(one_year):
-        ind = np.where( (date.month == months) & (date.day == days) )[0]
-        
-        for t in ind:
-            delta_sesr_z[t,:,:] = (delta_sesr[t,:,:] - delta_sesr_mean[n,:,:])/delta_sesr_std[n,:,:]
-
-
-
     # Begin the flash drought calculations
     print('Identifying flash drought')
     fd = np.ones((T, I, J)) * np.nan
 
-    fd2d = fd.reshape(T, I*J, order = 'F')
-    dsesr2d = delta_sesr_z.reshape(T, I*J, order = 'F')
+    fd = fd.reshape(T, I*J, order = 'F')
+    sesr_filt = sesr_filt.reshape(T, I*J, order = 'F')
+    delta_sesr = delta_sesr.reshape(T, I*J, order = 'F')
 
     dsesr_percentile = 25
     sesr_percentile  = 20
@@ -348,37 +452,39 @@ def christian_fd(sesr, mask, dates, start_year = 1990, end_year = 2020, years = 
     start_date = dates[-1]
     
     for ij in range(I*J):
-        if mask2d[ij] == 0:
-            continue
-        else:
-            pass
+        if mask_provided:
+            if mask[ij] == 0:
+                continue
+            else:
+                pass
         
         start_date = dates[-1]
         for t in range(T):
-            ind = np.where( (dates[t].month == months) & (dates[t].day == days) )[0]
+            ind = np.where( (dates[t].month == months[climo_index]) & (dates[t].day == days[climo_index]) )[0]
             
             # Determine the percentiles of dSESR and SESR
-            ri_crit = np.nanpercentile(dsesr2d[ind,ij], dsesr_percentile)
-            dc_crit = np.nanpercentile(sesr_filt2d[ind,ij], sesr_percentile)
+            ri_crit = np.nanpercentile(delta_sesr[ind,ij], dsesr_percentile)
+            dc_crit = np.nanpercentile(sesr_filt[ind,ij], sesr_percentile)
+
             
             # If start_date != dates[-1], the rapid intensification criteria is satisified
             # If the rapid intensification and drought component criteria are satisified (and FD period is 30+ days)
             # then FD occurs
-            if ( (dates[t] - start_date) >= min_change) & (sesr_filt2d[t,ij] <= dc_crit):
-                fd2d[t,ij] = 1
+            if ( (dates[t] - start_date) >= min_change) & (sesr_filt[t,ij] <= dc_crit):
+                fd[t,ij] = 1
             else:
-                fd2d[t,ij] = 0
+                fd[t,ij] = 0
             
             # # If the change in SESR is below the criteria, change the start date of the flash drought
-            if (dsesr2d[t,ij] <= ri_crit) & (start_date == dates[-1]):
+            if (delta_sesr[t,ij] <= ri_crit) & (start_date == dates[-1]):
                 start_date = dates[t]
-            elif (dsesr2d[t,ij] <= ri_crit) & (start_date != dates[-1]):
+            elif (delta_sesr[t,ij] <= ri_crit) & (start_date != dates[-1]):
                 pass
             else:
                 start_date = dates[-1]
             
     # Re-order the flash drought back into a 3D array
-    fd = fd2d.reshape(T, I, J, order = 'F')
+    fd = fd.reshape(T, I, J, order = 'F')
     print('Done')
     
     return fd
@@ -430,16 +536,16 @@ def nogeura_fd(spei, mask, dates, start_year = 1990, end_year = 2020, years = No
     delta_spei[6:,:,:] = spei[6:,:,:] - spei[:-6,:,:] # Set the indices so that each entry in delta_spei corrsponds to the end date of the difference
 
     # Reorder data into 2D arrays for fewer embedded loops
-    spei2d = spei.reshape(T, I*J, order = 'F')
-    delta_spei2d = delta_spei.reshape(T, I*J, order = 'F')
+    spei = spei.reshape(T, I*J, order = 'F')
+    delta_spei = delta_spei.reshape(T, I*J, order = 'F')
     
-    mask2d = mask.reshape(I*J, order = 'F')
+    mask = mask.reshape(I*J, order = 'F')
 
     # Calculate the occurrence of flash drought
     print('Identifying flash drought')
     fd = np.ones((T, I, J)) * np.nan
     
-    fd2d = fd.reshape(T, I*J, order = 'F')
+    fd = fd.reshape(T, I*J, order = 'F')
     
     change_criterion = -2
     drought_criterion = -1.28
@@ -448,7 +554,7 @@ def nogeura_fd(spei, mask, dates, start_year = 1990, end_year = 2020, years = No
     start_date = dates[-1]
 
     for ij in range(I*J):
-        if mask2d[ij] == 0:
+        if mask[ij] == 0:
             continue
         else:
             pass
@@ -458,13 +564,13 @@ def nogeura_fd(spei, mask, dates, start_year = 1990, end_year = 2020, years = No
             
             # If the monthly change in SPEI is below the required change, and SPEI is below the drought threshold, FD occurs
             # Note, since the changes are calculated over a 1 month period, the first criterion in Noguera et al. is automatically satisified
-            if (delta_spei2d[t,ij] <= change_criterion) & (spei2d[t,ij] <= drought_criterion): 
-                fd2d[t,ij] = 1
+            if (delta_spei[t,ij] <= change_criterion) & (spei[t,ij] <= drought_criterion): 
+                fd[t,ij] = 1
             else:
-                fd2d[t,ij] = 0
+                fd[t,ij] = 0
                 
     # Restore the FD back into a 3D array
-    fd = fd2d.reshape(T, I, J, order = 'F')
+    fd = fd.reshape(T, I, J, order = 'F')
     print('Done')
     
     return fd
@@ -514,13 +620,13 @@ def pendergrass_fd(eddi, mask, dates, start_year = 1990, end_year = 2020, years 
     
     fd = np.ones((T, I, J)) * np.nan
 
-    eddi2d = eddi.reshape(T, I*J, order = 'F')
-    fd2d = fd.reshape(T, I*J, order = 'F')
-    mask2d = mask.reshape(I*J, order = 'F')
+    eddi = eddi.reshape(T, I*J, order = 'F')
+    fd = fd.reshape(T, I*J, order = 'F')
+    mask = mask.reshape(I*J, order = 'F')
 
     print('Identifying flash drought')
     for ij in range(I*J):
-        if mask2d[ij] == 0:
+        if mask[ij] == 0:
             continue
         else:
             pass
@@ -530,16 +636,16 @@ def pendergrass_fd(eddi, mask, dates, start_year = 1990, end_year = 2020, years 
             
             ind = np.where( (dates[t].month == months[climo_index]) & (dates[t].day == days[climo_index]) )[0]
             
-            current_percent = stats.percentileofscore(eddi2d[ind,ij], eddi2d[t,ij])
-            previous_percent = stats.percentileofscore(eddi2d[ind,ij], eddi2d[t-3,ij])
+            current_percent = stats.percentileofscore(eddi[ind,ij], eddi[t,ij])
+            previous_percent = stats.percentileofscore(eddi[ind,ij], eddi[t-3,ij])
             
             # Note this checks for all pentads in the + 2 week period, so there cannot be moderation
-            if ( (current_percent - previous_percent) > 50 ) & (eddi2d[t+1,ij] >= eddi2d[t,ij]) & (eddi2d[t+2,ij] >= eddi2d[t,ij]) & (eddi2d[t+3,ij] >= eddi2d[t,ij]): 
-                fd2d[t,ij] = 1
+            if ( (current_percent - previous_percent) > 50 ) & (eddi[t+1,ij] >= eddi[t,ij]) & (eddi[t+2,ij] >= eddi[t,ij]) & (eddi[t+3,ij] >= eddi[t,ij]): 
+                fd[t,ij] = 1
             else:
-                fd2d[t,ij] = 0
+                fd[t,ij] = 0
                 
-    fd = fd2d.reshape(T, I, J, order = 'F')
+    fd = fd.reshape(T, I, J, order = 'F')
     print('Done')
     
     # print(np.nanmin(fd), np.nanmax(fd), np.nanmean(fd))
@@ -639,22 +745,27 @@ def liu_fd(vsm, mask, dates, start_year = 1990, end_year = 2020, years = None, m
     
     sm_percentiles = np.ones((T, I, J)) * np.nan
     
-    sm2d = vsm.reshape(T, I*J, order = 'F')
-    mask2d = mask.reshape(I*J, order = 'F')
-    sm_percentiles2d = sm_percentiles.reshape(T, I*J, order = 'F')
+    sm = vsm.reshape(T, I*J, order = 'F')
+    mask = mask.reshape(I*J, order = 'F')
+    sm_percentiles = sm_percentiles.reshape(T, I*J, order = 'F')
     
     for t in range(T):
         ind = np.where( (dates[t].day == days[climo_index]) & (dates[t].month == months[climo_index]) )[0]
         
         for ij in range(I*J):
-            sm_percentiles2d[t,ij] = stats.percentileofscore(sm2d[ind,ij], sm2d[t,ij])
+            if mask[ij] == 0:
+                continue
+            else:
+                pass
+    
+            sm_percentiles[t,ij] = stats.percentileofscore(sm[ind,ij], sm[t,ij])
         
         
     # Begin drought identification process
     print('Identifying flash droughts')
     fd = np.ones((T, I, J)) * np.nan
     
-    fd2d = fd.reshape(T, I*J, order = 'F')
+    fd = fd.reshape(T, I*J, order = 'F')
     
     # Initialize up a variable to look up to 12 pentads ahead (from Otkin et al. 2021, that rapid intensification goes up to 10 pentads ahead); 12 ensures data after intensification is included
     fut_pentads = np.arange(0, 13)
@@ -665,7 +776,7 @@ def liu_fd(vsm, mask, dates, start_year = 1990, end_year = 2020, years = None, m
         if (ij%1000) == 0:
             print('%d/%d'%(int(ij/1000), int(I*J/1000)))
         
-        if mask2d[ij] == 0:
+        if mask[ij] == 0:
             continue
         else:
             pass
@@ -674,7 +785,7 @@ def liu_fd(vsm, mask, dates, start_year = 1990, end_year = 2020, years = None, m
             # First determine if the soil moisture is below the 40 percentile
             # print(ij)
             # print(sm_percentiles2d[t,ij] <= 40)
-            if sm_percentiles2d[t,ij] <= 40:
+            if sm_percentiles[t,ij] <= 40:
                 
                 
                 R2 = np.ones((fp)) * np.nan
@@ -682,7 +793,7 @@ def liu_fd(vsm, mask, dates, start_year = 1990, end_year = 2020, years = None, m
                 
                 # To determine when the percentiles level out (when the intensification ends), regress SM percentiles with pentads with increasing polynomial degrees until R^2 > 0.95 or until a 10th order polynomial is used (assumed accuracy is being lost here)
                 for p in range(1, 11):
-                    sm_est, R2p = polynomial_regress(fut_pentads, sm_percentiles2d[t:t+fp,ij], order = p)
+                    sm_est, R2p = polynomial_regress(fut_pentads, sm_percentiles[t:t+fp,ij], order = p)
                     
                     R2[p-1] = R2p
                     if (R2[p-1] >= 0.95):
@@ -692,20 +803,20 @@ def liu_fd(vsm, mask, dates, start_year = 1990, end_year = 2020, years = None, m
                         # Find the maximum R2
                         ind = np.where(R2 == np.nanmax(R2))[0]
                         if len(ind) < 1: # If no maximum is found, the calculations are all NaNs and nothing can be determined
-                            fd2d[t,ij] = 0
+                            fd[t,ij] = 0
                             break
                         
                         order = ind[0]+1
                         
                         # Get the SM estimates for the polynomial regression with the highest R2
-                        sm_est, R2p = polynomial_regress(fut_pentads, sm_percentiles2d[t:t+fp,ij], order = order)
+                        sm_est, R2p = polynomial_regress(fut_pentads, sm_percentiles[t:t+fp,ij], order = order)
                         break
                     else:
                         pass
                     
                 # Next, determine where the change in sm_est is approximately 0 (within 0.01) to find when the rapid intensification ends
                 for pent in fut_pentads[1:]:
-                    ri_entries[pent-1] = (sm_percentiles2d[t+pent,ij] - sm_percentiles2d[t,ij])/pent # pent here is the difference between the current pentad and how many pentads ahead one is looking
+                    ri_entries[pent-1] = (sm_percentiles[t+pent,ij] - sm_percentiles[t,ij])/pent # pent here is the difference between the current pentad and how many pentads ahead one is looking
                     
                     if (sm_est[pent] - sm_est[pent-1]) < 0.1:
                         ri_end = pent
@@ -723,20 +834,20 @@ def liu_fd(vsm, mask, dates, start_year = 1990, end_year = 2020, years = None, m
                 # and the Rapid Intensification component must be: ri_mean >= 6.5 percentiles/week (about 5 percentiles/pentad) or ri_max >= 10 percentiles/week (about 7.5 percentiles/pentad)
                 
                 # Note also that the FD is being identified for the end of RI period
-                if (sm_percentiles2d[t+ri_end,ij] <= 20) & ( (ri_mean >= 5) | (ri_max >= 7.5) ):
-                    fd2d[t+ri_end,ij] = 1
+                if (sm_percentiles[t+ri_end,ij] <= 20) & ( (ri_mean >= 5) | (ri_max >= 7.5) ):
+                    fd[t+ri_end,ij] = 1
                 else:
-                    fd2d[t+ri_end,ij] = 0
+                    fd[t+ri_end,ij] = 0
                     
                 # Increment t to the end of the intensification period
                 t = t + ri_end
                 
             else:
-                fd2d[t,ij] = 0
+                fd[t,ij] = 0
             #     continue
     
     
-    fd = fd2d.reshape(T, I, J, order = 'F')    
+    fd = fd.reshape(T, I, J, order = 'F')    
     
     print('Done')
     
@@ -837,7 +948,7 @@ def create_fd_calculator_parser():
 
     parser.add_argument('--verbose', '-v', action='count', default=0, help="Verbosity level")
     
-    parser.add_argument('--dataset', type=str, default='/Users/stuartedris/desktop/PhD_Research_ML_and_FD/ML_and_FD_in_NARR/Data', help='Data set directory')
+    parser.add_argument('--dataset', type=str, default='./Data', help='Data set directory')
 
     # Flash Drought Indices
     parser.add_argument('--check_index', action='store_true', help='Check the some of the FD indices if they exist and calculate them if not')
@@ -884,9 +995,65 @@ if __name__ == '__main__':
     start_date = datetime.strptime(args.start_date, '%Y-%m-%d')
     end_date = datetime.strptime(args.end_date, '%Y-%m-%d')
     
+    if args.model == 'era5':
+        globe = True
+    else:
+        globe = False
+    
     # Load the land-sea mask?
     if args.mask:
         mask = load_mask(model = args.model)
+        
+        # For global models, add to the mask with the aridity index
+        if globe == True:
+            p = load_nc('precip', 'precipitation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
+            pet = load_nc('pevap', 'potential_evaporation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
+            
+            # Times 24 because the the data was averaged over each hour in the initial pre-processing; times 24 makes it like a daily sum
+            ai_mask = create_ai_mask(p['precip']*24, np.abs(pet['pevap'])*24, pet['lat'][:,0], mask, pet['ymd'], start_year = start_date.year, end_year = end_date.year)
+            
+            # Make a mask without the sea grid points
+            I, J = ai_mask.shape
+            ai_mask_no_sea = np.ones((1, I, J))
+            ai_mask_no_sea[0,:,:] = ai_mask
+            ai_mask_no_sea, _, _, _ = remove_sea(ai_mask_no_sea, p['lat'], p['lon'], mask)
+            
+            del p, pet
+            gc.collect()
+            
+            # Write the full gridded aridity mask
+            with Dataset('%s/ai_mask.nc'%dataset_dir, 'w', format = 'NETCDF4') as nc:
+                I, J = ai_mask.shape
+                
+                # Create the spatial and temporal dimensions
+                nc.createDimension('x', size = I)
+                nc.createDimension('y', size = J)
+                
+                # Create the main variable
+                nc.createVariable('mask', ai_mask.dtype, ('x', 'y'))
+                nc.variables['mask'][:,:] = ai_mask[:,:]
+                
+            # Now write the mask without the sea grid points
+            with Dataset('%s/ai_mask_no_sea.nc'%dataset_dir, 'w', format = 'NETCDF4') as nc:
+                T, I, J = ai_mask_no_sea.shape
+                
+                # Create the spatial and temporal dimensions
+                nc.createDimension('x', size = I)
+                nc.createDimension('y', size = J)
+                
+                # Create the main variable
+                nc.createVariable('mask', ai_mask_no_sea.dtype, ('x', 'y'))
+                nc.variables['mask'][:,:] = ai_mask_no_sea[0,:,:]
+                
+            
+        
+    if args.model == 'narr':
+        level = '0-40cm'
+    elif args.model == 'era5':
+        level = '0-28cm'
+    elif args.model == 'nldas':
+        level = '50cm'
+                
     
     #####################################
     ##### Calculate indices if they don't exist
@@ -961,22 +1128,38 @@ if __name__ == '__main__':
                     del pet
                 
                 elif index == 'smi':
-                    sm0 = load_nc('soilm', 'soil_moisture.0cm.%s.pentad.nc'%args.model, sm = True, path = '%s/Processed_Data/'%dataset_dir)
-                    sm10 = load_nc('soilm', 'soil_moisture.10cm.%s.pentad.nc'%args.model, sm = True, path = '%s/Processed_Data/'%dataset_dir)
-                    sm40 = load_nc('soilm', 'soil_moisture.40cm.%s.pentad.nc'%args.model, sm = True, path = '%s/Processed_Data/'%dataset_dir)
+                    # Only NARR has soil moisture split into multiple layers
+                    if args.model == 'narr':
+                        sm0 = load_nc('soilm', 'soil_moisture.0cm.%s.pentad.nc'%args.model, sm = True, path = '%s/Processed_Data/'%dataset_dir)
+                        sm10 = load_nc('soilm', 'soil_moisture.10cm.%s.pentad.nc'%args.model, sm = True, path = '%s/Processed_Data/'%dataset_dir)
+                        sm40 = load_nc('soilm', 'soil_moisture.40cm.%s.pentad.nc'%args.model, sm = True, path = '%s/Processed_Data/'%dataset_dir)
+                    else:
+                        if args.model == 'era5':
+                            level = '0-28cm'
+                        elif args.model == 'nldas':
+                            level = '50cm'
+                            
+                        sm0 = load_nc('soilm', 'soil_moisture.%s.%s.pentad.nc'%(level, args.model), sm = True, path = '%s/Processed_Data/'%dataset_dir)
+                    
                     lat = sm0['lat']; lon = sm0['lon']; dates = sm0['ymd']
                     
                     # Calculate the index
-                    index_data = caculate_smi([sm0['soilm'], sm10['soilm'], sm40['soilm']], dates, mask, start_year = start_date.year, end_year = end_date.year)
+                    if args.model == 'narr':
+                        index_data = caculate_smi([sm0['soilm'], sm10['soilm'], sm40['soilm']], dates, mask, start_year = start_date.year, end_year = end_date.year)
+                        
+                        # Remove the no longer needed variables
+                        del sm0, sm10, sm40
+                    else:
+                        index_data = caculate_smi([sm0['soilm']], dates, mask, start_year = start_date.year, end_year = end_date.year)
                     
-                    # Remove the no longer needed variables
-                    del sm0, sm10, sm40
+                        # Remove the no longer needed variables
+                        del sm0
                 
                 elif index == 'sodi':
                     p = load_nc('precip', 'precipitation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
                     et = load_nc('evap', 'evaporation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
                     pet = load_nc('pevap', 'potential_evaporation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
-                    sm = load_nc('soilm', 'soil_moisture.0-40cm.%s.pentad.nc'%args.model, sm = True, path = '%s/Processed_Data/'%dataset_dir)
+                    sm = load_nc('soilm', 'soil_moisture.%s.%s.pentad.nc'%(level, args.model), sm = True, path = '%s/Processed_Data/'%dataset_dir)
                     ro = load_nc('ro', 'runoff.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
                     lat = p['lat']; lon = p['lon']; dates = p['ymd']
                     
@@ -987,7 +1170,14 @@ if __name__ == '__main__':
                     del p, et, pet, sm, ro
                 
                 elif index == 'fdii':
-                    sm = load_nc('soilm', 'soil_moisture.0-40cm.%s.pentad.nc'%args.model, sm = True, path = '%s/Processed_Data/'%dataset_dir)
+                    if args.model == 'narr':
+                        level = '0-40cm'
+                    elif args.model == 'era5':
+                        level = '0-28cm'
+                    elif args.model == 'nldas':
+                        level = '50cm'
+                
+                    sm = load_nc('soilm', 'soil_moisture.%s.%s.pentad.nc'%(level, args.model), sm = True, path = '%s/Processed_Data/'%dataset_dir)
                     lat = sm['lat']; lon = sm['lon']; dates = sm['ymd']
                     
                     # Calcualte the index
@@ -1001,10 +1191,13 @@ if __name__ == '__main__':
                     
                 # Write the index data so that it is available for future use
                 if index != 'fdii':
+                    index_data = index_data.astype(np.float32)
+                
                     write_nc(index_data, lat, lon, dates, filename = '%s.%s.pentad.nc'%(index,args.model), VarSName = index, path = '%s/Indices/'%dataset_dir)
                 else: # Special case for FDII, which gives 3 variabels to save
                     for datum, name in zip(index_data, index_names):
-                        write_nc(datum, lat, lon, dates, filename = '%s.%s.pentad.nc'%(name,args.model), VarSName = index, path = '%s/Indices/'%dataset_dir)
+                        datum = datum.astype(np.float32)
+                        write_nc(datum, lat, lon, dates, filename = '%s.%s.pentad.nc'%(name,args.model), VarSName = name, path = '%s/Indices/'%dataset_dir)
                 
                 
                 gc.collect() # Clears deleted variables from memory
@@ -1029,10 +1222,10 @@ if __name__ == '__main__':
                 # Display a map of maximum values?
                 if args.max_map:
                     if index != 'fdii':
-                        display_maximum_map(index_data, lat, lon, dates, datetime(2012, 5, 1), datetime(2012, 8, 1), index, path = dataset_dir)
+                        display_maximum_map(index_data, lat, lon, dates, datetime(2012, 5, 1), datetime(2012, 8, 1), index, globe = globe, path = dataset_dir)
                     else:
                         for datum, name in zip(index_data, index_names):
-                            display_maximum_map(datum, lat, lon, dates, datetime(2012, 5, 1), datetime(2012, 8, 1), name, path = dataset_dir)
+                            display_maximum_map(datum, lat, lon, dates, datetime(2012, 5, 1), datetime(2012, 8, 1), name, globe = globe, path = dataset_dir)
             
             
         
@@ -1077,7 +1270,7 @@ if __name__ == '__main__':
             
             elif method == 'liu':
                 # Collect the required index
-                index = load_nc('soilm', 'soil_moisture.0-40cm.%s.pentad.nc'%args.model, sm = True, path = '%s/Processed_Data/'%dataset_dir)
+                index = load_nc('soilm', 'soil_moisture.%s.%s.pentad.nc'%(level, args.model), sm = True, path = '%s/Processed_Data/'%dataset_dir)
                 lat = index['lat']; lon = index['lon']; dates = index['ymd']
                 
                 # Calculate the FD
@@ -1103,12 +1296,19 @@ if __name__ == '__main__':
             del index
             gc.collect() # Clears deleted variables from memory
             
+            # For global datasets, remove the highly arid grid points
+            if globe == True:
+                fd = apply_mask(fd, ai_mask)
+                
+                
+            fd = fd.astype(np.float32)
+            
             # Write the FD data so that it is available for future use
             write_nc(fd, lat, lon, dates, filename = '%s.%s.pentad.nc'%(method,args.model), VarSName = 'fd', path = '%s/FD_Data/'%dataset_dir)
             
         # Make a FD climatology map?
         if args.fd_climatology:
-            display_fd_climatology(fd, lat, lon, dates, method, model = args.model, path = dataset_dir)
+            display_fd_climatology(fd, lat, lon, dates, method, model = args.model, globe = globe, path = dataset_dir)
             
     
     # Create label data?
@@ -1124,20 +1324,38 @@ if __name__ == '__main__':
         
         # Load the data that will make up the label data
         ch_fd = load_nc('fd', 'christian.%s.pentad.nc'%args.model, path = '%s/FD_Data/'%dataset_dir)
+        if args.model == 'era5':
+                ch_fd['fd'], ch_fd['lat'], ch_fd['lon'], _ = remove_sea(ch_fd['fd'], ch_fd['lat'], ch_fd['lon'], mask)
+                
         nog_fd = load_nc('fd', 'nogeura.%s.pentad.nc'%args.model, path = '%s/FD_Data/'%dataset_dir)
+        if args.model == 'era5':
+                nog_fd['fd'], nog_fd['lat'], nog_fd['lon'], _ = remove_sea(nog_fd['fd'], nog_fd['lat'], nog_fd['lon'], mask)
+                
         pen_fd = load_nc('fd', 'pendergrass.%s.pentad.nc'%args.model, path = '%s/FD_Data/'%dataset_dir)
+        if args.model == 'era5':
+                pen_fd['fd'], pen_fd['lat'], pen_fd['lon'], _ = remove_sea(pen_fd['fd'], pen_fd['lat'], pen_fd['lon'], mask)
+                
         liu_fd = load_nc('fd', 'liu.%s.pentad.nc'%args.model, path = '%s/FD_Data/'%dataset_dir)
+        if args.model == 'era5':
+                liu_fd['fd'], liu_fd['lat'], liu_fd['lon'], _ = remove_sea(liu_fd['fd'], liu_fd['lat'], liu_fd['lon'], mask)
         # li_fd = load_nc('fd', 'li.%s.pentad.nc'%args.model, path = '%s/FD_Data/'%dataset_dir)
+        #if args.model == 'era5':
+        #        li_fd['fd'], li_fd['lat'], li_fd['lon'], _ = remove_sea(li_fd['fd'], li_fd['lat'], li_fd['lon'], mask)
+        
         ot_fd = load_nc('fd', 'otkin.%s.pentad.nc'%args.model, path = '%s/FD_Data/'%dataset_dir)
+        if args.model == 'era5':
+                ot_fd['fd'], ot_fd['lat'], ot_fd['lon'], mask = remove_sea(ot_fd['fd'], ot_fd['lat'], ot_fd['lon'], mask)
         
         print(np.nanmin(ch_fd['fd']), np.nanmax(ch_fd['fd']))
         print(np.nanmin(nog_fd['fd']), np.nanmax(nog_fd['fd']))
         print(np.nanmin(pen_fd['fd']), np.nanmax(pen_fd['fd']))
         print(np.nanmin(liu_fd['fd']), np.nanmax(liu_fd['fd']))
         print(np.nanmin(ot_fd['fd']), np.nanmax(ot_fd['fd']))
+        print(ch_fd['fd'].dtype, nog_fd['fd'].dtype, pen_fd['fd'].dtype, liu_fd['fd'].dtype, ot_fd['fd'].dtype)
         
         # Parse and save the label data into a pickle file
-        parse_data([ch_fd['fd'], nog_fd['fd'], pen_fd['fd'], liu_fd['fd'], ot_fd['fd']], dates, dataset_dir, label_fname)
+        parse_data([ch_fd['fd'], nog_fd['fd'], pen_fd['fd'], liu_fd['fd'], ot_fd['fd']], 
+                    ch_fd['lat'], ch_fd['lon'], dates, dataset_dir, label_fname, args.model, mask)
         
             
             
