@@ -12,3 +12,6 @@
 *.gif
 *.docx
 *.pptx
+*.nc
+*.pkl
+*.ipynb*
