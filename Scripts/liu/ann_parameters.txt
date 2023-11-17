@@ -3,8 +3,8 @@
 --remove_nans
 --normalize
 --ml_model=ann
---class_weight=50
---patience=900
+--class_weight=900
+--patience=100
 --min_delta=0.001
 --batch=8192
 --dropout=0.6
