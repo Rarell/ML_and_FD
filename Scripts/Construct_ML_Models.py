@@ -173,20 +173,20 @@ def generate_model_fname_build(model, ml_model, method, rotation, lat_labels, lo
 ##############################################
 # Functions to load the ML models
 
-def load_single_model(fname, keras):
+def load_single_model(fname, use_keras):
     '''
     Load a single machine learning model
     
     Inputs:
     :param fname: The filename of the model being loaded
-    :param kera: Boolean indicating whether a keras model is being loaded
+    :param use_keras: Boolean indicating whether a keras model is being loaded
     
     Outputs:
     :param model: The machine learning model that was loaded
     '''
     
     # If a keras model is being loaded, use the build-in load function. Else load a pickle file
-    if keras:
+    if use_keras:
         model = keras.models.load_model(fname)
     else:
         with open('%s.pkl'%fname, 'rb') as fn:
@@ -1055,42 +1055,42 @@ def build_cnn_rnn_model(args, shape):
             
             
     # Add recurrent layers
-    #for n, (unit, activation, model_type) in enumerate(zip(args.rnn_units, args.rnn_activation, args.rnn_model)):
-    #    # Add a GRU layer?
-    #    if model_type == 'GRU': # The local bash run did seem to acknowledge the literal 'is' here
-    #        model.add(GRU(unit,
-    #                      activation = activation,
-    #                      use_bias = True,
-    #                      return_sequences = True,
-    #                      kernel_initializer = 'random_uniform',
-    #                      bias_initializer = 'random_uniform',
-    #                      kernel_regularizer = regularizer,
-    #                      dropout = args.dropout,
-    #                      name = 'GRU_layer%d'%(n+1)))
+    for n, (unit, activation, model_type) in enumerate(zip(args.rnn_units, args.rnn_activation, args.rnn_model)):
+       # Add a GRU layer?
+       if model_type == 'GRU': # The local bash run did seem to acknowledge the literal 'is' here
+           model.add(GRU(unit,
+                         activation = activation,
+                         use_bias = True,
+                         return_sequences = True,
+                         kernel_initializer = 'random_uniform',
+                         bias_initializer = 'random_uniform',
+                         kernel_regularizer = regularizer,
+                         dropout = args.dropout,
+                         name = 'GRU_layer%d'%(n+1)))
 
-    #    # Add an LSTM?
-    #    elif model_type == 'LSTM':
-    #        model.add(LSTM(unit,
-    #                       activation = activation,
-    #                       use_bias = True,
-    #                       return_sequences = True,
-    #                       kernel_initializer = 'random_uniform',
-    #                       bias_initializer = 'random_uniform',
-    #                       kernel_regularizer = regularizer,
-    #                       dropout = args.dropout,
-    #                       name = 'LSTM_layer%d'%(n+1)))
+       # Add an LSTM?
+       elif model_type == 'LSTM':
+           model.add(LSTM(unit,
+                          activation = activation,
+                          use_bias = True,
+                          return_sequences = True,
+                          kernel_initializer = 'random_uniform',
+                          bias_initializer = 'random_uniform',
+                          kernel_regularizer = regularizer,
+                          dropout = args.dropout,
+                          name = 'LSTM_layer%d'%(n+1)))
 
-    #    # If another layer is specified, add a simple RNN layer instead
-    #    else:
-    #        model.add(SimpleRNN(unit,
-    #                            activation = activation,
-    #                            use_bias = True,
-    #                            return_sequences = True,
-    #                            kernel_initializer = 'random_uniform',
-    #                            bias_initializer = 'random_uniform',
-    #                            kernel_regularizer = regularizer,
-    #                            dropout = args.dropout,
-    #                            name = 'sRNN_layer%d'%(n+1)))
+       # If another layer is specified, add a simple RNN layer instead
+       else:
+           model.add(SimpleRNN(unit,
+                               activation = activation,
+                               use_bias = True,
+                               return_sequences = True,
+                               kernel_initializer = 'random_uniform',
+                               bias_initializer = 'random_uniform',
+                               kernel_regularizer = regularizer,
+                               dropout = args.dropout,
+                               name = 'sRNN_layer%d'%(n+1)))
     
     # Add dense layers
     for n, unit in enumerate(args.units):

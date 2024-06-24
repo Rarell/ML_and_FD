@@ -44,6 +44,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
 from matplotlib import colorbar as mcolorbar
+from matplotlib.dates import YearLocator, MonthLocator, DateFormatter
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
 import cartopy.mpl.ticker as cticker
@@ -64,22 +65,236 @@ from Calculate_Indices import *
 ##############################################
 
 # Create a function to make climatology maps for FD
-def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', globe = False, path = './Figures', grow_season = False, years = None, months = None):
+def display_fd_climatology(fd, lat, lon, dates, mask, methods, model = 'narr', globe = False, grow_season = False, path = './'):
     '''
-    Display the climatology of flash drought (percentage of years with flash drought)
+    Display different types of FD climatology including frequency (percentage of years with flash drought), number of flash droughts in the dataset,
+    Average percentage of time spent in flash drought, average duration of flash drought, most common onset month, 
+    and average flash drought coveraged/onset month time series and barplot (all this done for multiple flash drought identification methods).
     
     Inputs:
-    :param fd: Input flash drought (FD) data to be plotted, time x lat x lon format
+    :param fd: List of input flash drought (FD) data to be plotted. Each entry in the list is for an FD identification method, and data inside each entry is time x lat x lon format
     :param lat: Gridded latitude values corresponding to data
     :param lon: Gridded longitude values corresponding to data
-    :param dates: Array of datetimes corresponding to the timestamps in fd
-    :param method: String describing the method used to calculate the flash drought
+    :param mask: Land-sea mask for the dataset (1 = land, 0 = sea)
+    :param dates: Array of datetimes corresponding to the timestamps in FD
+    :param methods: List of FD identification methods used to calculate the FD
     :param model: String describing what reanalysis model the data comes from. Used to name the figure
     :param globe: Boolean indicating whether the data is global
-    :param path: Path the figure will be saved to
-    :param grow_season: Boolean indicating whether fd has already been set into growing seasons.
+    :param grow_season: Boolean indicating whether fd has already been set into growing seasons
+    :param path: Path the figures will be saved to
+
+    Outputs:
+    A set of a figures for each type of climatology and for each method will be made and saved
+    '''
+
+    for m, method in enumerate(methods):
+        # Calculate and plot FD frequency climatology
+        filename = '%s_%s_flash_drought_frequency.png'%(model, method)
+        cbar_label = '% of years with Flash Drought'
+        
+        fd_climo = calculate_climatology_frequency(fd[m], lat, dates, grow_season = grow_season)
+        display_climatology_map(fd_climo*100, lat, lon, title = method, cbar_label = cbar_label, globe = globe, 
+                                cmin = -20, cmax = 80, cint = 1, cticks = np.arange(0, 90, 10), new_colorbar = True, path = path, savename = filename)
+
+        # Calculate and plot total number of FDs climatology
+        filename = '%s_%s_flash_drought_number.png'%(model, method)
+        cbar_label = '# of Flash Droughts'
+        
+        fd_climo = calculate_climatology_number(fd[m], lat, dates, grow_season = grow_season)
+        display_climatology_map(fd_climo, lat, lon, title = method, cbar_label = cbar_label, globe = globe, 
+                                cmin = -10, cmax = 50, cint = 1, cticks = np.arange(0, 50+1, 10), new_colorbar = True, path = path, savename = filename)
+
+        # Calculate and plot the average time in FD climatology
+        filename = '%s_%s_flash_drought_time_in_drought.png'%(model, method)
+        cbar_label = '% Time Spent in Flash Drought'
+        
+        fd_climo = calculate_time_in_fd_climatology(fd[m], lat, dates, grow_season = grow_season)
+        display_climatology_map(fd_climo*100, lat, lon, title = method, cbar_label = cbar_label, globe = globe, 
+                                cmin = -0.5, cmax = 5, cint = 0.5, cticks = np.arange(0, 5+1, 1), new_colorbar = False, path = path, savename = filename)
+
+        # Calculate and plot the average FD duration climatology
+        filename = '%s_%s_flash_drought_duration.png'%(model, method)
+        cbar_label = 'Average Duration of Flash Drought (days)'
+        
+        fd_climo = calculate_duration_climatology(fd[m], lat, dates, grow_season = grow_season)
+        display_climatology_map(fd_climo, lat, lon, title = method, cbar_label = cbar_label, globe = globe, 
+                                cmin = 30, cmax = 40, cint = 1, cticks = np.arange(30, 40+1, 1), new_colorbar = False, path = path, savename = filename)
+
+        # Calculate and plot the average onset time climatology
+        filename = '%s_%s_flash_drought_onset_month.png'%(model, method)
+        cbar_label = 'Most Common Onset Month for Flash Drought'
+        
+        fd_climo = calculate_average_onset_time_climatology(fd[m], lat, dates, grow_season = grow_season)
+        display_climatology_map(fd_climo, lat, lon, title = method, cbar_label = cbar_label, globe = globe, 
+                                cmin = 0, cmax = 12, cint = 1, cticks = np.arange(0, 12, 1), new_colorbar = False, cbar_months = True, 
+                                path = path, savename = filename)
+
+        # Give a time series plot of the climatology
+        fd_coverage_time_series(fd[m], dates, mask, lat, grow_season = grow_season, title = method,
+                                path = path, savename_ts = '%s_%s_time_series_climatology.png'%(model, method), 
+                                savename_bar = '%s_%s_barplot_climatology.png'%(model, method))
+
+
+# Function for the FD climatology time series
+def fd_coverage_time_series(fd, dates, mask, lat, grow_season = False, title = 'tmp', years = None, months = None, days = None, 
+                            path = './', savename_ts = 'tmp.png', savename_bar = 'tmp.png'):
+    '''
+    Create a time series showing the average FD coverage in a year, and a bar plot showing the average the how many grid points experience FD onset in each month
+
+    Inputs:
+    :param fd: FD data to be plotted. time x lat x lon format
+    :param dates: Array of datetimes corresponding to the timestamps in fd
+    :param mask: Land-sea mask for the dataset (1 = land, 0 = sea)
+    :param lat: Gridded latitude values corresponding to data
+    :param grow_season: Boolean indicating whether fd has already been set into growing seasons
     :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
     :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
+    :param days: Array of intergers corresponding to the dates.month. If None, it is made from dates
+    :param path: Path the figures will be saved to
+    :param savename_ts: Filename the time series plot will be saved to
+    :param savename_bar: Filename the barplot will be saved to
+
+    Outputs:
+    Two plots of a time series and bar plot will be created and saved
+    '''
+    
+    # Make the years, months, and/or days variables?
+    if years == None:
+        years = np.array([date.year for date in dates])
+        
+    if months == None:
+        months = np.array([date.month for date in dates])
+        
+    if days == None:
+        days = np.array([date.day for date in dates])
+
+
+    # Calculate the average number of rapid intensifications and flash droughts in a year
+    if np.invert(grow_season):
+        fd_grow = collect_grow_seasons(fd, dates, lat[:,0])
+    else:
+        fd_grow = fd
+
+    # Get the data size
+    T, I, J = fd_grow.shape
+    
+    # Reduce years to the size of the growing season (should be the same for both hemispheres)
+    ind = np.where( (months >= 4) & (months <= 10) )[0]
+    dates_grow = dates[ind]
+    years_grow = years[ind]
+    months_grow = months[ind]
+    days_grow = days[ind]
+    
+    # Isolate datetimes for a single year
+    ind = np.where(years_grow == 2001)[0]
+    one_year = dates_grow[ind]
+    year_months = np.array([date.month for date in one_year])
+    
+    # Determine the time series
+    fd_ts = np.nansum(fd_grow.reshape(T, I*J), axis = -1)
+    I_m, J_m = mask.shape # The mask shape may differ from the actual data for the global dataset
+    mask_ts = np.nansum(mask.reshape(I_m*J_m))
+    
+    # Calculate the average and standard deviation of FD coverage for each pentad in a year
+    fd_mean = []
+    fd_std = []
+    fd_sum = []
+    for date in one_year:
+        y_ind = np.where((date.month == months_grow) & (date.day == days_grow))[0]
+        
+        fd_mean.append(np.nanmean(fd_ts[y_ind]))
+        fd_std.append(np.nanstd(fd_ts[y_ind]))
+        fd_sum.append(np.nansum(fd_ts[y_ind]))
+    
+    fd_mean = np.array(fd_mean)
+    fd_std = np.array(fd_std)
+    fd_sum = np.array(fd_sum)
+    
+    # Date format for the tick labels
+    DateFMT = DateFormatter('%b')
+    
+    # Plot the FD coverage
+    fig = plt.figure(figsize = [18, 10])
+    ax = fig.add_subplot(1,1,1)
+    
+    # Plot the data in a time series
+    ax.plot(dates_grow[ind], fd_mean/mask_ts*100, 'b')
+    #ax.fill_between(dates[ind], 100*(fd_mean/mask_ts-fd_std/mask_ts), 100*(fd_mean/mask_ts+fd_std/mask_ts), alpha = 0.5, edgecolor = 'b', facecolor = 'b')
+    
+    # Set the title
+    ax.set_title(title, fontsize = 18)
+    
+    # Set the axis labels
+    ax.set_xlabel('Time', size = 18)
+    ax.set_ylabel('Annual Average Areal Coverage (%)', size = 18)
+    
+    # Set the ticks
+    ax.set_ylim([0, 4.5])
+    ax.xaxis.set_major_formatter(DateFMT)
+
+    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+        i.set_size(18)
+    
+    # Save the figure
+    plt.savefig('%s/%s'%(path, savename_ts), bbox_inches = 'tight')
+    plt.show(block = False)
+    
+    # Determine the average number of grids for each month
+    months_unique = np.unique(months_grow)
+    fd_month_mean = []
+    fd_month_std = []
+    for month in months_unique:
+        y_ind = np.where(month == year_months)[0]
+        fd_month_mean.append(np.nansum(fd_sum[y_ind])/np.nansum(fd_sum)*100)
+        fd_month_std.append(np.nanmean(fd_std[y_ind]))
+
+    # Obtain the labels for each month
+    month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    month_names_grow = []
+    for m, month in enumerate(months_unique):
+        month_names_grow.append(month_names[int(month-1)])
+    
+    
+    # Bar plot of average number of FD in each month
+    fig = plt.figure(figsize = [18, 10])
+    ax = fig.add_subplot(1,1,1)
+    
+    # Make the bar plot
+    ax.bar(months_unique, fd_month_mean, width = 0.8, edgecolor = 'k')#, yerr = fd_month_std)
+    
+    # Set the title
+    ax.set_title(title, fontsize = 18)
+    
+    # Set the axis labels
+    ax.set_xlabel('Time', size = 18)
+    ax.set_ylabel('Percentage of FD Occurance', size = 18)
+    
+    # Set the ticks
+    ax.set_xticks(months_unique, month_names_grow)
+    #ax.xaxis.set_major_formatter(DateFMT)
+
+    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+        i.set_size(18)
+    
+    # Save the figure
+    plt.savefig('%s/%s'%(path, savename_bar), bbox_inches = 'tight')
+    plt.show(block = False)
+
+# Function for the FD frequency climatology
+def calculate_climatology_frequency(fd, lat, dates,  grow_season = False, years = None, months = None):
+    '''
+    Calculate the frequency climatology of flash droughts (percentage of years that experienced flash drought)
+    
+    Inputs:
+    :param fd: flash drought data to be plotted. time x lat x lon format
+    :param lat: Gridded latitude values corresponding to data
+    :param dates: Array of datetimes corresponding to the timestamps in fd
+    :param grow_season: Boolean indicating whether fd has already been set into growing seasons
+    :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
+    :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
+
+    Outputs:
+    :param per_ann_fd: Map containing the number of years that experienced flash drought
     '''
     
     # Make the years, months, and/or days variables?
@@ -99,14 +314,20 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', globe = 
     ann_fd = np.ones((all_years.size, I, J)) * np.nan
     
     # Calculate the average number of rapid intensifications and flash droughts in a year
+    if np.invert(grow_season):
+        fd_grow = collect_grow_seasons(fd, dates, lat[:,0])
+    else:
+        fd_grow = fd
+
+    # Reduce years to the size of the growing season (should be the same for both hemispheres)
+    ind = np.where( (months >= 4) & (months <= 10) )[0]
+    years_grow = years[ind]
+        
     for y in range(all_years.size):
-        if grow_season:
-            y_ind = np.where( (all_years[y] == years) )[0]
-        else:
-            y_ind = np.where( (all_years[y] == years) & ((months >= 4) & (months <= 10)) )[0] # Second set of conditions ensures only growing season values
+        y_ind = np.where( (all_years[y] == years_grow) )[0]
         
         # Calculate the mean number of flash drought for each year    
-        ann_fd[y,:,:] = np.nanmean(fd[y_ind,:,:], axis = 0)
+        ann_fd[y,:,:] = np.nanmean(fd_grow[y_ind,:,:], axis = 0)
         
         # Turn nonzero values to 1 (each year gets 1 count to the total)    
         ann_fd[y,:,:] = np.where(( (ann_fd[y,:,:] == 0) | (np.isnan(ann_fd[y,:,:])) ), 
@@ -120,31 +341,419 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', globe = 
     
     # Turn 0 values into nan
     per_ann_fd = np.where(per_ann_fd != 0, per_ann_fd, np.nan)
-    
-    
 
+    return per_ann_fd
+
+# Function for the FD number climatology
+def calculate_climatology_number(fd, lat, dates, grow_season = False, years = None, months = None):
+    '''
+    Calculate the number of flash droughts experienced in a dataset
+    
+    Inputs:
+    :param fd: flash drought data to be plotted. time x lat x lon format
+    :param lat: Gridded latitude values corresponding to data
+    :param dates: Array of datetimes corresponding to the timestamps in fd
+    :param grow_season: Boolean indicating whether fd has already been set into growing seasons
+    :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
+    :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
+
+    Outputs:
+    :param fd_number: Map containing the number of flash drought for each grid point
+    '''
+    
+    # Make the years, months, and/or days variables?
+    if years == None:
+        years = np.array([date.year for date in dates])
+        
+    if months == None:
+        months = np.array([date.month for date in dates])
+
+        
+    ### Calcualte the climatology ###
+
+    # Initialize variables
+    T, I, J = fd.shape
+    all_years = np.unique(years)
+
+    # Calculate the average number of rapid intensifications and flash droughts in a year
+    if np.invert(grow_season):
+        fd_grow = collect_grow_seasons(fd, dates, lat[:,0])
+    else:
+        fd_grow = fd
+
+    # Reduce years to the size of the growing season (should be the same for both hemispheres)
+    ind = np.where( (months >= 4) & (months <= 10) )[0]
+    dates_grow = dates[ind]
+    
+    # Calculate the number of flash droughts in each year
+    fd_number = np.zeros((I, J)) * np.nan
+
+    for i in range(I):
+        for j in range(J):
+            # Identify the duration of each FD (works to count all unique FDs as well)
+            start_times, end_times = identify_drought_by_time_series(fd_grow[:,i,j], dates, min_time = 0)
+            # Count the FDs
+            n_fd = 0
+            if np.invert(len(start_times) < 1):
+                for start, end in zip(start_times, end_times):
+                    n_fd = n_fd + 1
+
+                # Total number of FD (goes to 50) or average number of droughts per year (goes up to 3)
+                #per_ann_fd[i,j] = n_fd/len(all_years)
+                fd_number[i,j] = n_fd
+            else:
+               fd_number[i,j] = 0
+    
+    
+    # Turn 0 values into nan
+    fd_number = np.where(fd_number != 0, fd_number, np.nan)
+
+    return fd_number
+
+# Function for the timei n FD climatology
+def calculate_time_in_fd_climatology(fd, lat, dates, grow_season = False, years = None, months = None):
+    '''
+    Calculate the average percentage of time spend in flash drought
+
+    Inputs:
+    :param fd: flash drought data to be plotted. time x lat x lon format
+    :param lat: Gridded latitude values corresponding to data
+    :param dates: Array of datetimes corresponding to the timestamps in fd
+    :param grow_season: Boolean indicating whether fd has already been set into growing seasons
+    :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
+    :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
+
+    Outputs:
+    :param fd_time: Map containing the percentage of time spend in flash drought for each grid point
+    '''
+     
+    # Make the years, months, and/or days variables?
+    if years == None:
+        years = np.array([date.year for date in dates])
+        
+    if months == None:
+        months = np.array([date.month for date in dates])
+
+        
+    ### Calcualte the climatology ###
+
+    # Initialize variables
+    T, I, J = fd.shape
+    all_years = np.unique(years)
+
+    # Calculate the average number of rapid intensifications and flash droughts in a year
+    if np.invert(grow_season):
+        fd_grow = collect_grow_seasons(fd, dates, lat[:,0])
+    else:
+        fd_grow = fd
+
+    # Reduce years to the size of the growing season (should be the same for both hemispheres)
+    ind = np.where( (months >= 4) & (months <= 10) )[0]
+    years_grow = years[ind]
+    
+    # Calculate the percentage of time in FD (or the average number of pentads that experienced FD)
+    fd_time = np.nansum(fd_grow, axis = 0)/T
+    
+    # Turn 0 values into nan
+    fd_time = np.where(fd_time != 0, fd_time, np.nan)
+
+    return fd_time
+
+# Function for the FD duration climatology
+def calculate_duration_climatology(fd, lat, dates, grow_season = False, years = None, months = None):
+    '''
+    Calculate the average duration of flash droughts
+
+    Inputs:
+    :param fd: flash drought data to be plotted. time x lat x lon format
+    :param lat: Gridded latitude values corresponding to data
+    :param dates: Array of datetimes corresponding to the timestamps in fd
+    :param grow_season: Boolean indicating whether fd has already been set into growing seasons
+    :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
+    :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
+
+    Outputs:
+    :param fd_duration: Map containing the average duration of flash drought for each grid point
+    '''
+    
+    # Make the years, months, and/or days variables?
+    if years == None:
+        years = np.array([date.year for date in dates])
+        
+    if months == None:
+        months = np.array([date.month for date in dates])
+
+        
+    ### Calcualte the climatology ###
+
+    # Initialize variables
+    T, I, J = fd.shape
+    all_years = np.unique(years)
+
+    # Calculate the average number of rapid intensifications and flash droughts in a year
+    if np.invert(grow_season):
+        fd_grow = collect_grow_seasons(fd, dates, lat[:,0])
+    else:
+        fd_grow = fd
+
+    # Reduce years to the size of the growing season (should be the same for both hemispheres)
+    ind = np.where( (months >= 4) & (months <= 10) )[0]
+    dates_grow = dates[ind]
+    
+    # Calculate the average duration of flash droughts
+    fd_duration = np.zeros((I, J)) * np.nan
+    
+    for i in range(I):
+        for j in range(J):
+            # Determine the start and end time of each flash drought for a grid point
+            start_times, end_times = identify_drought_by_time_series(fd_grow[:,i,j], dates_grow, min_time = 0)
+            duration = []
+            # Determine the duration of the flash droughts (include the intensification period - add 30 days)
+            if np.invert(len(start_times) < 1):
+                for start, end in zip(start_times, end_times):
+                    duration.append((end - start).days + 30)
+
+                # Determine the mean of the durations in the time series
+                fd_duration[i,j] = np.nanmean(duration)
+            else:
+                fd_duration[i,j] = 0
+    
+    # Turn 0 values into nan
+    fd_duration = np.where(fd_duration != 0, fd_duration, np.nan)
+
+    return fd_duration
+
+# Function for the average onset time climatology
+def calculate_average_onset_time_climatology(fd, lat, dates, grow_season = False, years = None, months = None):
+    '''
+    Calculate the average onset month of flash droughts
+
+    Inputs:
+    :param fd: flash drought data to be plotted. time x lat x lon format
+    :param lat: Gridded latitude values corresponding to data
+    :param dates: Array of datetimes corresponding to the timestamps in fd
+    :param grow_season: Boolean indicating whether fd has already been set into growing seasons
+    :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
+    :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
+
+    Outputs:
+    :param onset_map: Map containing the average onset month (1 = Jan, 2 = Feb, ...) flash drought for each grid point
+    '''
+    
+    # Make the years, months, and/or days variables?
+    if years == None:
+        years = np.array([date.year for date in dates])
+        
+    if months == None:
+        months = np.array([date.month for date in dates])
+
+
+    # Initialize variables
+    all_years = np.unique(years)
+
+    # Calculate the average number of rapid intensifications and flash droughts in a year
+    if np.invert(grow_season):
+        fd_grow = collect_grow_seasons(fd, dates, lat[:,0])
+    else:
+        fd_grow = fd
+
+    T, I, J = fd_grow.shape
+    
+    # Reduce years to the size of the growing season (should be the same for both hemispheres)
+    ind = np.where( (months >= 4) & (months <= 10) )[0]
+    months_grow = months[ind]
+
+    fd_months = np.zeros((T, I, J))
+    # Set each flash drought identifier to the month it occurs in
+    for month in np.unique(months_grow):
+        mon_ind = np.where(month == months_grow)[0]
+        fd_months[mon_ind,:,:] = np.where(fd_grow[mon_ind,:,:] == 1, month, fd_months[mon_ind,:,:])
+    
+    # Set 0 values to NaN so they are not counted
+    fd_months[fd_months == 0] = np.nan
+
+    # Calculate the most common onset month
+    onset_map = np.zeros((I, J))
+    for i in range(I):
+        for j in range(J):
+            ind = []
+            for month in np.unique(months_grow):
+                # Determine the length (number) of pentads with FD onset in a given month
+                ind_month = np.where(fd_months[:,i,j] == month)[0]
+                ind.append(len(ind_month))
+
+            # The longest length is the pentad with the most common onset month
+            most_common = np.where(ind == np.nanmax(ind))[0]
+            onset_map[i,j] = np.unique(months_grow)[most_common[0]]
+            # Mode determines the most common value (month) in a vector (time series)
+            #onset_map[i,j] = stats.mode(fd_months[:,i,j], nan_policy = 'omit')[0][0]
+    
+    # Turn 0 values into nan
+    onset_map = np.where(onset_map == 0, np.nan, onset_map)
+
+    return onset_map
+
+# Function to identify unique droughts in a time series and deliver the start and end dates
+def identify_drought_by_time_series(index, dates, min_time = 1):
+    '''
+    Identify drought by a patch of contiuous grid points that falls below a threshold.
+    Returns two lists of datetimes indicating when droughts started in the grid, and when they ended
+    
+    NOTE: This method is NOT perfect; it assumes droughts only last for 1 summer (due to time stamps skipping Nov. - Mar.)
+    and droughts that start in different regions of the grid may get skipped over for the earlier drought in the year.
+    
+    Inputs:
+    :param index: The index used to find the droughts; time x lat x lon shape
+    :param dates: An array of datetimes corresponding to each time stamp in index
+    :param min_time: The minimum number of days that need to be below the threshold to be recorded as drought
+    
+    Outputs:
+    :param start_dates: List of datetimes corresponding to the beginning times of droughts
+    :param end_dates: List of datetimes corresponding to the ending times of droughts
+    '''
+    
+    # Identify the droughts
+    droughts = np.where(index == 1, 1, 0)
+
+    start_time = []
+    end_time = []
+
+    # drought_patch is the minimum area/# of grids that must have drought to register an event
+    # So the sum of drought grid points must be the total area/number of grid points (drought_patch x drought_patch)
+    times = np.where(droughts == 1)[0]
+
+    # Start looking for times when droughts start/end
+    if len(times) >= 2:
+        start = times[0]
+        end = times[-1]
+        start_time.append(start)
+        for t in range(len(times)):
+            ## Exclude start and end points
+            if np.invert(times[t] == end) & np.invert(times[t] == start):
+                # If condition for middle of drought
+                if (times[t-1] == (times[t] - 1)) & (times[t+1] == (times[t] + 1)):
+                    pass
+                # If condition for only 1 point with drought
+                elif np.invert(times[t-1] == (times[t] - 1)) & np.invert(times[t+1] == (times[t] + 1)):
+                    start_time.append(times[t])
+                    end_time.append(times[t])
+                # If conditions for end of drought
+                elif (times[t-1] == (times[t] - 1)) & np.invert(times[t+1] == (times[t] + 1)):
+                    end_time.append(times[t])
+                # If condition for start of drought
+                elif np.invert(times[t-1] == (times[t] - 1)) & (times[t+1] == (times[t] + 1)):
+                    start_time.append(times[t])
+            
+            # If the start or end point is considered
+            else:
+                # Embedded blocks are to avoid indexing errors (using t+1 or t-1 causes an indexing error at t=0 and t=-1
+                
+                # Start point
+                if (times[t] == start):
+                    if np.invert(times[t+1] == (times[t]+1)):
+                        end_time.append(times[t])
+                        
+                # End time
+                if (times[t] == end):
+                    if np.invert(times[t-1] == (times[t] - 1)):
+                        start_time.append(times[t])
+
+            end_time.append(end)
+
+    # If there is only 1 drought found
+    elif len(times) == 1:
+        start_dates = dates[times]
+        end_dates = dates[times]
+        
+        return start_dates, end_dates
+        
+
+    # Loops may find identical start/end times; focus only on unique values
+    start_time = np.unique(start_time)
+    end_time = np.unique(end_time)
+        
+    # Start and end times should now have the same length, and start and end times should align        
+    
+    # Get the datetimes if there are any
+    if len(start_time) < 1:
+        start_dates = np.array([])
+        end_dates = np.array([])
+    else:
+        if start_time[-1] == dates.size:
+            start_time = start_time[:-1]
+            end_time = end_time[:-1]
+        
+        start_days = dates[start_time[:]]
+        end_days = dates[end_time[:]]
+
+        # If the difference between start and end times does not pass the minimum time, remove them
+        min_time = timedelta(days = min_time)
+        start_dates = []
+        end_dates = []
+        for n in range(len(start_days)):
+            difference = end_days[n] - start_days[n]
+            if difference >= min_time:
+                start_dates.append(start_days[n])
+                end_dates.append(end_days[n])
+
+        # Turn the start and end times into numpy arrays
+        start_dates = np.array(start_dates)
+        end_dates = np.array(end_dates)
+    
+    return start_dates, end_dates
+
+# Function to display the FD climatology maps
+def display_climatology_map(data, lat, lon, title = 'tmp', cbar_label = 'tmp', globe = False, 
+                            cmin = -20, cmax = 80, cint = 1, cticks = np.arange(0, 90, 10), new_colorbar = True, cbar_months = False,
+                            path = './', savename = 'tmp.png'):
+    '''
+    Create a map plot of FD climatology
+
+    Inputs:
+    :param data: FD map to be plotted
+    :param lat: Gridded latitude values corresponding to data
+    :param lon: Gridded longitude values corresponding to data
+    :param title: Title of the plot
+    :param globe: Boolean indicating whether the data is global
+    :param cmin, cmax, cint: The minimum, maximum, and interval of the values in the colorbar
+    :param cticks: List or 1D array of the values to make the ticks in the colorbar
+    :param new_colorbar: Boolean indicating whether to make/use a new, adjusted colorbar (separate from the raw one)
+    :param cbar_months: Boolean indicating whether to label the colorbar with months instead of values
+    :param path: Path the figures will be saved to
+    :param savename: Filename of the figure to be saved to
+
+    Outputs:
+    Map of FD climatology will be made and saved
+    '''
     #### Create the Plot ####
     
     # Set colorbar information
-    cmin = -20; cmax = 80; cint = 1
-    clevs = np.arange(-20, cmax + cint, cint)
+    clevs = np.arange(cmin, cmax + cint, cint)
     nlevs = len(clevs)
     cmap  = plt.get_cmap(name = 'hot_r', lut = nlevs)
-    
-    
+
     # Get the normalized color values
-    norm = mcolors.Normalize(vmin = 0, vmax = cmax)
-    
-    # Generate the colors from the orginal color map in range from [0, cmax]
-    colors = cmap(np.linspace(1 - (cmax - 0)/(cmax - cmin), 1, cmap.N))  ### Note, in the event cmin and cmax share the same sign, 1 - (cmax - cmin)/cmax should be used
-    colors[:4,:] = np.array([1., 1., 1., 1.]) # Change the value of 0 to white
-    
-    # Create a new colorbar cut from the colors in range [0, cmax.]
-    ColorMap = mcolors.LinearSegmentedColormap.from_list('cut_hot_r', colors)
-    
-    colorsNew = cmap(np.linspace(0, 1, cmap.N))
-    colorsNew[abs(cmin)-1:abs(cmin)+1, :] = np.array([1., 1., 1., 1.]) # Change the value of 0 in the plotted colormap to white
-    cmap = mcolors.LinearSegmentedColormap.from_list('hot_r', colorsNew)
+    vmin = 0 if cmin < 0 else cmin
+    v = cmin if cmin < 0 else 0
+    norm = mcolors.Normalize(vmin = vmin, vmax = cmax)
+
+    # Create a new/adjust the colorbar?
+    if np.invert(cbar_months):
+        
+        # Generate the colors from the orginal color map in range from [0, cmax]
+        colors = cmap(np.linspace(1 - (cmax - vmin)/(cmax - v), 1, cmap.N))  ### Note, in the event cmin and cmax share the same sign, 1 - (cmax - cmin)/cmax should be used
+        if new_colorbar:
+            colors[:4,:] = np.array([1., 1., 1., 1.]) # Change the value of 0 to white
+        else:
+            colors[:1,:] = np.array([1., 1., 1., 1.]) # Change the value of 0 to white
+        
+        # Create a new colorbar cut from the colors in range [0, cmax.]
+        ColorMap = mcolors.LinearSegmentedColormap.from_list('cut_hot_r', colors)
+        
+        colorsNew = cmap(np.linspace(0, 1, cmap.N))
+        if new_colorbar:
+            colorsNew[abs(cmin)-1:abs(cmin)+1, :] = np.array([1., 1., 1., 1.]) # Change the value of 0 in the plotted colormap to white
+        cmap = mcolors.LinearSegmentedColormap.from_list('hot_r', colorsNew)
     
     # Shapefile information
     # ShapeName = 'Admin_1_states_provinces_lakes_shp'
@@ -176,7 +785,6 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', globe = 
     fig_proj  = ccrs.PlateCarree()
     
     
-    
     # Create the plots
     fig = plt.figure(figsize = [12, 10])
     
@@ -185,7 +793,7 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', globe = 
     ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
     
     # Set the flash drought title
-    ax.set_title('Percent of Years from %s - %s with %s Flash Drought'%(all_years[0], all_years[-1], method), size = 18)
+    ax.set_title(title, size = 14)
     
     # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
     ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
@@ -200,18 +808,18 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', globe = 
     ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
     ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
     
-    ax.set_yticklabels(LatLabel, fontsize = 18)
-    ax.set_xticklabels(LonLabel, fontsize = 18)
+    ax.set_yticklabels(LatLabel, fontsize = 14)
+    ax.set_xticklabels(LonLabel, fontsize = 14)
     
     ax.xaxis.set_major_formatter(LonFormatter)
     ax.yaxis.set_major_formatter(LatFormatter)
     
     # Plot the flash drought data
     if globe:
-        cs = ax.contourf(lon, lat, per_ann_fd*100, levels = 20, vmin = cmin, vmax = cmax,
-                         cmap = cmap, transform = data_proj, zorder = 1)
+        cs = ax.pcolormesh(lon, lat, data, vmin = cmin, vmax = cmax,
+                           cmap = cmap, transform = data_proj, zorder = 1)
     else:
-        cs = ax.pcolormesh(lon, lat, per_ann_fd*100, vmin = cmin, vmax = cmax,
+        cs = ax.pcolormesh(lon, lat, data, vmin = cmin, vmax = cmax,
                            cmap = cmap, transform = data_proj, zorder = 1)
     
     # Set the map extent to the U.S.
@@ -228,21 +836,24 @@ def display_fd_climatology(fd, lat, lon, dates, method, model = 'narr', globe = 
         cbax = fig.add_axes([0.915, 0.29, 0.025, 0.425])
     
     # Create the colorbar
-    cbar = mcolorbar.ColorbarBase(cbax, cmap = ColorMap, norm = norm, orientation = 'vertical')
+    if new_colorbar:
+        cbar = mcolorbar.ColorbarBase(cbax, cmap = ColorMap, norm = norm, orientation = 'vertical')
+    else:
+        cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, norm = norm, orientation = 'vertical')
     
     # Set the colorbar label
-    cbar.ax.set_ylabel('% of years with Flash Drought', fontsize = 18)
+    cbar.ax.set_ylabel(cbar_label, fontsize = 14)
     
     # Set the colorbar ticks
-    cbar.set_ticks(np.arange(0, 90, 10))
-    cbar.ax.set_yticklabels(np.arange(0, 90, 10), fontsize = 16)
-    
-    # Show the figure
-    plt.show(block = False)
+    if cbar_months:
+        cbar.set_ticks([0.5, 1.3, 2.3, 3.15, 4.2, 5.05, 6.0, 6.9, 7.8, 8.75, 9.7, 10.7, 11.6])
+        cbar.ax.set_yticklabels(['No FD', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'], fontsize = 14)
+    else:
+        cbar.set_ticks(cticks)
+        cbar.ax.set_yticklabels(cticks, fontsize = 14)
     
     # Save the figure
-    filename = '%s_%s_flash_drought_climatology.png'%(model, method)
-    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
+    plt.savefig('%s/%s'%(path, savename), bbox_inches = 'tight')
     plt.show(block = False)
 
 
@@ -327,12 +938,13 @@ def create_ai_mask(precip, pet, lat, mask, dates, start_year = 1990, end_year = 
     
     print('Collecting the mask...')
     # Masked grids are highly arid locations (AI < 0.2, and average daily PET < 1 mm day^-1)
-    ai_mask = np.where( ((ai < 0.2) | (pet_daily_mean < 1) | (mask == 0)), 0, 1)
-    
+    ai_mask = np.where( (ai < 0.2) | (mask == 0) | (pet_daily_mean < 1), 0, 1)
+
     # Make sure tropics are not masked
-    ind = np.where((lat >= -10) & (lat <= 10))[0]
+    ind = np.where((lat >= -13) & (lat <= 13))[0]
     ai_mask[ind,:] = 1
     ai_mask[mask == 0] = 0
+    
     
     print('Done')
     return ai_mask
@@ -426,24 +1038,24 @@ def christian_fd(sesr, mask, dates, start_year = 1990, end_year = 2020, years = 
         sesr_filt[:,ij] = signal.savgol_filter(sesr_inter[:,ij], WinLength, PolyOrder)
         
     # Reorder SESR back to 3D data
-    sesr_filt = sesr_filt.reshape(T, I, J, order = 'F')
+    #sesr_filt = sesr_filt.reshape(T, I, J, order = 'F')
 
 
 
     # Determine the change in SESR
     print('Calculating the change in SESR')
-    delta_sesr  = np.ones((T, I, J)) * np.nan
+    delta_sesr  = np.ones((T, I*J)) * np.nan
     
-    delta_sesr[1:,:,:] = sesr_filt[1:,:,:] - sesr_filt[:-1,:,:]
+    delta_sesr[1:,:] = sesr_filt[1:,:] - sesr_filt[:-1,:]
 
     
     # Begin the flash drought calculations
     print('Identifying flash drought')
-    fd = np.ones((T, I, J)) * np.nan
+    fd = np.ones((T, I*J)) * np.nan
 
-    fd = fd.reshape(T, I*J, order = 'F')
-    sesr_filt = sesr_filt.reshape(T, I*J, order = 'F')
-    delta_sesr = delta_sesr.reshape(T, I*J, order = 'F')
+    #fd = fd.reshape(T, I*J, order = 'F')
+    #sesr_filt = sesr_filt.reshape(T, I*J, order = 'F')
+    #delta_sesr = delta_sesr.reshape(T, I*J, order = 'F')
 
     dsesr_percentile = 25
     sesr_percentile  = 20
@@ -1002,7 +1614,7 @@ if __name__ == '__main__':
     
     # Load the land-sea mask?
     if args.mask:
-        mask = load_mask(model = args.model)
+        mask = load_mask(model = args.model, path = args.dataset)
         
         # For global models, add to the mask with the aridity index
         if globe == True:
@@ -1308,7 +1920,7 @@ if __name__ == '__main__':
             
         # Make a FD climatology map?
         if args.fd_climatology:
-            display_fd_climatology(fd, lat, lon, dates, method, model = args.model, globe = globe, path = dataset_dir)
+            display_fd_climatology([fd], lat, lon, dates, mask, [method], model = args.model, globe = globe, path = dataset_dir)
             
     
     # Create label data?
@@ -1355,7 +1967,7 @@ if __name__ == '__main__':
         
         # Parse and save the label data into a pickle file
         parse_data([ch_fd['fd'], nog_fd['fd'], pen_fd['fd'], liu_fd['fd'], ot_fd['fd']], 
-                    ch_fd['lat'], ch_fd['lon'], dates, dataset_dir, label_fname, args.model, mask)
+                    ch_fd['lat'], ch_fd['lon'], dates, dataset_dir, label_fname, args.model, ai_mask_no_sea)
         
             
             

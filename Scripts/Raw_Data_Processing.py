@@ -232,7 +232,7 @@ def load2D_nc(filename, sname, path = './Data/'):
     return x
 
 # Create a function to load in mask data
-def load_mask(model):
+def load_mask(model, path = './Data'):
     '''
     Load in the land-sea mask
     
@@ -245,7 +245,7 @@ def load_mask(model):
     
     # Determine model specific variables
     if model == 'narr':
-        path = './Data/narr'
+        path = '%s/%s'%(path, model)
         filename = 'land.nc'
         sname = 'land'
         
@@ -259,7 +259,7 @@ def load_mask(model):
         LonMax = -65
         
     elif model == 'nldas':
-        path = './Data/nldas'
+        path = '%s/%s'%(path, model)
         filename = 'land.nc'
         sname = 'land'
         
@@ -273,7 +273,7 @@ def load_mask(model):
         LonMax = -65
         
     elif model == 'era5':
-        path = './Data/era5'
+        path = '%s/%s'%(path, model)
         filename = 'land.nc'
         sname = 'lsm'
         
@@ -1154,7 +1154,10 @@ def parse_data(data, lat, lon, dates, path, fname, model, mask, years = None, mo
         data_parsed_south = np.stack(data_parsed_south, axis = -1)
         
         # Concatenate the north and south hemispheric data along the space axis (axis 2)
-        data_parsed = np.concatenate([data_parsed_north, data_parsed_south], axis = 2)
+        data_parsed = np.ones((Nf, int(ind_north.size), I*J, Nfold), dtype = np.float32)*np.nan # This second method ensures the data points go with the correct lat/lon labels
+        data_parsed[:,:,ind_lat_north,:] = data_parsed_north
+        data_parsed[:,:,ind_lat_south,:] = data_parsed_south
+        # data_parsed = np.concatenate([data_parsed_north, data_parsed_south], axis = 2)
 
     # Halve the datasize for easier use
     data_parsed = data_parsed.astype(np.float32)
@@ -1282,10 +1285,10 @@ def remove_sea(data, lat, lon, mask):
     
     # Reshape data to time x space and space vectors
     data = data.reshape(T, I*J, order = 'F')
-    lat = lat.reshape(I*J)
-    lon = lon.reshape(I*J)
+    lat = lat.reshape(I*J, order = 'F')
+    lon = lon.reshape(I*J, order = 'F')
     
-    mask = mask.reshape(I*J)
+    mask = mask.reshape(I*J, order = 'F')
     
     # Find the indices where there are sea
     ind = np.where(mask == 0)[0]
@@ -1307,6 +1310,59 @@ def remove_sea(data, lat, lon, mask):
     
     
     return data, lat, lon, mask
+
+def collect_grow_seasons(data, dates, lat, years = None, months = None):
+    '''
+    Select out the growing season from a 3D dataset.
+
+    Growing season is defined here as April - October for the northern hemisphere, and September - April 4 for the southern hemisphere
+    (April 4 in the southern hemisphere to ensure equal pentad length for both hemispheres)
+
+    Inputs:
+    :param data: Data select the growing seasons for. time x lat x lon format
+    :param dates: Array of datetimes corresponding to the timestamps in data.
+    :param latitude: Latitude of the dataset. 1D array.
+    :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
+    :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
+
+    Outputs:
+    :param data_grow_season: data reduced to just the growing seasons
+    '''
+
+    # Make the years, months, and/or days variables?
+    if years == None:
+        years = np.array([date.year for date in dates])
+        
+    if months == None:
+        months = np.array([date.month for date in dates])
+
+    # Collect the indices for the northern and southern hemispheres
+    ind_north = np.where(lat >= 0)[0]
+    ind_south = np.where(lat < 0)[0]
+
+    # Select data for the northern (and southern if it exists) hemisphere
+    data_north = data[:,ind_north,:]
+    if len(ind_south) >= 1:
+        data_south = data[:,ind_south,:]
+
+    # Determine the indices for the growing season
+    ind_north = np.where( (months >= 4) & (months <= 10) )[0]
+    if len(ind_south) >= 1:
+        ind_south = np.where( (months >= 9) | (months <= 4) )[0]
+        ind_south = ind_south[:len(ind_north)] # Select up to the same number of pentads as ind_north (for concatenating); should be to about April 5 for pentads
+    
+    # Select the data for the growing season
+    data_north = data_north[ind_north,:,:]
+    if len(ind_south) >= 1:
+        data_south = data_south[ind_south,:,:]
+
+    # Concatenate results into one dataset if for nothern and southern hemispheres, otherwise do nothing
+    if len(ind_south) >= 1:
+        data_grow_seasons = np.concatenate([data_north, data_south], axis = 1)
+    else:
+        data_grow_seasons = data_north
+
+    return data_grow_seasons
     
 
 #%%
@@ -1384,7 +1440,7 @@ if __name__ == '__main__':
         feature_fname = 'fd_input_features.pkl'
         
         # Load the land-sea mask
-        mask = load_mask(model = args.model)
+        mask = load_mask(model = args.model, path = dataset_dir)
         
         # Check if output processed file already exists
         if os.path.exists('%s/%s'%(dataset_dir, feature_fname)):
@@ -1408,8 +1464,8 @@ if __name__ == '__main__':
                 
             if args.model == 'era5':
                 # Account for an error that occurred in the initial preprocessing of ERA5 evap data
-                #evap_sname = 'temp'
-                evap_sname = 'evap'
+                evap_sname = 'temp'
+                #evap_sname = 'evap'
             else:
                 evap_sname = 'evap'
             evap = load_nc(evap_sname, 'evaporation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
