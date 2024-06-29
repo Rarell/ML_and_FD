@@ -634,12 +634,13 @@ def sequential_cnn(args):
                      bias_initializer = 'zeros',
                      kernel_regularizer = kernel_regularizer,
                      name = 'Output_CNN'))
-    
-    # This last reshape and dense layer allows the use of sample weights (data shape must be < 3D)
-    model.add(Reshape((args['map_size'][1]*args['map_size'][2], 3), name = 'Output_reshape'))
+
     
     # Add the output layer
     model.add(Dense(units = 3, use_bias = True, name = 'Output', activation = args['output_activation']))
+
+    # This last reshape and dense layer allows the use of sample weights (data shape must be < 3D)
+    model.add(Reshape((args['map_size'][1]*args['map_size'][2], 3), name = 'Output_reshape'))
 
     # Define the optimizer
     # NOTE: In newer versions of TF, the decay parameter is weight_decay
@@ -855,12 +856,13 @@ def model_cnn(args):
                     kernel_regularizer = kernel_regularizer,
                     name = 'Output_Convolution')(tensor)
     
-    # This last reshape and dense layer allows the use of sample weights (data shape must be < 3D)
-    tensor = Reshape((args['map_size'][1]*args['map_size'][2], 3), name = 'Output_reshape')(tensor)
     
     # Add the output layer
     output_tensor = Dense(units = 3, use_bias = True, #bias_initializer = keras.initializers.Constant(-5.0682), # Number comes from  np.log(# pos obs/# total obs)
                           name = 'Output', activation = args['output_activation'])(tensor)
+
+    # This last reshape and dense layer allows the use of sample weights (data shape must be < 3D)
+    output_tensor = Reshape((args['map_size'][1]*args['map_size'][2], 3), name = 'Output_reshape')(output_tensor)
 
     # Create the model
     model = Model(inputs = input_tensor, outputs = output_tensor)
@@ -1350,7 +1352,38 @@ def variational_loss(loss = 'categorical_crossentropy', gamma = 2.0, alpha = 4.0
         return combined_loss
     return combine_loss
         
-
+def cce_sample_weights(sample_weights = None):
+     """
+     Apply the categorical cross entropy loss with arbitrary dimension sample weights.
+     Note the sample weights MUST have the same shape as the model outputs.
+     
+     :Inputs:
+     :param sample_weights: Sample weights to be applied to each input in the loss
+     
+     :Outputs:
+     :param custom_cce: Categorical cross entropy loss function 
+     """
+ 
+     if sample_weights is None:
+         sample_weights = 1.
+     else:
+         sample_weights = tf.convert_to_tensor(sample_weights, tf.float32)
+ 
+         
+     def custom_cce(y_true, y_pred):
+         """
+         Custom categorical cross entropy function that applies sample weights to each value without reshaping the sample weights to 2D.
+         """
+         epsilon = 1e-9
+         y_true = tf.convert_to_tensor(y_true, tf.float32)
+         y_pred = tf.convert_to_tensor(y_pred, tf.float32)
+         
+         model_out = tf.add(y_pred, epsilon)
+         ce = tf.multiply(sample_weights, tf.multiply(y_true, -tf.math.log(model_out)))
+         
+         reduced_ce = tf.reduce_max(ce, axis = 1)
+         return tf.reduce_mean(reduced_ce)
+     return custom_cce
 
 
 ###### Some outdated functions that no longer with the current version of the experiments

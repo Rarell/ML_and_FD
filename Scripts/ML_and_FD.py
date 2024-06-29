@@ -38,6 +38,7 @@ Created on Sat Oct 2 17:52:45 2021
 #   3.4.0 - 6/21/2023 - Added self attention networks, based on the transformer configuration.
 #   3.5.0 - 7/10/2023 - Added CNN-RNN network code.
 #   3.6.0 - 1/20/2024 - Added compatibility with global datasets.
+#   3.7.0 - 6/29/2024 - Fixed U-Nets to run properly.
 #
 # Inputs:
 #   - Data files for FD indicator features, and FD labels (.pkl format)
@@ -65,7 +66,6 @@ Created on Sat Oct 2 17:52:45 2021
 #     this is presumed to be due to the transformers computation requirements)
 #   - Notes on things to fix on lines 2251 and 2351
 #       - FIXES IMPLEMENTED, NEED TO BE TESTED (True also for the new feature importances)
-#   - In merge_results(), something needs to be done so that 70+ GB is not needed for ERA5
 #
 # Notes:
 #   - See tf_environment.yml for a list of all packages and versions. netcdf4 and cartopy must be downloaded seperately.
@@ -472,7 +472,7 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
         try:
             with open('%s.pkl'%model_fname, 'rb') as fn:
                 model = pickle.load(fn)
-        except pickle.UnpicklingError:
+        except pickle.UnpicklingError | (EOFError):
             print('Could not load file: %s. Erasing and retraining it.'%model_fname)
             os.remove('%s.pkl'%model_fname)
             
@@ -840,6 +840,11 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     T, I, J, NV = train_in.shape
     Tt, I, J, NV = valid_in.shape
     Ttot, I, J, NV = data_in.shape
+
+     if args.ml_model.lower() == 'cnn':
+         reshape_method = 'C'
+     else:
+         reshape_method = 'F'
     
     # Normalize data?
     if args.normalize:
@@ -872,25 +877,25 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     
     
     # Reshape output data for training
-    train_out = train_out.reshape(T, I*J, order = 'F')
-    valid_out = valid_out.reshape(Tt, I*J, order = 'F')
-    test_out = test_out.reshape(Tt, I*J, order = 'F')
+    train_out = train_out.reshape(T, I*J, order = reshape_method)
+    valid_out = valid_out.reshape(Tt, I*J, order = reshape_method)
+    test_out = test_out.reshape(Tt, I*J, order = reshape_method)
     
     # Record the loss
     loss = args.loss
         
     # Rearrange data for ANNs so that all time steps and grid points are examples
     if (args.ml_model.lower() == 'ann') | (args.ml_model.lower() == 'artificial_neural_network'):
-        train_in = train_in.reshape(T*I*J, NV, order = 'F')
-        valid_in = valid_in.reshape(Tt*I*J, NV, order = 'F')
-        test_in = test_in.reshape(Tt*I*J, NV, order = 'F')
+        train_in = train_in.reshape(T*I*J, NV, order = reshape_method)
+        valid_in = valid_in.reshape(Tt*I*J, NV, order = reshape_method)
+        test_in = test_in.reshape(Tt*I*J, NV, order = reshape_method)
 
-        train_out = train_out.reshape(T*I*J, order = 'F')
-        valid_out = valid_out.reshape(Tt*I*J, order = 'F')
-        test_out = test_out.reshape(Tt*I*J, order = 'F')
+        train_out = train_out.reshape(T*I*J, order = reshape_method)
+        valid_out = valid_out.reshape(Tt*I*J, order = reshape_method)
+        test_out = test_out.reshape(Tt*I*J, order = reshape_method)
         
-        data_in = data_in.reshape(Ttot*I*J, NV, order = 'F')
-        data_out = data_out.reshape(Ttot*I*J, order = 'F')
+        data_in = data_in.reshape(Ttot*I*J, NV, order = reshape_method)
+        data_out = data_out.reshape(Ttot*I*J, order = reshape_method)
         
         print(data_in.shape)
         print(valid_in.shape)
@@ -908,9 +913,9 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         
     # Rearrange data for RNNs and transformers so that all grid points are examples, and they are recurrsive along the time axis
     elif (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network') | (args.ml_model.lower() == 'cnn-rnn'): #| (args.ml_model.lower() == 'attention') | (args.ml_model.lower() == 'transformer'):
-        train_in = train_in.reshape(T, I*J, NV, order = 'F')
-        valid_in = valid_in.reshape(Tt, I*J, NV, order = 'F')
-        test_in = test_in.reshape(Tt, I*J, NV, order = 'F')
+        train_in = train_in.reshape(T, I*J, NV, order = reshape_method)
+        valid_in = valid_in.reshape(Tt, I*J, NV, order = reshape_method)
+        test_in = test_in.reshape(Tt, I*J, NV, order = reshape_method)
 
         # For RNNs, move the time axis (first) to the second, so that it is trained along the time axis, and each grid is an example
         train_in = np.moveaxis(train_in, 0, 1)
@@ -921,8 +926,8 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         valid_out = np.moveaxis(valid_out, 0, 1)
         test_out = np.moveaxis(test_out, 0, 1)
         
-        data_in = data_in.reshape(Ttot, I*J, NV, order = 'F')
-        data_out = data_out.reshape(Ttot, I*J, order = 'F')
+        data_in = data_in.reshape(Ttot, I*J, NV, order = reshape_method)
+        data_out = data_out.reshape(Ttot, I*J, order = reshape_method)
         
         data_in = np.moveaxis(data_in, 0, 1)
         data_out = np.moveaxis(data_out, 0, 1)
@@ -954,12 +959,12 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
 
     # Reshape gives weights the same shape as the model output
     weight_shape = []
-    for ws in train_out.shape:
+    for ws in weights.shape:
         weight_shape.append(ws)
         
     weight_shape.append(1)
     
-    weights = weights.reshape(weight_shape, order = 'F')
+    weights = weights.reshape(weight_shape, order = reshape_method)
 
     
     # Define the labels in the case of binary or categorical cross-entropy losses
@@ -1123,29 +1128,29 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     
     # Reshape the 2D data back into 3D
     if (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
-        results['train_predict'] = results['train_predict'].reshape(I, J, Ttot, order = 'F')
-        results['valid_predict'] = results['valid_predict'].reshape(I, J, Tt, order = 'F')
-        results['test_predict'] = results['test_predict'].reshape(I, J, Tt, order = 'F')
+        results['train_predict'] = results['train_predict'].reshape(I, J, Ttot, order = reshape_method)
+        results['valid_predict'] = results['valid_predict'].reshape(I, J, Tt, order = reshape_method)
+        results['test_predict'] = results['test_predict'].reshape(I, J, Tt, order = reshape_method)
         
         # For RNNs, the time axis needs to be moved back to the first axis for consistency with other models
         results['train_predict'] = np.moveaxis(results['train_predict'], 2, 0)
         results['valid_predict'] = np.moveaxis(results['valid_predict'], 2, 0)
         results['test_predict'] = np.moveaxis(results['test_predict'], 2, 0)
     else:
-        results['train_predict'] = results['train_predict'].reshape(Ttot, I ,J, order = 'F')
-        results['valid_predict'] = results['valid_predict'].reshape(Tt, I ,J, order = 'F')
-        results['test_predict'] = results['test_predict'].reshape(Tt, I ,J, order = 'F')
+        results['train_predict'] = results['train_predict'].reshape(Ttot, I ,J, order = reshape_method)
+        results['valid_predict'] = results['valid_predict'].reshape(Tt, I ,J, order = reshape_method)
+        results['test_predict'] = results['test_predict'].reshape(Tt, I ,J, order = reshape_method)
     
     # Evaluate the model for each grid point?
     if evaluate_each_grid:
         
         # Reshape output data back into 3D for mapping evaluation
         if (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
-            train_out = np.squeeze(train_out.reshape(I, J, T, order = 'F'))
-            valid_out = np.squeeze(valid_out.reshape(I, J, Tt,  order = 'F'))
-            test_out = np.squeeze(test_out.reshape(I, J, Tt, order = 'F'))
+            train_out = np.squeeze(train_out.reshape(I, J, T, order = reshape_method))
+            valid_out = np.squeeze(valid_out.reshape(I, J, Tt,  order = reshape_method))
+            test_out = np.squeeze(test_out.reshape(I, J, Tt, order = reshape_method))
             
-            data_out = data_out.reshape(I, J, Ttot, order = 'F')
+            data_out = data_out.reshape(I, J, Ttot, order = reshape_method)
             
             # For RNNs, the time axis needs to be moved back to the first axis for consistency with other models
             train_out = np.moveaxis(train_out, 2, 0)
@@ -1154,11 +1159,11 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
             
             data_out = np.moveaxis(data_out, 2, 0)
         else:
-            train_out = np.squeeze(train_out.reshape(T, I, J, order = 'F'))
-            valid_out = np.squeeze(valid_out.reshape(Tt, I, J,  order = 'F'))
-            test_out = np.squeeze(test_out.reshape(Tt, I, J, order = 'F'))
+            train_out = np.squeeze(train_out.reshape(T, I, J, order = reshape_method))
+            valid_out = np.squeeze(valid_out.reshape(Tt, I, J,  order = reshape_method))
+            test_out = np.squeeze(test_out.reshape(Tt, I, J, order = reshape_method))
             
-            data_out = data_out.reshape(Ttot, I, J, order = 'F')
+            data_out = data_out.reshape(Ttot, I, J, order = reshape_method)
         
         # Initialize the gridded metrics
         eval_train_map = np.zeros((I, J, len(args.metrics))) * np.nan
