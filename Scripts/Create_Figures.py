@@ -2349,12 +2349,15 @@ def composite_difference(x, y, N = 5000):
     print('Calculating the significance of the composite mean difference')
     
     # Initialize the index
-    ind = np.random.randint(0, I*J, (N, I*J))
+    random_state = np.random.RandomState()
+    ind = np.arange(I*J)
+    # ind = np.random.randint(0, I*J, (N, I*J))
     
     comp_diff_mc = np.ones((I*J, N)) * np.nan
     
     # Calculate the composite mean difference N times with randomized data
-    for n, ij in enumerate(ind):
+    for n in range(N):
+        ij = random_state.choice(ind, size = I*J, replace = False)
         comp_diff_mc[:,n] = y_comp - x_comp[ij]
     
     # Calculate the p-value
