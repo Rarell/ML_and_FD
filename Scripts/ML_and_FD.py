@@ -2026,8 +2026,8 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
                 
                 
 
-        # if args.keras:
-        #    lc.append(result['history'])
+        if args.keras:
+           lc.append(result['history'])
     
     results = {}
     # Model coordinates
@@ -2125,21 +2125,21 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
 
     # Merge learning curves
     ### ADD SPIGGATI LEARNING CURVES
-    # if args.keras:
-    #     learn_curves = {}
-    #     learn_curves_var = {}
-    #     for key in lc[0].keys():
-    #         tmp = np.zeros((NFolds, args.epochs)) * np.nan
-    #         for n, curve in enumerate(lc):
-    #             n_epochs = len(curve[key])
+    if args.keras:
+        learn_curves = {}
+        learn_curves_var = {}
+        for key in lc[0].keys():
+            tmp = np.zeros((NFolds, args.epochs)) * np.nan
+            for n, curve in enumerate(lc):
+                n_epochs = len(curve[key])
 
-    #             tmp[n,:n_epochs] = curve[key]
+                tmp[n,:n_epochs] = curve[key]
                
-    #         learn_curves[key] = np.nanmean(tmp, axis = 0)
-    #         learn_curves_var[key] = np.nanstd(tmp, axis = 0)
+            learn_curves[key] = np.nanmean(tmp, axis = 0)
+            learn_curves_var[key] = np.nanstd(tmp, axis = 0)
            
-    #     results['history'] = learn_curves
-    #     results['history_var'] = learn_curves_var
+        results['history'] = learn_curves
+        results['history_var'] = learn_curves_var
         
         
     # Potentially halve some of the datasize
@@ -2409,13 +2409,13 @@ if __name__ == '__main__':
         # gc.collect()
 
         ### This method is better (predictions and outputs have similiar shapes)
-        ############################################# Make output labels conform to the same grid
         with open("%s/%s"%(dataset_dir, args.output_data_fname), "rb") as fp:
            fd = pickle.load(fp)
            Nfold  = fd.shape[-1]
            fd = np.concatenate([fd[:,:,:,fold] for fold in range(Nfold)], axis = 1)
            fd[np.isnan(fd)] = 0
            for m, method in enumerate(methods):
+               # Make output labels conform to the same grid
                true_fd.append(fd[m,:,:].reshape(T*Nfolds, I_data, J_data, order = 'F'))
                 
                 
@@ -2684,10 +2684,10 @@ if __name__ == '__main__':
 
         # Plot the learning curve?
         ##### ADD SPAGGATTI LEARNING CURVES
-        #if args.keras:
-        #    for m, method in enumerate(methods):
-        #        display_learning_curve(results[m]['history'], results[m]['history_var'], ['loss', 'categorical_accuracy'], 
-        #                               False, args.ra_model, method, path = dataset_dir)
+        if args.keras:
+           for m, method in enumerate(methods):
+               display_learning_curve(results[m]['history'], results[m]['history_var'], ['loss', 'categorical_accuracy'], 
+                                      False, args.ra_model, method, path = dataset_dir)
 
 
         # Make predictions?
