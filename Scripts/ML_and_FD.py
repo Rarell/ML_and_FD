@@ -841,10 +841,10 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     Tt, I, J, NV = valid_in.shape
     Ttot, I, J, NV = data_in.shape
 
-     if args.ml_model.lower() == 'cnn':
-         reshape_method = 'C'
-     else:
-         reshape_method = 'F'
+    if args.ml_model.lower() == 'cnn':
+        reshape_method = 'C'
+    else:
+        reshape_method = 'F'
     
     # Normalize data?
     if args.normalize:
@@ -2587,7 +2587,7 @@ if __name__ == '__main__':
                     
                     data_ts[y,:,n] = np.array([np.nan if valid_test[m] else sklearn.metrics.roc_auc_score(true_fd[m][ind,:,:].flatten(), pred[m].flatten()) for m in range(len(methods))])
                     
-        pred = [results[m]['test_predict'][:,:,:] for m in range(len(methods))]
+        pred = [results[m]['test_predict'][:,:,:] for m in range(len(methods))]        
         for m in range(len(methods)):
             pred[m][np.isnan(pred[m])] = 0
             valid_test = (np.nansum(pred[m] < 0.5) == 0) | (np.nansum(pred[m] < 0.5) == pred[m].size)
@@ -2887,10 +2887,231 @@ if __name__ == '__main__':
                 # Plot the climatology map with only the test predictions (to see how the model generalizes to data it has not seen)
                 display_fd_climatology(pred_test, lat, lon, dates_grow, mask, methods, globe = args.globe,
                                         model = '%s_%s_test_set'%(args.label, args.ra_model), path = dataset_dir, grow_season = True)
+                    
                                         
                                            
             # Make the predictions and plot the results for each method individually
             for m, method in enumerate(methods):
+
+                # Plot the average FD coverage per month?
+                if args.climatology_plot & np.invert(args.globe):
+                    fd_coverage_barplots([true_fd[m], pred_test[m]], dates_grow, mask, ['True label' ,'Prediction'], grow_season = True, 
+                                         path = dataset_dir, savename_bar = '%s_%s_bar_plots.png'%(args.ml_model, method))
+                    
+                # Plot the time series, seasonality for each FD prone region in the globe and globe FD frequency with areas prone to FD boxes?
+                elif args.climatology_plot & args.globe:
+
+                    # Determine the regions
+                    # Format: 0: min lat, 1: max lat, 2: min lon, 3: max lon
+                    bounds  = [[33.0, 42.0, -98.5+360,-85.0+360],    # Central United States
+                               [-22.5, -5, -53+360,-39+360],         # Brazil
+                               [7, 12.5, 5,40],                      # Sahel
+                               [-20, -1, 30, 39.5],                  # Great Rift Valley
+                               [8,27.5, 74,86],                      # India
+                               [-18.5, -13.5, 124, 143.5],           # Northern Australia
+                               [16.5, 23.5, -104.5+360, -94.5+360],  # Mexico
+                               [-10.5, 0.0, -71.5+360, -57.0+360],   # Central Amazon
+                               [-39.0, -30.5, -66.5+360, -58.0+360], # Argentina
+                               [36, 44, -10+360, -0.01+360],         # Iberian Peninsula
+                               [45, 55, 38, 48],                     # Western Russia
+                               [40.5, 49, 116, 127],                 # Northeastern China
+                               [35.5, 41.5, 27.5, 48],               # Asia Minor
+                               [11.0, 18.0, 98, 109.5],              # Indochinese Peninsula
+                               [-36.5, -30.5, 142.5, 149.5]]         # Southeast Australia
+                    regions = [['Central US'], 
+                               ['Brazil'], 
+                               ['Sahel'], 
+                               ['Great Rift Valley'], 
+                               ['India'], 
+                               ['Northern Australia'], 
+                               ['Mexico'], 
+                               ['Central Amazon'], 
+                               ['Argentina'], 
+                               ['Iberian Peninsula'], 
+                               ['Western Russia'], 
+                               ['Northeastern China'], 
+                               ['Asia Minor'], 
+                               ['Indochinese Peninsula'], 
+                               ['Southeast Australia']]
+
+                    mask_globe = mask.reshape(1, I, J, order = 'F')
+
+                    # Determine the  time series
+                    months_years = np.array([datetime(date.year, date.month, 1) for date in dates_grow])
+                    
+                    for region, bound in zip(regions, bounds):
+                        # Subset to the region
+                        pred_sub, lat_sub, lon_sub = subset_data(pred_test[m], lat, lon, 
+                                                                 LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+                        # pred_rnn_sub, lat_sub, lon_sub = subset_data(pred_rnn, lat, lon, 
+                        #                                              LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+                        true_fd_sub, _, _ = subset_data(true_fd[m], lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+                        mask_sub, _, _ = subset_data(mask_globe, lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+                        T, I_s, J_s = pred_sub.shape
+
+                        # Total number of land grids
+                        total_land = np.nansum(mask_sub.reshape(I_s, J_s, order = 'F'))
+
+                        # Total number of FD grid
+                        tmp_pred = np.nansum(pred_sub.reshape(T, I_s*J_s), axis = -1)
+                        # tmp_pred_rnn = np.nansum(pred_rnn_sub.reshape(T, I_s*J_s), axis = -1)
+                    
+                        pred_area = []
+                        pred_area_var = []
+                
+                        # pred_area_rnn = []
+                        # pred_area_var_rnn = []
+                        
+                        pred_tmp = []
+                        # pred_rnn_tmp = []
+                        
+                        # Determine the true areal coverage
+                        tmp_true = np.nansum(true_fd_sub.reshape(T, I_s*J_s), axis = -1)
+                        total_land = np.nansum(mask_sub)
+                    
+                        true_area = []
+                        true_area_var = []
+                    
+                        true_tmp = []
+                    
+                        for d, date in enumerate(np.unique(months_years)):
+                            # Index for the current month and year
+                            ind = np.where((date.month == months_grow) & (date.year == years_grow))[0]
+
+                            # Get all grids with FD for the current month and year
+                            pred_tmp.append(np.nansum(tmp_pred[ind]))
+                            # pred_rnn_tmp.append(np.nansum(tmp_pred_rnn[ind]))
+                            true_tmp.append(np.nansum(tmp_true[ind]))
+                            
+                        pred_tmp = np.array(pred_tmp)
+                        # pred_rnn_tmp = np.array(pred_rnn_tmp)
+                        true_tmp = np.array(true_tmp)
+                    
+                        years_unique = np.array([date.year for date in np.unique(months_years)])
+
+                        # Determine the average FD coverage per year
+                        for year in np.unique(years):
+                            ind = np.where(year == years_unique)[0]
+                    
+                            pred_area.append(np.nanmean(pred_tmp[ind])/total_land)
+                            # pred_area_var.append(np.nanstd(tmp_pred[ind])/total_land)
+                
+                            # pred_area_rnn.append(np.nanmean(pred_rnn_tmp[ind])/total_land)
+                            # pred_area_var_rnn.append(np.nanstd(tmp_pred_rnn[ind])/total_land)
+                    
+                            true_area.append(np.nanmean(true_tmp[ind])/total_land)
+                            # true_area_var.append(np.nanstd(tmp_true[ind])/total_land)
+                            
+                        # Turn the time series into arrays
+                        pred_area = np.array(pred_area)
+                        pred_area_var = np.array(pred_area_var)
+                
+                        # pred_area_rnn = np.array(pred_area_rnn)
+                        # pred_area_var_rnn = np.array(pred_area_var_rnn)
+                    
+                        true_area = np.array(true_area)
+                        true_area_var = np.array(true_area_var)
+
+                        display_time_series_shading(true_area*100, pred_area*100, true_area_var*100, pred_area_var*100, 
+                                                    dates_grow[::43], r'Areal Coverage (%)', args.ra_model, region[0], path = dataset_dir)
+
+                    # Determine the seasonality for each region
+                    for region, bound in zip(regions, bounds):
+                        # Subset for the region
+                        pred_sub, lat_sub, lon_sub = subset_data(pred_test[m], lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+                        # pred_rnn_sub, lat_sub, lon_sub = subset_data(pred_rnn, lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+                        true_fd_sub, _, _ = subset_data(true_fd[m], lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+                        mask_sub, _, _ = subset_data(mask_globe, lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+                        T, I_s, J_s = pred_sub.shape
+
+                        # Total number of land grids
+                        total_land = np.nansum(mask_sub.reshape(I_s, J_s, order = 'F'))
+
+                         # Total number of FD grid
+                        tmp_pred = np.nansum(pred_sub.reshape(T, I_s*J_s), axis = -1)
+                    
+                        pred_area = []
+                        pred_area_var = []
+                        
+                        pred_tmp = []
+                        # pred_rnn_tmp = []
+                        
+                        # Determine the true areal coverage
+                        tmp_true = np.nansum(true_fd_sub.reshape(T, I_s*J_s), axis = -1)
+                        total_land = np.nansum(mask_sub)
+                    
+                        true_area = []
+                        true_area_var = []
+                    
+                        # pred_area_rnn = []
+                        # pred_area_var_rnn = []
+                    
+                        true_tmp = []
+
+                        # Determine the total FD grids for each month
+                        for d, date in enumerate(np.unique(months_years)):
+                            # Index for the current month and year
+                            ind = np.where((date.month == months) & (date.year == years))[0]
+
+                            # Get all grids with FD for the current month and year
+                            pred_tmp.append(np.nansum(tmp_pred[ind]))
+                            # pred_rnn_tmp.append(np.nansum(tmp_pred_rnn[ind]))
+                            true_tmp.append(np.nansum(tmp_true[ind]))
+                            
+                        pred_tmp = np.array(pred_tmp)
+                        # pred_rnn_tmp = np.array(pred_rnn_tmp)
+                        true_tmp = np.array(true_tmp)
+                    
+                        months_unique = np.array([date.month for date in np.unique(months_years)])
+
+                        # Determine the average FD coverage for a given month
+                        for month in np.unique(months):
+                            ind = np.where(month == months_unique)[0]
+                    
+                            pred_area.append(np.nanmean(pred_tmp[ind])/total_land)
+                            # pred_area_var.append(np.nanstd(tmp_pred[ind])/total_land)
+                    
+                            # pred_area_rnn.append(np.nanmean(pred_rnn_tmp[ind])/total_land)
+                            # pred_area_var_rnn.append(np.nanstd(tmp_pred_rnn[ind])/total_land)
+                    
+                            true_area.append(np.nanmean(true_tmp[ind])/total_land)
+                            # true_area_var.append(np.nanstd(tmp_true[ind])/total_land)
+                    
+                        pred_area = np.array(pred_area)
+                        pred_area_var = np.array(pred_area_var)
+                    
+                        # pred_area_rnn = np.array(pred_area_rnn)
+                        # pred_area_var_rnn = np.array(pred_area_var_rnn)
+                    
+                        true_area = np.array(true_area)
+                        true_area_var = np.array(true_area_var)
+                    
+                        print(np.unique(months))
+                        print(true_area)
+
+                        # Adjust the months if in the Southern Hemisphere
+                        if bound[0] < 0:
+                            months_unique = np.unique(months) + 6
+                            for mon in range(months_unique.size):
+                                if months_unique[mon] > 12:
+                                    months_unique[mon] = months_unique[m] - 12
+                        else:
+                            months_unique = np.unique(months)
+                        
+                        display_time_series_shading(true_area*100, pred_area*100, true_area_var*100, pred_area_var*100, months_unique, 
+                                            r'Areal Coverage (%)', args.ra_model, region[0], one_year = True, path = dataset_dir)
+
+                    # Make the FD frequency climatology with boxes over the FD prone regions
+                    # File names
+                    filename = '%s_%s_flash_drought_frequency.png'%(args.ra_model, method)
+                    cbar_label = '% of years with Flash Drought'
+                    fd_climo = calculate_climatology_frequency(pred_test[m], lat[:,0], dates_grow, grow_season = True)
+
+                    # Create the map
+                    display_climatology_map_with_boxes(fd_climo*100, lat, lon, bounds, title = method, cbar_label = cbar_label, globe = args.globe, 
+                                                       cmin = -20, cmax = 80, cint = 1, cticks = np.arange(0, 90, 10), new_colorbar = True, 
+                                                       path = path, savename = filename)
+                    
 
                 # Plot the threat scores?
                 if args.confusion_matrix_plots:

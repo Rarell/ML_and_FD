@@ -36,6 +36,7 @@ import pickle
 import numpy as np
 import matplotlib.pyplot as plt
 import matplotlib.colors as mcolors
+import matplotlib.patches as mpatches
 from matplotlib import colorbar as mcolorbar
 import cartopy.crs as ccrs
 import cartopy.feature as cfeature
@@ -870,8 +871,392 @@ def display_time_series(data_true, data_pred, data_true_var, data_pred_var, time
     filename = '%s_%s_time_series.png'%(var_name, label)
     plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
     plt.show(block = False)
+
+#%%
+##############################################
+# Function to create time series for FD prone regions across the globe
+def display_time_series_shading(data_true, data_pred, data_true_var, data_pred_var, time, var_name, model, label, one_year = False, path = './Figures'):
+    '''
+    Display a time series for a set of prediction and true data
+    
+    Inputs:
+    :param data_true: The data of true values whose time series will be plotted
+    :param data_pred: The data of predicted values whose time series will be plotted
+    :param data_true_var: The variation of the true values
+    :param data_pred_var: The variation of the predicted values
+    :param time: The datetimes corresponding to each entry in data_true/data_pred
+    :param var_name: The name of the variable whose time series is being plotted
+    :param metric: The name of the metric being plotted
+    :param model: The name of the reanalysis model the data is based on
+    :param label: A label used to distinguish the experiment
+    :param path: Path from the current directory to the directory the maps will be saved to
+    '''
+
+    labels = ['Ada Predicted Labels', 'RNN Predicted Labels']
+    colors = ['b', 'k']
+    plot_type = 'long_term_ts'
+
+    # Create 1 year of datetimes?
+    if one_year:
+        year = 1998
+        tmp = []
+        for month in time:
+            tmp.append(datetime(year, month, 1))
+            if month == 12:
+                year = year + 1
+
+        time = np.array(tmp)
+        plot_type = 'seasonality'
+                
+    
+    # Create the plot
+    fig, ax = plt.subplots(figsize = [12, 8])
+    
+    # Set the title
+    ax.set_title(label, fontsize = 26)
+    
+    # Make the plots color = 'r', linestyle = '-', linewidth = 1, label = 'True values'
+    ax.plot(time, data_true, 'r-', linewidth = 1.5, label = 'True Values')
+    if type(data_pred) is list:
+        for data, data_label, color in zip(data_pred, labels, colors):
+            ax.plot(time, data, color = color, linestyle = '-.', linewidth = 1.5, label = data_label)
+    else:
+        ax.plot(time, data_pred, 'b-.', linewidth = 1.5, label = 'Predicted Values')
+    #ax.fill_between(time, data_true-data_true_var, data_true+data_true_var, alpha = 0.4, edgecolor = 'r', facecolor = 'r')
+    #ax.fill_between(time, data_pred-data_pred_var, data_pred+data_pred_var, alpha = 0.4, edgecolor = 'b', facecolor = 'b')
+    # ax.errorbar(time, data_true, yerr = data_true_var, capsize = 3, errorevery = 3*N, 
+    #             color = 'r', linestyle = '-', linewidth = 1.5, label = 'True values')
+    # ax.errorbar(time, data_pred, yerr = data_pred_var,  capsize = 3, errorevery = 3*N, 
+    #             color = 'b', linestyle = '-.', linewidth = 1.5, label = 'Predicted values')
+    
+    # Make a legend
+    ax.legend(loc = 'upper right', fontsize = 26)
+    
+    # Set the labels
+    ax.set_ylabel(var_name, fontsize = 26)
+    ax.set_xlabel('Time', fontsize = 26)
+
+    if one_year:
+        ax.set_ylim([0, 60])
+    else:
+        ax.set_ylim([0, 80])
+    
+    # Set the ticks
+    if one_year:
+        pass
+        ax.xaxis.set_major_formatter(DateFormatter('%b'))
+    else:
+        ax.xaxis.set_major_formatter(DateFormatter('%Y'))
+    
+    # Set the tick sizes
+    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+        i.set_size(26)
+        
+    # Save the figure
+    filename = '%s_%s_time_series_shading.png'%(plot_type, label)
+    plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
+    plt.show(block = False)
+
+
+#%%
+##############################################
+# Function to create barplots of FD coverage for every month
+def fd_coverage_barplots(fd, dates, mask, labels, grow_season = False, years = None, months = None, days = None, path = './', savename_bar = 'tmp.png'):
+    '''
+    Create a time series showing the average FD coverage in a year, and a bar plot showing the average the how many grid points experience FD onset in each month
+
+    Inputs:
+    :param fd: FD data to be plotted. time x lat x lon format
+    :param dates: Array of datetimes corresponding to the timestamps in fd
+    :param mask: Land-sea mask for the dataset (1 = land, 0 = sea)
+    :param lat: Gridded latitude values corresponding to data
+    :param grow_season: Boolean indicating whether fd has already been set into growing seasons
+    :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
+    :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
+    :param days: Array of intergers corresponding to the dates.month. If None, it is made from dates
+    :param path: Path the figures will be saved to
+    :param savename_ts: Filename the time series plot will be saved to
+    :param savename_bar: Filename the barplot will be saved to
+
+    Outputs:
+    Two plots of a time series and bar plot will be created and saved
+    '''
+    
+    # Make the years, months, and/or days variables?
+    if years == None:
+        years = np.array([date.year for date in dates])
+        
+    if months == None:
+        months = np.array([date.month for date in dates])
+        
+    if days == None:
+        days = np.array([date.day for date in dates])
+
+    # Reduce years to the size of the growing season (should be the same for both hemispheres)
+    ind = np.where( (months >= 4) & (months <= 10) )[0]
+    dates_grow = dates[ind]
+    years_grow = years[ind]
+    months_grow = months[ind]
+    days_grow = days[ind]
+
+    # Isolate datetimes for a single year
+    ind = np.where(years_grow == 2001)[0]
+    one_year = dates_grow[ind]
+    year_months = np.array([date.month for date in one_year])
+
+    # Date format for the tick labels
+    DateFMT = DateFormatter('%b')
+
+    fd_list = []
+    
+    # Calculate the average number of rapid intensifications and flash droughts in a year
+    for flash_drought in fd:
+
+        # Get the data size
+        T, I, J = flash_drought.shape
+        
+        # Determine the time series
+        fd_ts = np.nansum(flash_drought.reshape(T, I*J), axis = -1)
+        mask_ts = np.nansum(mask)
+        
+        # Calculate the average and standard deviation of FD coverage for each pentad in a year
+        fd_mean = []
+        fd_std = []
+        for date in one_year:
+            y_ind = np.where((date.month == months_grow) & (date.day == days_grow))[0]
+            
+            fd_mean.append(np.nansum(fd_ts[y_ind]))
+            fd_std.append(np.nanstd(fd_ts[y_ind]))
+        
+        fd_mean = np.array(fd_mean)
+        fd_std = np.array(fd_std)
+    
+        # Determine the average number of grids for each month
+        months_unique = np.unique(months_grow)
+        fd_month_mean = []
+        fd_month_std = []
+        for month in months_unique:
+            y_ind = np.where(month == year_months)[0]
+            fd_month_mean.append(np.nansum(fd_mean[y_ind])/np.nansum(fd_mean))
+            fd_month_std.append(np.nanmean(fd_std[y_ind]))
+
+        fd_list.append(fd_month_mean)
+
+    # Obtain the labels for each month
+    month_names = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+    month_names_grow = []
+    for m, month in enumerate(months_unique):
+        month_names_grow.append(month_names[int(month-1)])
+    
+
+    N = len(fd)
+    if (N%2) == 0:
+        width = 0.42
+        offset = width*N/4
+    else:
+        width = 0.16
+        offset = width*np.floor(N/2)
+        ind = np.arange(N)
+    
+    # Bar plot of average number of FD in each month
+    fig = plt.figure(figsize = [18, 10])
+    ax = fig.add_subplot(1,1,1)
+    
+    # Make the bar plot
+    m = 0
+    for flash_drought, label in zip(fd_list, labels):
+        print(flash_drought, np.nansum(flash_drought))
+        ax.bar(months_unique+width*m-offset, flash_drought, width = width, edgecolor = 'k', label = label)#, yerr = fd_month_std)
+        m = m + 1
+
+    ax.legend(fontsize = 24)
+    
+    # Set the title
+    ax.set_title('Average Month of FD Occurance', fontsize = 24)
+    
+    # Set the axis labels
+    ax.set_xlabel('Time', size = 24)
+    ax.set_ylabel('Percentage of FD Occurance', size = 24)
+    
+    # Set the ticks
+    ax.set_xticks(months_unique, month_names_grow)
+    #ax.xaxis.set_major_formatter(DateFMT)
+
+    for i in ax.xaxis.get_ticklabels() + ax.yaxis.get_ticklabels():
+        i.set_size(24)
+    
+    # Save the figure
+    plt.savefig('%s/%s'%(path, savename_bar), bbox_inches = 'tight')
+    plt.show(block = False)
+
+
+#%%
+##############################################
+# Function to plot a global frequency climatology with boxes over FD prone regions
+def display_climatology_map_with_boxes(data, lat, lon, borders, title = 'tmp', cbar_label = 'tmp', globe = False, 
+                                       cmin = -20, cmax = 80, cint = 1, cticks = np.arange(0, 90, 10), new_colorbar = True, cbar_months = False,
+                                       path = './', savename = 'tmp.png'):
+    '''
+    Create a map plot of FD climatology
+
+    Inputs:
+    :param data: FD map to be plotted
+    :param lat: Gridded latitude values corresponding to data
+    :param lon: Gridded longitude values corresponding to data
+    :param title: Title of the plot
+    :param globe: Boolean indicating whether the data is global
+    :param cmin, cmax, cint: The minimum, maximum, and interval of the values in the colorbar
+    :param cticks: List or 1D array of the values to make the ticks in the colorbar
+    :param new_colorbar: Boolean indicating whether to make/use a new, adjusted colorbar (separate from the raw one)
+    :param cbar_months: Boolean indicating whether to label the colorbar with months instead of values
+    :param path: Path the figures will be saved to
+    :param savename: Filename of the figure to be saved to
+
+    Outputs:
+    Map of FD climatology will be made and saved
+    '''
+    #### Create the Plot ####
+    
+    # Set colorbar information
+    clevs = np.arange(cmin, cmax + cint, cint)
+    nlevs = len(clevs)
+    cmap  = plt.get_cmap(name = 'hot_r', lut = nlevs)
+
+    # Get the normalized color values
+    vmin = 0 if cmin < 0 else cmin
+    v = cmin if cmin < 0 else 0
+    norm = mcolors.Normalize(vmin = vmin, vmax = cmax)
+
+    # Create a new/adjust the colorbar?
+    if np.invert(cbar_months):
+        
+        # Generate the colors from the orginal color map in range from [0, cmax]
+        colors = cmap(np.linspace(1 - (cmax - vmin)/(cmax - v), 1, cmap.N))  ### Note, in the event cmin and cmax share the same sign, 1 - (cmax - cmin)/cmax should be used
+        if new_colorbar:
+            colors[:4,:] = np.array([1., 1., 1., 1.]) # Change the value of 0 to white
+        else:
+            colors[:1,:] = np.array([1., 1., 1., 1.]) # Change the value of 0 to white
+        
+        # Create a new colorbar cut from the colors in range [0, cmax.]
+        ColorMap = mcolors.LinearSegmentedColormap.from_list('cut_hot_r', colors)
+        
+        colorsNew = cmap(np.linspace(0, 1, cmap.N))
+        if new_colorbar:
+            colorsNew[abs(cmin)-1:abs(cmin)+1, :] = np.array([1., 1., 1., 1.]) # Change the value of 0 in the plotted colormap to white
+        cmap = mcolors.LinearSegmentedColormap.from_list('hot_r', colorsNew)
+    
+    # Shapefile information
+    # ShapeName = 'Admin_1_states_provinces_lakes_shp'
+    if np.invert(globe):
+        ShapeName = 'admin_0_countries'
+        CountriesSHP = shpreader.natural_earth(resolution = '110m', category = 'cultural', name = ShapeName)
+    
+        CountriesReader = shpreader.Reader(CountriesSHP)
+    
+        USGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] == 'United States of America']
+        NonUSGeom = [country.geometry for country in CountriesReader.records() if country.attributes['NAME'] != 'United States of America']
+    
+    # Lonitude and latitude tick information
+    if globe:
+        lat_int = 15
+        lon_int = 40
+    else:
+        lat_int = 10
+        lon_int = 20
+    
+    LatLabel = np.arange(-90, 90, lat_int)
+    LonLabel = np.arange(-180, 180, lon_int)
+    
+    LonFormatter = cticker.LongitudeFormatter()
+    LatFormatter = cticker.LatitudeFormatter()
+    
+    # Projection information
+    data_proj = ccrs.PlateCarree()
+    fig_proj  = ccrs.PlateCarree()
     
     
+    # Create the plots
+    fig = plt.figure(figsize = [12, 10])
+    
+    
+    # Flash Drought plot
+    ax = fig.add_subplot(1, 1, 1, projection = fig_proj)
+    
+    # Set the flash drought title
+    ax.set_title(title, size = 14)
+    
+    # Ocean and non-U.S. countries covers and "masks" data outside the U.S.
+    ax.add_feature(cfeature.OCEAN, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    if np.invert(globe):
+        ax.add_feature(cfeature.STATES)
+        ax.add_geometries(USGeom, crs = fig_proj, facecolor = 'none', edgecolor = 'black', zorder = 3)
+        ax.add_geometries(NonUSGeom, crs = fig_proj, facecolor = 'white', edgecolor = 'white', zorder = 2)
+    else:
+        ax.coastlines(edgecolor = 'black', zorder = 3)
+    
+    # Adjust the ticks
+    ax.set_xticks(LonLabel, crs = ccrs.PlateCarree())
+    ax.set_yticks(LatLabel, crs = ccrs.PlateCarree())
+    
+    ax.set_yticklabels(LatLabel, fontsize = 14)
+    ax.set_xticklabels(LonLabel, fontsize = 14)
+    
+    ax.xaxis.set_major_formatter(LonFormatter)
+    ax.yaxis.set_major_formatter(LatFormatter)
+    
+    # Plot the flash drought data
+    if globe:
+        cs = ax.pcolormesh(lon, lat, data, vmin = cmin, vmax = cmax,
+                           cmap = cmap, transform = data_proj, zorder = 1)
+    else:
+        cs = ax.pcolormesh(lon, lat, data, vmin = cmin, vmax = cmax,
+                           cmap = cmap, transform = data_proj, zorder = 1)
+    
+    # Set the map extent to the U.S.
+    if globe:
+        ax.set_extent([-179, 179, -60, 75])
+    else:
+        ax.set_extent([-130, -65, 23.5, 48.5])
+
+    for border in borders:
+        height = border[1] - border[0]
+        width = border[3] - border[2]
+        min_lat = border[0]
+        if border[2] > 180:
+            min_lon = border[2] - 360
+        else:
+            min_lon = border[2]
+        ax.add_patch(mpatches.Rectangle(xy = [min_lon, min_lat], width = width, height = height, 
+                                        facecolor = 'none', edgecolor = 'blue', linewidth = 2, transform = fig_proj, zorder = 4))
+    
+    
+    # Set the colorbar size and location
+    if globe:
+        cbax = fig.add_axes([0.92, 0.375, 0.02, 0.25])
+    else:
+        cbax = fig.add_axes([0.915, 0.29, 0.025, 0.425])
+    
+    # Create the colorbar
+    if new_colorbar:
+        cbar = mcolorbar.ColorbarBase(cbax, cmap = ColorMap, norm = norm, orientation = 'vertical')
+    else:
+        cbar = mcolorbar.ColorbarBase(cbax, cmap = cmap, norm = norm, orientation = 'vertical')
+    
+    # Set the colorbar label
+    cbar.ax.set_ylabel(cbar_label, fontsize = 14)
+    
+    # Set the colorbar ticks
+    if cbar_months:
+        cbar.set_ticks([0.5, 1.3, 2.3, 3.15, 4.2, 5.05, 6.0, 6.9, 7.8, 8.75, 9.7, 10.7, 11.6])
+        cbar.ax.set_yticklabels(['No FD', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'June', 'July', 'Aug', 'Sept', 'Oct', 'Nov', 'Dec'], fontsize = 14)
+    else:
+        cbar.set_ticks(cticks)
+        cbar.ax.set_yticklabels(cticks, fontsize = 14)
+    
+    # Save the figure
+    plt.savefig('%s/%s'%(path, savename), bbox_inches = 'tight')
+    plt.show(block = False)
+
 
 #%%
 ##############################################
