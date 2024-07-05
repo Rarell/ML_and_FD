@@ -875,13 +875,13 @@ def display_time_series(data_true, data_pred, data_true_var, data_pred_var, time
 #%%
 ##############################################
 # Function to create time series for FD prone regions across the globe
-def display_time_series_shading(data_true, data_pred, data_true_var, data_pred_var, time, var_name, model, label, one_year = False, path = './Figures'):
+def display_time_series_region(data_true, data_pred, data_true_var, data_pred_var, time, var_name, model, label, one_year = False, path = './Figures'):
     '''
     Display a time series for a set of prediction and true data
     
     Inputs:
     :param data_true: The data of true values whose time series will be plotted
-    :param data_pred: The data of predicted values whose time series will be plotted
+    :param data_pred: The data of predicted values whose time series will be plotted; could be a list of predictands for multiple time series
     :param data_true_var: The variation of the true values
     :param data_pred_var: The variation of the predicted values
     :param time: The datetimes corresponding to each entry in data_true/data_pred
@@ -889,6 +889,7 @@ def display_time_series_shading(data_true, data_pred, data_true_var, data_pred_v
     :param metric: The name of the metric being plotted
     :param model: The name of the reanalysis model the data is based on
     :param label: A label used to distinguish the experiment
+    :param one_year: Boolean indicating whether the plotted time series is for one year (i.e., seasonality)
     :param path: Path from the current directory to the directory the maps will be saved to
     '''
 
@@ -953,7 +954,7 @@ def display_time_series_shading(data_true, data_pred, data_true_var, data_pred_v
         i.set_size(26)
         
     # Save the figure
-    filename = '%s_%s_time_series_shading.png'%(plot_type, label)
+    filename = '%s_%s_%s_time_series_shading.png'%(plot_type, model, label)
     plt.savefig('%s/%s'%(path, filename), bbox_inches = 'tight')
     plt.show(block = False)
 
@@ -969,13 +970,11 @@ def fd_coverage_barplots(fd, dates, mask, labels, grow_season = False, years = N
     :param fd: FD data to be plotted. time x lat x lon format
     :param dates: Array of datetimes corresponding to the timestamps in fd
     :param mask: Land-sea mask for the dataset (1 = land, 0 = sea)
-    :param lat: Gridded latitude values corresponding to data
     :param grow_season: Boolean indicating whether fd has already been set into growing seasons
     :param years: Array of intergers corresponding to the dates.year. If None, it is made from dates
     :param months: Array of intergers corresponding to the dates.month. If None, it is made from dates
     :param days: Array of intergers corresponding to the dates.month. If None, it is made from dates
     :param path: Path the figures will be saved to
-    :param savename_ts: Filename the time series plot will be saved to
     :param savename_bar: Filename the barplot will be saved to
 
     Outputs:

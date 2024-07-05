@@ -55,17 +55,14 @@ Created on Sat Oct 2 17:52:45 2021
 #   - May look into residual curves (training and validation metric performance over different number of folds; 
 #                                    may be too computationally and temporally expensive)
 #   - May look into Ceteris-Paribus effect
+#   - May look into spagetti plots for learning curves
 #   - Add XAI for keras models
-#   - See multiple hashtag comments in merge_results() function for list of tasks (4 total comments)
-#   - See multiple hashtag comments in if __name__ == ... for list of tasks (3 total comments)
 #
 # Bugs:
 #   - TensorFlow models are known to perform more poorly if the computer has not been power cycled (turned off and on) for a while. 
 #     True even if the kernel is reset
 #   - Current errors for the transformer models have been removed, however the local computer nearly crashed when a test run was done (during the training step;
 #     this is presumed to be due to the transformers computation requirements)
-#   - Notes on things to fix on lines 2251 and 2351
-#       - FIXES IMPLEMENTED, NEED TO BE TESTED (True also for the new feature importances)
 #
 # Notes:
 #   - See tf_environment.yml for a list of all packages and versions. netcdf4 and cartopy must be downloaded seperately.
@@ -203,7 +200,7 @@ def create_ml_parser():
     parser.add_argument('--L2_regularization', '--l2', type=float, default=None, help='L2 regularization factor (only active if no L2)')
     
     
-    # Data augmentation parameter (currently only applied to CNNs
+    # Data augmentation parameter (currently only applied to CNNs)
     parser.add_argument('--data_augmentation', action='store_true', help = 'Use data augmentation')
     parser.add_argument('--crop_height', type=int, default=None, help = 'Crop the map along the height axis. This must have the same primes used in the max pooling layers')
     parser.add_argument('--crop_width', type=int, default=None, help = 'Crop the map along the width axis. This must have the same primes used in the max pooling layers')
@@ -270,7 +267,6 @@ def create_ml_parser():
     parser.add_argument('--inner_unit', type=int, default=5, help='Units of the output dense layer in the transformer encoder/decoder')
     parser.add_argument('--inner_activation', type=str, default='elu', help='Activation function for the transformer encoder/decoder inner dense layer')
     parser.add_argument('--encoder_decoder', type=str, default='encoder', help='Create a transformer encoder and/or a decoder block (options are encoder/decoder/both')
-    
     
     
     return parser
@@ -436,7 +432,6 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
     NV, Tt, IJ = valid_in.shape
     
     
-    ###### May need to change transpose variables
     # Normalize data?
     if args.normalize:
         for ij in range(IJ):
@@ -458,6 +453,7 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
             tmp_whole = scaler_whole.fit_transform(data_in[:,:,ij].T)
             data_in[:,:,ij] = tmp_whole.T
 
+    # Reshape data into number of variables x number of samples for sklearn models
     train_in = train_in.reshape(NV, T*IJ, order = 'F')
     valid_in = valid_in.reshape(NV, Tt*IJ, order = 'F')
     test_in = test_in.reshape(NV, Tt*IJ, order = 'F')
@@ -473,6 +469,7 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
             with open('%s.pkl'%model_fname, 'rb') as fn:
                 model = pickle.load(fn)
         except pickle.UnpicklingError | (EOFError):
+            # If there is an error in the pickle file, it will need to recreated (and the model re-trained)
             print('Could not load file: %s. Erasing and retraining it.'%model_fname)
             os.remove('%s.pkl'%model_fname)
             
@@ -762,11 +759,10 @@ def sklearn_evaluate_model(model, args, train_in, valid_in, test_in, train_out, 
         results['tpr_valid'] = np.ones((thresh.size)) * np.nan
         results['fpr_test'] = np.ones((thresh.size)) * np.nan
         results['tpr_test'] = np.ones((thresh.size)) * np.nan
-        
+
+        # Collect the TPR and FPR
         fpr_train, tpr_train, thresh_train = metrics.roc_curve(train_out, train_pred_roc)
-        
         fpr_valid, tpr_valid, thresh_valid = metrics.roc_curve(valid_out, valid_pred_roc)
-        
         fpr_test, tpr_test, thresh_test = metrics.roc_curve(test_out, test_pred_roc)
         
         # Note this step is needed to ensure the ROC curves have the same length across all rotations and regions
@@ -841,6 +837,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     Tt, I, J, NV = valid_in.shape
     Ttot, I, J, NV = data_in.shape
 
+    # Reshape layer in U-net codes uses the 'C' method
     if args.ml_model.lower() == 'cnn':
         reshape_method = 'C'
     else:
@@ -997,7 +994,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
         tmp_train_out = train_out
         tmp_valid_out = valid_out
     
-    # Turn the data into a dataset
+    # Turn the data into a dataset/tensor
     if (args.ml_model.lower() == 'attention') | (args.ml_model.lower() == 'transformer'):
         # The attention networks in TF_models does not accept a third part to the dataset
         train_dataset = tf.data.Dataset.from_tensor_slices((train_in, tmp_train_out)) 
@@ -1018,7 +1015,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     test_dataset  = test_dataset.prefetch(args.prefetch)
     full_dataset  = full_dataset.prefetch(args.prefetch)
     
-    # May see if this breaks the code
+    # Remove large variables from memory
     del train_in, valid_in, test_in, data_in
     gc.collect()
     
@@ -1144,7 +1141,7 @@ def execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, t
     # Evaluate the model for each grid point?
     if evaluate_each_grid:
         
-        # Reshape output data back into 3D for mapping evaluation
+        # Reshape output data back into 3D for map evaluation
         if (args.ml_model.lower() == 'rnn') | (args.ml_model.lower() == 'recurrent_neural_network'):
             train_out = np.squeeze(train_out.reshape(I, J, T, order = reshape_method))
             valid_out = np.squeeze(valid_out.reshape(I, J, Tt,  order = reshape_method))
@@ -1279,9 +1276,7 @@ def keras_evaluate_model(model, args, train_in, valid_in, test_in, train_out, va
 
             # Calcualte TPR and FPR
             fpr_train, tpr_train, thresh_train = metrics.roc_curve(train_out.flatten(), train_pred.flatten())
-
             fpr_valid, tpr_valid, thresh_valid = metrics.roc_curve(valid_out.flatten(), valid_pred.flatten())
-
             fpr_test, tpr_test, thresh_test = metrics.roc_curve(test_out.flatten(), test_pred.flatten())
 
             # Note this step is needed to ensure the ROC curves have the same length across all rotations and regions
@@ -1401,7 +1396,8 @@ def keras_evaluate_model(model, args, train_in, valid_in, test_in, train_out, va
     
     
     
-    
+#%%
+##############################################    
 def execute_single_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, data_in, data_out, rotation, model_fname, evaluate_each_grid = False):
     '''
     Run a single ML experiment and save the model
@@ -1424,7 +1420,7 @@ def execute_single_exp(args, train_in, valid_in, test_in, train_out, valid_out, 
     :param results: Dictionary results from the ML model, including predictions, performance metrics, and learning curves
     '''
     
-    # Execute the experiment based on whether it is an sklearn model or NN
+    # Execute the experiment based on whether it is an sklearn model or NN/TensorFlow model
     if args.keras:
         results = execute_keras_exp(args, train_in, valid_in, test_in, train_out, valid_out, test_out, data_in, data_out, rotation,
                                     model_fname, evaluate_each_grid)
@@ -1710,7 +1706,8 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
     :param NFolds: Total number of folds in the full dataset
     :param NVar: Number of variables used to train the ML model
     :param T, I, J: Size of the time (for 1 fold), horizontal, and width dimensions respectively
-    :param data_in: The input dataset for the ML models. Most be entered if collecting feature attribution/importance
+    :param data_in: The input dataset for the ML models. Must be entered if collecting feature attribution/importance
+    :param data_out: The output labels (true labels) for the ML models. Must be entered if collecting feature attribution/importance
     
     Outputs:
     .pkl file containing merged results
@@ -1816,9 +1813,10 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
     tpr_valid_tmp = []
     tpr_test_tmp = []
 
+    # Determine if the feature importance can be collected
     if args.interpret:
-        if data_in is None:
-            assert "data_in must be entered to interpret models!"
+        if (data_in is None) | (data_out is None):
+            assert "data_in and data_out must be entered to interpret models!"
         else:
             # The data loaded by the pkl file is loaded as a masked array; must be turned into a np array for shap
             if np.ma.isMaskedArray(data_in):
@@ -1833,6 +1831,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
 
         #rotation = int(f[68:70]) # Only true for C23 method, remove after!
 
+        # Collect folds for the rotation
         train_folds = (np.arange(args.ntrain_folds) + rot) % NFolds
         train_folds = np.sort(train_folds)
         val_folds = int((np.array([args.ntrain_folds]) + rot) % NFolds)
@@ -1852,7 +1851,8 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
         pred_train[rot, train_fold_ind, :] = result['train_predict']
         pred_valid[val_folds*T:(val_folds+1)*T,:] = result['valid_predict']
         pred_test[test_folds*T:(test_folds+1)*T,:] = result['test_predict']
-        
+
+        # Collect evaluation results
         etrain.append(result['train_eval'])
         evalid.append(result['valid_eval'])
         etest.append(result['test_eval'])
@@ -2115,6 +2115,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
 
 
     if args.interpret:
+        # Feature importances
         results['attributions'] = attributions
         results['attributions_cs'] = attributions_cs
         results['feature_import'] = np.nanmean(np.stack(fi, axis = -1), axis = -1)
@@ -2294,7 +2295,7 @@ def get_domain(data, lat, lon, year, globe = False, sea_points = False):
             lat_max = 40
 
     # Reshape the data into 3D arrays for the subset function
-    if globe: ############################### Update this on how to use it properly (block is needed for getting attributions, but errors in the case studies)
+    if globe:
         T, IJ = data.shape
         if np.invert(sea_points):
             print("Sea points were not restored.")
@@ -2499,6 +2500,7 @@ if __name__ == '__main__':
                 metrics_valid = [results[m]['valid_eval_map'][:,:,met] for m in range(len(methods))]
                 metrics_test = [results[m]['test_eval_map'][:,:,met] for m in range(len(methods))]
 
+            # Color map limits
             if (metric == 'mse') | (metric == 'mae'):
                 cmin = 0; cmax = 0.5; cint = 0.005
             else:
@@ -2516,7 +2518,8 @@ if __name__ == '__main__':
             display_metric_map(metrics_test, lat, lon, methods, 
                                metric, cmin, cmax, cint, args.ra_model, 
                                args.label, dataset = 'test', reverse = False, globe = args.globe, path = dataset_dir)
-                               
+
+            # Output the overall average of the metric
             for m, method in enumerate(methods):
                 print('Overall metric score, %s, for %s is %4.2f'%(metric, method, np.nanmean(metrics_test[m])))
 
@@ -2586,7 +2589,8 @@ if __name__ == '__main__':
                     valid_test = [(np.nansum(pred[m] < 0.5) == 0) | (np.nansum(pred[m] < 0.5) == pred[m].size) for m in range(len(methods))]
                     
                     data_ts[y,:,n] = np.array([np.nan if valid_test[m] else sklearn.metrics.roc_auc_score(true_fd[m][ind,:,:].flatten(), pred[m].flatten()) for m in range(len(methods))])
-                    
+
+        # Collect predictions and get overall AUC score
         pred = [results[m]['test_predict'][:,:,:] for m in range(len(methods))]        
         for m in range(len(methods)):
             pred[m][np.isnan(pred[m])] = 0
@@ -2596,7 +2600,8 @@ if __name__ == '__main__':
 
         # Create the time series plot
         display_metrics_in_time(data_ts, methods, years_unique, metrics, path = dataset_dir)
-        
+
+        # Display overall time series metrics
         for m, method in enumerate(methods):
             for n, metric in enumerate(metrics):
                 print('Overall metric score, %s, for %s is %4.2f'%(metric, method, np.nanmean(data_ts[:,m,n])))
@@ -2657,7 +2662,8 @@ if __name__ == '__main__':
             if (args.ml_model == 'rf') | (args.ml_model == 'ada'):
                 fi = [results[m]['feature_import_pi'] for m in range(len(methods))]
                 fi_var = [results[m]['feature_import_pi_var'] for m in range(len(methods))]
-                
+
+                # Permutation importance
                 display_feature_importance(fi, fi_var, 42, features, methods, args.ml_model, '%s_feature_importance_pi'%args.label, path = dataset_dir)
 
                 # Feature importance for GINI importance
@@ -2667,12 +2673,13 @@ if __name__ == '__main__':
                     
                     display_feature_importance(fi, fi_var, 42, features, methods, args.ml_model, '%s_feature_importance_gini'%args.label, path = dataset_dir)
 
+            # SHAP feature importance
             fi = [results[m]['feature_import'] for m in range(len(methods))]
             fi_var = [results[m]['feature_import_var'] for m in range(len(methods))]
             print(fi)
             print(fi_var)
 
-
+            # SHAP attributions
             attribution = [np.nanmean(results[m]['attributions'], axis = 0) for m in range(len(methods))]
             print(attribution)
 
@@ -2700,6 +2707,8 @@ if __name__ == '__main__':
 
             # Collect the predicted labels (full maps)
             if args.globe:
+                # Sea grid points need to be re-added into global maps before plotting (elsewise produces faulty maps)
+                
                 # Reshape the mask
                 mask2d = mask.reshape(I*J, order = 'F')
                 
@@ -2762,7 +2771,7 @@ if __name__ == '__main__':
             for year in args.case_study_years:
                 ind = np.where(year == years)[0]
                 raw_variable = data_in[:,:,:,ind[0]]
-                # Standardize the raw variable
+                # Standardize the raw variable to show exactly what the ML models see
                 for ij in range(IJ):
                     scaler = StandardScaler()
             
@@ -2990,7 +2999,7 @@ if __name__ == '__main__':
                         years_unique = np.array([date.year for date in np.unique(months_years)])
 
                         # Determine the average FD coverage per year
-                        for year in np.unique(years):
+                        for year in np.unique(years_grow):
                             ind = np.where(year == years_unique)[0]
                     
                             pred_area.append(np.nanmean(pred_tmp[ind])/total_land)
@@ -3012,8 +3021,9 @@ if __name__ == '__main__':
                         true_area = np.array(true_area)
                         true_area_var = np.array(true_area_var)
 
-                        display_time_series_shading(true_area*100, pred_area*100, true_area_var*100, pred_area_var*100, 
-                                                    dates_grow[::43], r'Areal Coverage (%)', args.ra_model, region[0], path = dataset_dir)
+                        # Plot the time series for the region
+                        display_time_series_region(true_area*100, pred_area*100, true_area_var*100, pred_area_var*100, 
+                                                    dates_grow[::43], r'Areal Coverage (%)', '%s_%s'%(args.ra_model, method), region[0], path = dataset_dir)
 
                     # Determine the seasonality for each region
                     for region, bound in zip(regions, bounds):
@@ -3051,7 +3061,7 @@ if __name__ == '__main__':
                         # Determine the total FD grids for each month
                         for d, date in enumerate(np.unique(months_years)):
                             # Index for the current month and year
-                            ind = np.where((date.month == months) & (date.year == years))[0]
+                            ind = np.where((date.month == months_grow) & (date.year == years_grow))[0]
 
                             # Get all grids with FD for the current month and year
                             pred_tmp.append(np.nansum(tmp_pred[ind]))
@@ -3065,7 +3075,7 @@ if __name__ == '__main__':
                         months_unique = np.array([date.month for date in np.unique(months_years)])
 
                         # Determine the average FD coverage for a given month
-                        for month in np.unique(months):
+                        for month in np.unique(months_grow):
                             ind = np.where(month == months_unique)[0]
                     
                             pred_area.append(np.nanmean(pred_tmp[ind])/total_land)
@@ -3086,20 +3096,21 @@ if __name__ == '__main__':
                         true_area = np.array(true_area)
                         true_area_var = np.array(true_area_var)
                     
-                        print(np.unique(months))
+                        print(np.unique(months_grow))
                         print(true_area)
 
                         # Adjust the months if in the Southern Hemisphere
                         if bound[0] < 0:
-                            months_unique = np.unique(months) + 6
+                            months_unique = np.unique(months_grow) + 6
                             for mon in range(months_unique.size):
                                 if months_unique[mon] > 12:
-                                    months_unique[mon] = months_unique[m] - 12
+                                    months_unique[mon] = months_unique[mon] - 12
                         else:
-                            months_unique = np.unique(months)
-                        
-                        display_time_series_shading(true_area*100, pred_area*100, true_area_var*100, pred_area_var*100, months_unique, 
-                                            r'Areal Coverage (%)', args.ra_model, region[0], one_year = True, path = dataset_dir)
+                            months_unique = np.unique(months_grow)
+
+                        # Plot the seasonality for the region
+                        display_time_series_region(true_area*100, pred_area*100, true_area_var*100, pred_area_var*100, months_unique, 
+                                            r'Areal Coverage (%)', '%s_%s'%(args.ra_model, method), region[0], one_year = True, path = dataset_dir)
 
                     # Make the FD frequency climatology with boxes over the FD prone regions
                     # File names
@@ -3110,7 +3121,7 @@ if __name__ == '__main__':
                     # Create the map
                     display_climatology_map_with_boxes(fd_climo*100, lat, lon, bounds, title = method, cbar_label = cbar_label, globe = args.globe, 
                                                        cmin = -20, cmax = 80, cint = 1, cticks = np.arange(0, 90, 10), new_colorbar = True, 
-                                                       path = path, savename = filename)
+                                                       path = dataset_dir, savename = filename)
                     
 
                 # Plot the threat scores?
@@ -3263,3 +3274,289 @@ if __name__ == '__main__':
     print('Done')        
                     
 
+
+## Code for creating the seasonality barplots (for CONUS), developed in Jupyter Lab is below:
+# years = np.arange(1979, 2021+1)
+# dates = np.array([datetime(1979,1,1) + timedelta(days = 5*t) for t in range(years.size*73)])
+
+# fd_coverage_barplots(true_fd, dates, mask, ['C23' ,'N20', 'P20', 'L20', 'O21'], grow_season = True, path = './', savename_bar = 'true_labels_bar_plots.png')
+# pred_test = [results[m]['test_predict'] for m in range(len(methods))]
+# for m in range(len(methods)):
+#     fd_coverage_barplots([true_fd[m], pred_test[m]], dates, mask, ['True label' ,'Prediction'], grow_season = True, path = './', savename_bar = '%s_bar_plots.png'%methods[m])
+
+
+## Code for creating the global time series and seaosnality plots for both ML models for each region, developed in Jupyter Lab is below:
+# # Modify one of the arguments
+# args.ra_model = 'era5'
+# args.ml_model = 'rnn'; args.keras = True; args.globe = True
+# args.label = 'LSTM_experiment'
+
+# #method = 'christian'
+
+
+# # Create a merged dataset to create final figures (test)
+# # methods = ['christian']
+# # methods = ['nogeura']
+# # methods = ['pendergrass']
+# # methods = ['liu']
+# methods = ['otkin']
+# #results = []
+# for method in methods:
+#     path = '../Data/%s'%args.ra_model
+#     dataset_dir = '%s/%s/%s/%s'%(args.dataset, args.ra_model, args.ml_model, method)
+#     filename = '%s_ada_experiment_%s_merged_results.pkl'%(args.ra_model, method)
+#     with open('%s/%s'%(path, filename), 'rb') as fn:
+#         results = pickle.load(fn)
+#         results = results['test_predict']
+#         #results.append(result)
+#     filename = '%s_LSTM_experiment_%s_merged_results.pkl'%(args.ra_model, method)
+#     with open('%s/%s'%(path, filename), 'rb') as fn:
+#         results_rnn = pickle.load(fn)
+#         results_rnn = results_rnn['test_predict']
+
+
+# print(results.shape)
+# mask = load_mask(model = args.ra_model, path = args.dataset)
+# I, J = mask.shape
+# print(I, J)
+
+# # Create the merged dataset for the true labels
+# true_fd = []
+# with open("%s/%s/%s"%(args.dataset, args.ra_model, args.output_data_fname), "rb") as fp:
+#     fd = pickle.load(fp)
+#     Nfold  = fd.shape[-1]
+#     T = fd.shape[1]
+#     fd = np.concatenate([fd[:,:,:,fold] for fold in range(Nfold)], axis = 1)
+#     fd[np.isnan(fd)] = 0
+#     fd = fd[0,:,:]
+#     #for m, method in enumerate(methods):
+#     #    true_fd.append(fd[m,:,:].reshape(T*Nfold, I, J, order = 'F'))
+
+# et = load_nc('evap', 'evaporation.%s.pentad.nc'%args.ra_model, sm = False, path = '%s/%s/Processed_Data/'%(args.dataset, args.ra_model))
+# lat = et['lat']; lon = et['lon']; dates = et['ymd']
+# print(lon)
+
+# del et
+# gc.collect()
+
+# # Restore input and outputs to their original shapes
+# T, I_s, J_s = results.shape
+
+# pred = np.ones((T, I*J), dtype = np.float32) * np.nan
+# pred_rnn = np.ones((T, I*J), dtype = np.float32) * np.nan
+# true_fd = np.ones((T, I*J), dtype = np.float32) * np.nan
+
+
+# results = results.reshape(T, I_s*J_s, order = 'F')
+# results_rnn = results_rnn.reshape(T, I_s*J_s, order = 'F')
+# mask = mask.reshape(I*J, order = 'F')
+# n = 0
+
+# print(np.unique(mask))
+# for ij in range(I*J):
+#     if mask[ij] == 1:
+#         pred[:,ij] = results[:,n]
+#         pred_rnn[:,ij] = results_rnn[:,n]
+#         true_fd[:,ij] = fd[:,n]
+#         n = n + 1
+
+# print(n)
+
+# pred = pred.reshape(T, I , J, order = 'F')
+# pred_rnn = pred_rnn.reshape(T, I , J, order = 'F')
+# true_fd = true_fd.reshape(T, I, J, order = 'F')
+
+# # Determine the regions
+# # Format: 0: min lat, 1: max lat, 2: min lon, 3: max lon
+# bounds  = [[33.0, 42.0, -98.5+360,-85.0+360], [-22.5, -5, -53+360,-39+360], [7, 12.5, 5,40], [-20, -1, 30, 39.5], [8,27.5, 74,86], [-18.5, -13.5, 124, 143.5], 
+#            [16.5, 23.5, -104.5+360, -94.5+360], [-10.5, 0.0, -71.5+360, -57.0+360], [-39.0, -30.5, -66.5+360, -58.0+360], [36, 44, -10+360, -0.01+360], [45, 55, 38, 48], 
+#            [40.5, 49, 116, 127], [35.5, 41.5, 27.5, 48], [11.0, 18.0, 98, 109.5], [-36.5, -30.5, 142.5, 149.5]]
+# regions = [['Central US'], ['Brazil'], ['Sahel'], ['Great Rift Valley'], ['India'], ['Northern Australia'], 
+#            ['Mexico'], ['Central Amazon'], ['Argentina'], ['Iberian Peninsula'], ['Western Russia'], 
+#            ['Northeastern China'], ['Asia Minor'], ['Indochinese Peninsula'], ['Southeast Australia']]
+
+# print(bounds)
+# mask = mask.reshape(1, I, J, order = 'F')
+
+# years = np.array([date.year for date in dates])
+# months = np.array([date.month for date in dates])
+# ind = np.where(years < 2022)[0]
+# years = years[ind]
+# months = months[ind]
+
+# # Select growing seaons values (not exact for SH, but should still correspond to correct indices
+# grow_ind = np.where((months >= 4) & (months <= 10))[0]
+# years = years[grow_ind]
+# months = months[grow_ind]
+# dates_grow = dates[grow_ind]
+
+# months_years = np.array([datetime(date.year, date.month, 1) for date in dates_grow])
+
+# print(years)
+
+# for region, bound in zip(regions, bounds):
+#     for m, method in enumerate(methods):
+#         pred_sub, lat_sub, lon_sub = subset_data(pred, lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+#         pred_rnn_sub, lat_sub, lon_sub = subset_data(pred_rnn, lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+#         true_fd_sub, _, _ = subset_data(true_fd, lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+#         mask_sub, _, _ = subset_data(mask, lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+#         T, I_s, J_s = pred_sub.shape
+    
+#         total_land = np.nansum(mask_sub.reshape(I_s, J_s, order = 'F'))
+        
+#         tmp_pred = np.nansum(pred_sub.reshape(T, I_s*J_s), axis = -1)
+#         tmp_pred_rnn = np.nansum(pred_rnn_sub.reshape(T, I_s*J_s), axis = -1)
+    
+#         pred_area = []
+#         pred_area_var = []
+
+#         pred_area_rnn = []
+#         pred_area_var_rnn = []
+        
+#         pred_tmp = []
+#         pred_rnn_tmp = []
+        
+#         # Determine the true areal coverage
+#         tmp_true = np.nansum(true_fd_sub.reshape(T, I_s*J_s), axis = -1)
+#         total_land = np.nansum(mask_sub)
+    
+#         true_area = []
+#         true_area_var = []
+    
+#         true_tmp = []
+    
+#         for d, date in enumerate(np.unique(months_years)):
+#             ind = np.where((date.month == months) & (date.year == years))[0]
+#             pred_tmp.append(np.nansum(tmp_pred[ind]))
+#             pred_rnn_tmp.append(np.nansum(tmp_pred_rnn[ind]))
+#             true_tmp.append(np.nansum(tmp_true[ind]))
+            
+#         pred_tmp = np.array(pred_tmp)
+#         pred_rnn_tmp = np.array(pred_rnn_tmp)
+#         true_tmp = np.array(true_tmp)
+    
+#         years_unique = np.array([date.year for date in np.unique(months_years)])
+        
+#         for year in np.unique(years):
+#             ind = np.where(year == years_unique)[0]
+    
+#             pred_area.append(np.nanmean(pred_tmp[ind])/total_land)
+#             #pred_area_var.append(np.nanstd(tmp_pred[ind])/total_land)
+
+#             pred_area_rnn.append(np.nanmean(pred_rnn_tmp[ind])/total_land)
+#             #pred_area_var_rnn.append(np.nanstd(tmp_pred_rnn[ind])/total_land)
+    
+#             true_area.append(np.nanmean(true_tmp[ind])/total_land)
+#             #true_area_var.append(np.nanstd(tmp_true[ind])/total_land)
+            
+#         # for year in np.unique(years):
+#         #    ind = np.where(year == years)[0]
+    
+#         #    pred_area.append(np.nanmean(tmp_pred[ind])/total_land)
+#         #    pred_area_var.append(np.nanstd(tmp_pred[ind])/total_land)
+    
+#         #    true_area.append(np.nanmean(tmp_true[ind])/total_land)
+#         #    true_area_var.append(np.nanstd(tmp_true[ind])/total_land)
+    
+#         pred_area = np.array(pred_area)
+#         pred_area_var = np.array(pred_area_var)
+
+#         pred_area_rnn = np.array(pred_area_rnn)
+#         pred_area_var_rnn = np.array(pred_area_var_rnn)
+    
+#         true_area = np.array(true_area)
+#         true_area_var = np.array(true_area_var)
+
+#     print(dates_grow[::43])
+#     print(true_area)
+
+#     print(pred_area)
+#     print(pred_area_rnn)
+    
+#     display_time_series_region(true_area*100, [pred_area*100, pred_area_rnn*100], true_area_var*100, pred_area_var*100, dates_grow[::43], 
+#                         r'Areal Coverage (%)', args.ra_model, region[0], path = dataset_dir)
+
+# for region, bound in zip(regions, bounds):
+#     pred_sub, lat_sub, lon_sub = subset_data(pred, lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+#     pred_rnn_sub, lat_sub, lon_sub = subset_data(pred_rnn, lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+#     true_fd_sub, _, _ = subset_data(true_fd, lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+#     mask_sub, _, _ = subset_data(mask, lat, lon, LatMin = bound[0], LatMax = bound[1], LonMin = bound[2], LonMax = bound[3])
+#     T, I_s, J_s = pred_sub.shape
+
+#     total_land = np.nansum(mask_sub.reshape(I_s, J_s, order = 'F'))
+    
+#     tmp_pred = np.nansum(pred_sub.reshape(T, I_s*J_s), axis = -1)
+
+#     pred_area = []
+#     pred_area_var = []
+    
+#     pred_tmp = []
+#     pred_rnn_tmp = []
+    
+#     # Determine the true areal coverage
+#     tmp_true = np.nansum(true_fd_sub.reshape(T, I_s*J_s), axis = -1)
+#     total_land = np.nansum(mask_sub)
+
+#     true_area = []
+#     true_area_var = []
+
+#     pred_area_rnn = []
+#     pred_area_var_rnn = []
+
+#     true_tmp = []
+
+#     for d, date in enumerate(np.unique(months_years)):
+#         ind = np.where((date.month == months) & (date.year == years))[0]
+#         pred_tmp.append(np.nansum(tmp_pred[ind]))
+#         pred_rnn_tmp.append(np.nansum(tmp_pred_rnn[ind]))
+#         true_tmp.append(np.nansum(tmp_true[ind]))
+        
+#     pred_tmp = np.array(pred_tmp)
+#     pred_rnn_tmp = np.array(pred_rnn_tmp)
+#     true_tmp = np.array(true_tmp)
+
+#     months_unique = np.array([date.month for date in np.unique(months_years)])
+    
+#     for month in np.unique(months):
+#         ind = np.where(month == months_unique)[0]
+
+#         pred_area.append(np.nanmean(pred_tmp[ind])/total_land)
+#         #pred_area_var.append(np.nanstd(tmp_pred[ind])/total_land)
+
+#         pred_area_rnn.append(np.nanmean(pred_rnn_tmp[ind])/total_land)
+#         #pred_area_var_rnn.append(np.nanstd(tmp_pred_rnn[ind])/total_land)
+
+#         true_area.append(np.nanmean(true_tmp[ind])/total_land)
+#         #true_area_var.append(np.nanstd(tmp_true[ind])/total_land)
+        
+#     # for year in np.unique(years):
+#     #    ind = np.where(year == years)[0]
+
+#     #    pred_area.append(np.nanmean(tmp_pred[ind])/total_land)
+#     #    pred_area_var.append(np.nanstd(tmp_pred[ind])/total_land)
+
+#     #    true_area.append(np.nanmean(tmp_true[ind])/total_land)
+#     #    true_area_var.append(np.nanstd(tmp_true[ind])/total_land)
+
+#     pred_area = np.array(pred_area)
+#     pred_area_var = np.array(pred_area_var)
+
+#     pred_area_rnn = np.array(pred_area_rnn)
+#     pred_area_var_rnn = np.array(pred_area_var_rnn)
+
+#     true_area = np.array(true_area)
+#     true_area_var = np.array(true_area_var)
+
+#     print(np.unique(months))
+#     print(true_area)
+
+#     if bound[0] < 0:
+#         months_unique = np.unique(months) + 6
+#         for m in range(months_unique.size):
+#             if months_unique[m] > 12:
+#                 months_unique[m] = months_unique[m] - 12
+#     else:
+#         months_unique = np.unique(months)
+    
+#     display_time_series_region(true_area*100, [pred_area*100, pred_area_rnn*100], true_area_var*100, pred_area_var*100, months_unique, 
+#                         r'Areal Coverage (%)', args.ra_model, region[0], one_year = True, path = dataset_dir)
