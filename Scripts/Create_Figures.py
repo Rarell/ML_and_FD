@@ -1058,7 +1058,7 @@ def fd_coverage_barplots(fd, dates, mask, labels, grow_season = False, years = N
         ind = np.arange(N)
     
     # Bar plot of average number of FD in each month
-    fig = plt.figure(figsize = [18, 10])
+    fig = plt.figure(figsize = [14.4, 8])
     ax = fig.add_subplot(1,1,1)
     
     # Make the bar plot

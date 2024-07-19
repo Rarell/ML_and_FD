@@ -2031,8 +2031,8 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
                 
                 
 
-        if args.keras:
-           lc.append(result['history'])
+        #if args.keras:
+        #   lc.append(result['history'])
     
     results = {}
     # Model coordinates
@@ -2131,21 +2131,21 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
 
     # Merge learning curves
     ### ADD SPIGGATI LEARNING CURVES
-    if args.keras:
-        learn_curves = {}
-        learn_curves_var = {}
-        for key in lc[0].keys():
-            tmp = np.zeros((NFolds, args.epochs)) * np.nan
-            for n, curve in enumerate(lc):
-                n_epochs = len(curve[key])
+    # if args.keras:
+    #     learn_curves = {}
+    #     learn_curves_var = {}
+    #     for key in lc[0].keys():
+    #         tmp = np.zeros((NFolds, args.epochs)) * np.nan
+    #         for n, curve in enumerate(lc):
+    #             n_epochs = len(curve[key])
 
-                tmp[n,:n_epochs] = curve[key]
+    #             tmp[n,:n_epochs] = curve[key]
                
-            learn_curves[key] = np.nanmean(tmp, axis = 0)
-            learn_curves_var[key] = np.nanstd(tmp, axis = 0)
+    #         learn_curves[key] = np.nanmean(tmp, axis = 0)
+    #         learn_curves_var[key] = np.nanstd(tmp, axis = 0)
            
-        results['history'] = learn_curves
-        results['history_var'] = learn_curves_var
+    #     results['history'] = learn_curves
+    #     results['history_var'] = learn_curves_var
         
         
     # Potentially halve some of the datasize
@@ -3560,3 +3560,66 @@ if __name__ == '__main__':
     
 #     display_time_series_region(true_area*100, [pred_area*100, pred_area_rnn*100], true_area_var*100, pred_area_var*100, months_unique, 
 #                         r'Areal Coverage (%)', args.ra_model, region[0], one_year = True, path = dataset_dir)
+
+## Code for determining the percentage in improved RNN predictions (in terms of over prediction) compared to the Ada boosted trees, 
+## developed in Jupyter Lab is below:
+# # Create a merged dataset of the RNNs
+# methods = ['christian', 'nogeura', 'pendergrass', 'liu', 'otkin']
+# results_rnn = []
+# args.ra_model = 'narr'
+# for method in methods:
+#     path = '../Data/narr/'
+#     filename = 'narr_LSTM_experiment_%s_merged_results.pkl'%method
+#     with open('%s/%s'%(path, filename), 'rb') as fn:
+#         result = pickle.load(fn)
+#         results_rnn.append(result)
+
+# # Create a merged dataset of the Ada boosted treess
+# methods = ['christian', 'nogeura', 'pendergrass', 'liu', 'otkin']
+# results_ada = []
+# args.ra_model = 'narr'
+# for method in methods:
+#     path = '../Data/narr/'
+#     filename = 'narr_ada_experiment_%s_merged_results.pkl'%method
+#     with open('%s/%s'%(path, filename), 'rb') as fn:
+#         result = pickle.load(fn)
+#         results_ada.append(result)
+
+# mask = load_mask(model = args.ra_model, path = args.dataset)
+# I, J = mask.shape
+
+# # Create the merged dataset for the true labels
+# true_fd = []
+# with open("%s/%s/%s"%(args.dataset, args.ra_model, args.output_data_fname), "rb") as fp:
+#     fd = pickle.load(fp)
+#     Nfold  = fd.shape[-1]
+#     T = fd.shape[1]
+#     fd = np.concatenate([fd[:,:,:,fold] for fold in range(Nfold)], axis = 1)
+#     fd[np.isnan(fd)] = 0
+#     for m, method in enumerate(methods):
+#         true_fd.append(fd[m,:,:].reshape(T*Nfold, I, J, order = 'F'))
+
+# # Determine the percentage improvement in overpredictions of FD for each method
+# for m, method in enumerate(methods):
+#     # Collect the composites
+#     x_rnn_comp = np.nanmean(results_rnn[m]['test_predict'].reshape(T*Nfold, I*J, order = 'F'), axis = 0)
+#     x_ada_comp = np.nanmean(results_ada[m]['test_predict'].reshape(T*Nfold, I*J, order = 'F'), axis = 0)
+#     y_comp = np.nanmean(true_fd[m].reshape(T*Nfold, I*J, order = 'F'), axis = 0)
+
+#     comp_diff_rnn = y_comp - x_rnn_comp
+#     comp_diff_ada = y_comp - x_ada_comp
+
+#     # Filter composite differences down to over predictions (when the composites are negative)
+#     comp_diff_rnn = np.where(comp_diff_rnn < 0, comp_diff_rnn, np.nan)
+#     comp_diff_ada = np.where(comp_diff_ada < 0, comp_diff_ada, np.nan)
+
+#     # Get the overall composite of over predictions
+#     over_pred_mean_rnn = np.nanmean(comp_diff_rnn)
+#     over_pred_mean_ada = np.nanmean(comp_diff_ada)
+
+#     # The ratio of rnn to ada composite values gives the percentage of how close the rnn composite is to the ada composite. 
+#     # 1 minus this ratio gives how much close the rnn composite is to 0 (i.e., improvement in the composite difference).
+#     improvement = 1 - over_pred_mean_rnn/over_pred_mean_ada
+
+#     # Output the improvement
+#     print('The percentage improvement in overpredictions of the RNNs to the Ada boosted for the %s methid is %4.2f'%(method, improvement*100))
