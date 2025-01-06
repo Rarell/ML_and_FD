@@ -39,6 +39,7 @@ Created on Sat Oct 2 17:52:45 2021
 #   3.5.0 - 7/10/2023 - Added CNN-RNN network code.
 #   3.6.0 - 1/20/2024 - Added compatibility with global datasets.
 #   3.7.0 - 6/29/2024 - Fixed U-Nets to run properly.
+#   3.8.0 - 12/12/2024 - Added XGBoosting to allowable ML models; changed colorbar for climatology plots; Bug fixes for the SHAP code
 #
 # Inputs:
 #   - Data files for FD indicator features, and FD labels (.pkl format)
