@@ -1917,7 +1917,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
             # Reshape into a standard list (list entry for each class, each list entry an array of Nexamples x Nfeatures)
             if (args.ml_model.lower() == 'svm') | (args.ml_model.lower() == 'support_vector_machine'):
                 n_examples = len(shap_values)
-                n_features = shap_values[0].shape[0]
+                n_features = shap_values[:,:,0].shape[0]
                 tmp_values = np.ones((n_examples, n_features)) * np.nan
                 tmp = []
                 tmp.append(0) # First list entry is unimportant (class 0); it isn't used in the final results
@@ -1931,15 +1931,15 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
             # Calculate the feature importance
             importances = []
             importances_var = []
-            for feature in range(shap_values[1].shape[1]):
-                importances.append(np.nanmean(np.abs(shap_values[1][:,feature])))
-                importances_var.append(np.nanstd(np.abs(shap_values[1][:,feature])))
+            for feature in range(shap_values[:,:,1].shape[1]):
+                importances.append(np.nanmean(np.abs(shap_values[:,:,1][:,feature])))
+                importances_var.append(np.nanstd(np.abs(shap_values[:,:,1][:,feature])))
             
             #importances = softmax(importances)
             importances = np.array(importances)
 
             # Store the values
-            attributions[test_folds*T:(test_folds+1)*T,:] = shap_values[1]
+            attributions[test_folds*T:(test_folds+1)*T,:] = shap_values[:,:,1]
             fi.append(importances)
             fi_var.append(importances_var)
 
@@ -1961,7 +1961,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
                # Collect the shapley values
                shap_values = explainer.shap_values(data_in_ts.T)
 
-               attributions_cs[ind[0],:,:] = shap_values[1]
+               attributions_cs[ind[0],:,:] = shap_values[:,:,1]
 
             if (args.ml_model == 'rf') | (args.ml_model == 'ada'):
                 # Get the input data for permutation importance for test folds (test folds because size reduction is needed to not crash the computer)
@@ -2696,10 +2696,10 @@ if __name__ == '__main__':
 
         # Plot the learning curve?
         ##### ADD SPAGGATTI LEARNING CURVES
-        if args.keras:
-           for m, method in enumerate(methods):
-               display_learning_curve(results[m]['history'], results[m]['history_var'], ['loss', 'categorical_accuracy'], 
-                                      False, args.ra_model, method, path = dataset_dir)
+        #if args.keras:
+        #   for m, method in enumerate(methods):
+        #       display_learning_curve(results[m]['history'], results[m]['history_var'], ['loss', 'categorical_accuracy'], 
+        #                              False, args.ra_model, method, path = dataset_dir)
 
 
         # Make predictions?

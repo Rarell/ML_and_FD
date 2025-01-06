@@ -94,7 +94,7 @@ def display_fd_climatology(fd, lat, lon, dates, mask, methods, model = 'narr', g
         
         fd_climo = calculate_climatology_frequency(fd[m], lat, dates, grow_season = grow_season)
         display_climatology_map(fd_climo*100, lat, lon, title = method, cbar_label = cbar_label, globe = globe, 
-                                cmin = -20, cmax = 80, cint = 1, cticks = np.arange(0, 90, 10), new_colorbar = True, path = path, savename = filename)
+                                cmin = -20, cmax = 100, cint = 1, cticks = np.arange(0, 110, 10), new_colorbar = True, path = path, savename = filename)
 
         # Calculate and plot total number of FDs climatology
         filename = '%s_%s_flash_drought_number.png'%(model, method)
@@ -730,7 +730,7 @@ def display_climatology_map(data, lat, lon, title = 'tmp', cbar_label = 'tmp', g
     # Set colorbar information
     clevs = np.arange(cmin, cmax + cint, cint)
     nlevs = len(clevs)
-    cmap  = plt.get_cmap(name = 'hot_r', lut = nlevs)
+    cmap  = plt.get_cmap(name = 'Spectral_r', lut = nlevs)
 
     # Get the normalized color values
     vmin = 0 if cmin < 0 else cmin
@@ -1711,7 +1711,11 @@ if __name__ == '__main__':
                     p = load_nc('precip', 'precipitation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
                     pet = load_nc('pevap', 'potential_evaporation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
                     lat = p['lat']; lon = p['lon']; dates = p['ymd']
-                    
+
+                    if args.model == 'era5':
+                        pet['pevap'] = -1*pet['pevap']
+                        print(np.nanmin(pet['pevap']), np.nanmax(pet['pevap']), np.nanmean(pet['pevap']))
+
                     # Calculate the index
                     index_data = calculate_spei(p['precip'], pet['pevap'], dates, mask, start_year = start_date.year, end_year = end_date.year)
                     
@@ -1723,6 +1727,9 @@ if __name__ == '__main__':
                     pet = load_nc('pevap', 'potential_evaporation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
                     lat = p['lat']; lon = p['lon']; dates = p['ymd']
                     
+                    if args.model == 'era5':
+                        pet['pevap'] = -1*pet['pevap']
+                    
                     # Calculate the index
                     index_data = calculate_sapei(p['precip'], pet['pevap'], dates, mask, start_year = start_date.year, end_year = end_date.year)
                     
@@ -1732,6 +1739,9 @@ if __name__ == '__main__':
                 elif index == 'eddi':
                     pet = load_nc('pevap', 'potential_evaporation.%s.pentad.nc'%args.model, sm = False, path = '%s/Processed_Data/'%dataset_dir)
                     lat = pet['lat']; lon = pet['lon']; dates = pet['ymd']
+                    
+                    if args.model == 'era5':
+                        pet['pevap'] = -1*pet['pevap']
                     
                     # Calculate the index
                     index_data = calculate_eddi(pet['pevap'], dates, mask, start_year = start_date.year, end_year = end_date.year)

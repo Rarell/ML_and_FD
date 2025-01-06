@@ -1079,8 +1079,8 @@ def compress_raw_data(data_name, model, fname_base, raw_sname, start_date, end_d
 
 def parse_data(data, lat, lon, dates, path, fname, model, mask, years = None, months = None, days = None):
     '''
-    Parse a list 3D time x lat x space datasets into time x space x folds datasets, with each
-    fold being 1 growing season. The data is then saved to a cdf (.nc) file for later use.
+    Parse a list 3D Nvar x time x lat x space datasets into Nvar x time x space x folds datasets, with each
+    fold being 1 growing season. The data is then saved to a pickle (.pkl) file for later use.
     
     Inputs:
     :param data: List of 3D datasets in time x lat x lon formats. Must be a list.
@@ -1107,9 +1107,9 @@ def parse_data(data, lat, lon, dates, path, fname, model, mask, years = None, mo
     
     # Stack the list into an axis
     data_stacked = np.stack(data, axis = 0)
-    Nf, T, I, J = data_stacked.shape
+    Nv, T, I, J = data_stacked.shape
     
-    data_stacked = data_stacked.reshape(Nf, T, I*J, order = 'F')
+    data_stacked = data_stacked.reshape(Nv, T, I*J, order = 'F')
     
     lat = lat.reshape(I*J, order = 'F')
     lon = lon.reshape(I*J, order = 'F')
@@ -1119,6 +1119,8 @@ def parse_data(data, lat, lon, dates, path, fname, model, mask, years = None, mo
         Nyears = np.unique(years)[:-1]
     else:
         Nyears = np.unique(years)
+        
+    Nfold = int(Nyears.size)
     
     
     # Growing season is Apr - Oct for lat >= 0, and Sept - Apr for lat < 0
@@ -1154,7 +1156,7 @@ def parse_data(data, lat, lon, dates, path, fname, model, mask, years = None, mo
         data_parsed_south = np.stack(data_parsed_south, axis = -1)
         
         # Concatenate the north and south hemispheric data along the space axis (axis 2)
-        data_parsed = np.ones((Nf, int(ind_north.size), I*J, Nfold), dtype = np.float32)*np.nan # This second method ensures the data points go with the correct lat/lon labels
+        data_parsed = np.ones((Nv, int(ind_north.size), I*J, Nfold), dtype = np.float32)*np.nan # This second method ensures the data points go with the correct lat/lon labels
         data_parsed[:,:,ind_lat_north,:] = data_parsed_north
         data_parsed[:,:,ind_lat_south,:] = data_parsed_south
         # data_parsed = np.concatenate([data_parsed_north, data_parsed_south], axis = 2)
