@@ -1942,7 +1942,7 @@ def make_map(var, lat, lon, var_name = 'tmp', model = 'narr', globe = False, pat
     '''
     
     # Set colorbar information
-    cmin = 0; cmax = 1; cint = 0.05
+    cmin = 0; cmax = 0.35; cint = 0.01
     clevs = np.arange(cmin, cmax + cint, cint)
     nlevs = len(clevs)
     
@@ -2125,6 +2125,9 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
 
     false_alarms_s = np.nansum(false_alarms, axis = -1)
     false_alarms_s = np.nansum(false_alarms_s, axis = -1)
+
+    correct_negatives_s = np.nansum(correct_negatives, axis = -1)
+    correct_negatives_s = np.nansum(correct_negatives_s, axis = -1)
     
 
     # Calculate the total threat score in space for each time stamp
@@ -2134,6 +2137,9 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     hits_rand_s = (hits_s + misses_s)*(hits_s + false_alarms_s)/total_s
     
     ets_s = (hits_s - hits_rand_s)/(hits_s + misses_s + false_alarms_s - hits_rand_s)
+
+    # Calculate the total true skill score in space for each time stamp
+    true_skill_s = hits_s/(hits_s + misses_s) - false_alarms_s/(false_alarms_s + correct_negatives_s)
     
     
     
@@ -2141,6 +2147,7 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     hits_t = np.nansum(hits, axis = 0)
     misses_t = np.nansum(misses, axis = 0)
     false_alarms_t = np.nansum(false_alarms, axis = 0)
+    correct_negatives_t = np.nansum(correct_negatives, axis = 0)
     
     # Calculate the total threat score in time for each grid point
     ts_t = hits_t/(hits_t + misses_t + false_alarms_t)
@@ -2149,6 +2156,9 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     hits_rand_t = (hits_t + misses_t)*(hits_t + false_alarms_t)/total_t
     
     ets_t = (hits_t - hits_rand_t)/(hits_t + misses_t + false_alarms_t - hits_rand_t)
+
+    # Calculate the total true skill score in time for each grid point
+    true_skill_t = hits_t/(hits_t + misses_t) - false_alarms_t/(false_alarms_t + correct_negatives_t)
         
 
         
@@ -2161,6 +2171,11 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     filename = 'equitable_threat_score_%s_time_series.png'%(label)
     make_timeseries(ets_s, time, var_name = 'Equitable Threat Score', model = model, path = path, savename = filename)
 
+
+    # Create and save a true skill score time series
+    filename = 'true_skill_score_%s_time_series.png'%(label)
+    make_timeseries(true_skill_s, time, var_name = 'True Skill Score', model = model, path = path, savename = filename)
+
     
     # Plot the threat scores in space and save the plot
     filename = 'threat_score_%s_map.png'%(label)
@@ -2170,6 +2185,11 @@ def display_threat_score(true, pred, lat, lon, time, mask, model = 'narr', label
     # Plot the equitable threat scores in space and save the plot
     filename = 'equitable_threat_score_%s_map.png'%(label)
     make_map(ets_t, lat, lon, var_name = 'Equitable Threat Score', model = model, globe = globe, path = path, savename = filename)
+
+
+    # Plot the true skill score in space and save the plot
+    filename = 'true_skill_score_%s_map.png'%(label)
+    make_map(true_skill_t, lat, lon, var_name = 'True Skill Score', model = model, globe = globe, path = path, savename = filename)
     
     # Overall performance
     ts_list = []

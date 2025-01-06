@@ -1976,6 +1976,9 @@ if __name__ == '__main__':
         print(ch_fd['fd'].dtype, nog_fd['fd'].dtype, pen_fd['fd'].dtype, liu_fd['fd'].dtype, ot_fd['fd'].dtype)
         
         # Parse and save the label data into a pickle file
+        if globe == False:
+            ai_mask_no_sea = None # A placeholder to allow the function to run (ai_mask_no_sea is no used when globe is False, so what it is is unimportant in this instance)
+            
         parse_data([ch_fd['fd'], nog_fd['fd'], pen_fd['fd'], liu_fd['fd'], ot_fd['fd']], 
                     ch_fd['lat'], ch_fd['lon'], dates, dataset_dir, label_fname, args.model, ai_mask_no_sea)
         

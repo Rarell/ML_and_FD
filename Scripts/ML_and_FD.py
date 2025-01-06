@@ -117,6 +117,8 @@ from sklearn import ensemble
 from sklearn import svm
 from sklearn import metrics
 
+import xgboost as xgb
+
 # Tensorflow 2.x way of doing things
 from tensorflow.keras.layers import InputLayer, Dense, Dropout, Reshape, Masking, Flatten, RepeatVector
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, SpatialDropout2D, Concatenate
@@ -462,6 +464,16 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
     valid_out = valid_out.reshape(Tt*IJ, order = 'F')
     test_out = test_out.reshape(Tt*IJ, order = 'F')
 
+    if args.ml_model.lower() ==  'xgboost':
+        # Make sample weights if XG boosting is used
+        weights = np.ones((train_out.shape[0]))
+
+        # Missing/sea values have weights of 0
+        weights = np.where(train_out == 2, 0, weights)
+        
+        # Weights for true labels
+        weights = np.where(train_out == 1, args.class_weight, weights)
+
 
     if os.path.exists('%s.pkl'%model_fname):
         # If the modeel exists, there is no need to make and train it
@@ -477,22 +489,32 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
             model = build_sklearn_model(args)
 
             # Train the model
-            model.fit(train_in.T, train_out)
+            if args.ml_model.lower() ==  'xgboost':
+                model.fit(train_in.T, train_out, sample_weights = weights, eval_set = [(valid_in.T, valid_out)], verbose = 2)
+
+                model.save_model('%s.json'%model_fname)
+            else:
+                model.fit(train_in.T, train_out)
             
-            # Save the model
-            with open('%s.pkl'%model_fname, 'wb') as fn:
-                pickle.dump(model, fn)
+                # Save the model
+                with open('%s.pkl'%model_fname, 'wb') as fn:
+                    pickle.dump(model, fn)
                 
     else:
         # Build the model
         model = build_sklearn_model(args)
 
         # Train the model
-        model.fit(train_in.T, train_out)
+        if args.ml_model.lower() ==  'xgboost':
+            model.fit(train_in.T, train_out, sample_weight = weights, eval_set = [(valid_in.T, valid_out)], verbose = 2)
+
+            model.save_model('%s.json'%model_fname)
+        else:
+            model.fit(train_in.T, train_out)
         
-        # Save the model
-        with open('%s.pkl'%model_fname, 'wb') as fn:
-            pickle.dump(model, fn)
+            # Save the model
+            with open('%s.pkl'%model_fname, 'wb') as fn:
+                pickle.dump(model, fn)
     
     # Evaluate the model
     NV, T, IJ = data_in.shape
@@ -551,6 +573,11 @@ def execute_sklearn_exp(args, train_in, valid_in, test_in, train_out, valid_out,
     # Save the results
     with open('%s.pkl'%results_fname, 'wb') as fn:
         pickle.dump(results, fn)
+
+    # If XG boosted tree was used, make a graph of the boosted tree,
+    if args.ml_model.lower() == 'xgboost':
+        ax = xgb.to_graphviz(model)
+        ax.render(filename = 'xgboost_tree_graph_rot_%02d.dot'%rotation)
         
     return results
     
@@ -602,7 +629,7 @@ def sklearn_evaluate_model(model, args, train_in, valid_in, test_in, train_out, 
         # Collect the AUC metric?
         elif metric == 'auc':
             # RFs don't have the decision_function() subfunction, so predict_proba() is used instead
-            if (args.ml_model.lower() == 'rf') | (args.ml_model.lower() == 'random_forest'):
+            if (args.ml_model.lower() == 'rf') | (args.ml_model.lower() == 'random_forest') | (args.ml_model.lower() == 'xgboost'):
                 train_pred_auc = model.predict_proba(train_in.T)
                 valid_pred_auc = model.predict_proba(valid_in.T)
                 test_pred_auc = model.predict_proba(test_in.T)
@@ -720,7 +747,7 @@ def sklearn_evaluate_model(model, args, train_in, valid_in, test_in, train_out, 
     # Collect information for the ROC curve
     if args.roc_curve:
         # Test if the model predicts FD
-        if (args.ml_model.lower() == 'rf') | (args.ml_model.lower() == 'random_forest'):
+        if (args.ml_model.lower() == 'rf') | (args.ml_model.lower() == 'random_forest') | (args.ml_model.lower() == 'xgboost'):
             train_pred_roc = model.predict_proba(train_in.T)
             valid_pred_roc = model.predict_proba(valid_in.T)
             test_pred_roc = model.predict_proba(test_in.T)
@@ -1897,7 +1924,8 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
             feature_names = ['T', 'ET', r'$\Delta$ET', 'PET', r'$\Delta$PET', 'P', 'SM', r'$\Delta$SM']
 
             # Load the model
-            model = load_single_model('%s/%s/%s/%s/%s'%(args.dataset, args.ra_model, args.ml_model, method, model_fbase), args.keras)
+            use_xgb = True if args.ml_model.lower() == 'xgboost' else False
+            model = load_single_model('%s/%s/%s/%s/%s'%(args.dataset, args.ra_model, args.ml_model, method, model_fbase), args.keras, use_xgb = use_xgb)
 
             # Determine which prediction method to use for the explanation
             if (args.ml_model.lower() == 'ann') | (args.ml_model.lower() == 'artificial_neural_network'):
@@ -1917,7 +1945,8 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
             # Reshape into a standard list (list entry for each class, each list entry an array of Nexamples x Nfeatures)
             if (args.ml_model.lower() == 'svm') | (args.ml_model.lower() == 'support_vector_machine'):
                 n_examples = len(shap_values)
-                n_features = shap_values[:,:,0].shape[0]
+                #n_features = shap_values[:,:,0].shape[0]
+                n_features = shap_values[0].shape[0]
                 tmp_values = np.ones((n_examples, n_features)) * np.nan
                 tmp = []
                 tmp.append(0) # First list entry is unimportant (class 0); it isn't used in the final results
@@ -1931,15 +1960,19 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
             # Calculate the feature importance
             importances = []
             importances_var = []
-            for feature in range(shap_values[:,:,1].shape[1]):
-                importances.append(np.nanmean(np.abs(shap_values[:,:,1][:,feature])))
-                importances_var.append(np.nanstd(np.abs(shap_values[:,:,1][:,feature])))
+            for feature in range(shap_values[1].shape[1]):
+            #for feature in range(shap_values[:,:,1].shape[1]):
+                #importances.append(np.nanmean(np.abs(shap_values[:,:,1][:,feature])))
+                #importances_var.append(np.nanstd(np.abs(shap_values[:,:,1][:,feature])))
+                importances.append(np.nanmean(np.abs(shap_values[1][:,feature])))
+                importances_var.append(np.nanstd(np.abs(shap_values[1][:,feature])))
             
             #importances = softmax(importances)
             importances = np.array(importances)
 
             # Store the values
-            attributions[test_folds*T:(test_folds+1)*T,:] = shap_values[:,:,1]
+            #attributions[test_folds*T:(test_folds+1)*T,:] = shap_values[:,:,1]
+            attributions[test_folds*T:(test_folds+1)*T,:] = shap_values[1]
             fi.append(importances)
             fi_var.append(importances_var)
 
@@ -1961,9 +1994,10 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
                # Collect the shapley values
                shap_values = explainer.shap_values(data_in_ts.T)
 
-               attributions_cs[ind[0],:,:] = shap_values[:,:,1]
+               #attributions_cs[ind[0],:,:] = shap_values[:,:,1]
+               attributions_cs[ind[0],:,:] = shap_values[1]
 
-            if (args.ml_model == 'rf') | (args.ml_model == 'ada'):
+            if (args.ml_model == 'rf') | (args.ml_model == 'ada') | (args.ml_model == 'xgboost'):
                 # Get the input data for permutation importance for test folds (test folds because size reduction is needed to not crash the computer)
                 ins = np.concatenate([data_in[:,:,:,test_folds]], axis = 1)
                 Nvar, IJ_train, T_train = ins.shape
@@ -2121,7 +2155,7 @@ def merge_results(args, method, lat, lon, NFolds, NVar, T, I, J, data_in = None,
         results['feature_import'] = np.nanmean(np.stack(fi, axis = -1), axis = -1)
         results['feature_import_var'] = np.nanmean(np.stack(fi_var, axis = -1), axis = -1)
 
-        if (args.ml_model == 'rf') | (args.ml_model == 'ada'):
+        if (args.ml_model == 'rf') | (args.ml_model == 'ada') | (args.ml_model == 'xgboost'):
             results['feature_import_pi'] = np.nanmean(np.stack(fi_pi, axis = -1), axis = -1)
             results['feature_import_pi_var'] = np.nanmean(np.stack(fi_pi_var, axis = -1), axis = -1)
 
@@ -2659,7 +2693,7 @@ if __name__ == '__main__':
             print('Making overall feature importance barplot...')
             # Feature importance plots for permutation importance
             # Note there are 42 rotations/samples
-            if (args.ml_model == 'rf') | (args.ml_model == 'ada'):
+            if (args.ml_model == 'rf') | (args.ml_model == 'ada') | (args.ml_model == 'xgboost'):
                 fi = [results[m]['feature_import_pi'] for m in range(len(methods))]
                 fi_var = [results[m]['feature_import_pi_var'] for m in range(len(methods))]
 
@@ -3623,3 +3657,244 @@ if __name__ == '__main__':
 
 #     # Output the improvement
 #     print('The percentage improvement in overpredictions of the RNNs to the Ada boosted for the %s methid is %4.2f'%(method, improvement*100))
+
+
+#############
+## Code used to calculate correlation coefficient, ANOVA and regression F-statistics, and to plot the figures
+#############
+# from sklearn.feature_selection import r_regression
+# from sklearn.feature_selection import f_regression
+# from sklearn.feature_selection import f_classif
+
+# dataset_dir = '%s/%s'%(args.dataset, args.ra_model)
+
+# # List of FD identification methods
+# methods = np.asarray(['', 'C23', 'N20', 'P20', 'L20', 'O21'])
+
+# # Determine the directory of the data
+# print('loading')
+# dataset_dir = '%s/%s'%(args.dataset, args.ra_model)
+
+# features = [r'', r'T', r'ET', r'$\Delta$ET', r'PET', r'$\Delta$PET', r'P', r'SM', r'$\Delta$SM']
+
+# # Load data
+# ins = load_ml_data(args.input_data_fname, path = dataset_dir)
+# outs = load_ml_data(args.output_data_fname, path = dataset_dir)
+
+# Nvar, T, IJ, Nfold  = ins.shape
+# Nmethods = outs.shape[0]
+
+# # Remove NaNs
+# for var in range(Nvar):
+#     ins[var,np.isnan(ins[var,:,:,:])] = np.nanmean(ins[var,:,:,:])
+
+# outs[outs <= 0] = 0 # Remove once corrected
+
+# Nfold = 43
+
+# # Split into train, val, test
+# print('Splitting and reshaping')
+# ins, _, _ = split_data(ins, 43, args.rotation[0])
+# outs, _, _ = split_data(outs, 43, args.rotation[0])
+
+# for ij in range(IJ):
+#     scaler = StandardScaler()
+#     tmp = scaler.fit_transform(ins[:,:,ij].T)
+#     ins[:,:,ij] = tmp.T
+
+# ins = ins.reshape(Nvar, T*IJ*Nfold).T
+# outs = outs.reshape(Nmethods, T*IJ*Nfold).T
+
+# # ind = np.where(np.isnan(outs[0,:]))[0]
+# # outs = np.delete(outs, ind, axis = 0)
+
+# # Standardize data
+# IJ = int(ins.shape[0]/(T*Nfold))
+# ins = ins.reshape(IJ, T*Nfold, Nvar)
+
+# ins = ins.reshape(IJ*T*Nfold, Nvar)
+
+# print('Working on sensitivity analyses')
+# cor = []
+# reg = []
+# reg_p = []
+# anova = []
+# anova_p = []
+# for method in range(Nmethods):
+#     print(methods[method+1])
+#     # Remove NaNs so that they are not counted
+#     ind = np.where(np.isnan(outs[:,method]))[0]
+#     ins_new = np.delete(ins, ind, axis = 0)
+#     outs_new = np.delete(outs[:,method], ind, axis = 0)
+    
+#     cor.append(r_regression(ins_new, outs_new)) # Correlation coefficient/analysis
+    
+#     f_statistic, p_value = f_regression(ins_new, outs_new) # Regression F-Statistic and p-value
+#     reg.append(f_statistic)
+#     reg_p.append(p_value)
+    
+#     f_statistic, p_value = f_classif(ins_new, outs_new) # ANOVA F-Statistic and p-value
+#     anova.append(f_statistic)
+#     anova_p.append(p_value)
+    
+
+# print('Correlation')
+# cor = np.array(cor)
+# print(cor)
+
+# print('Regression F')
+# reg = np.array(reg)
+# reg_p = np.array(reg_p)
+# print(reg)
+# print(reg_p)
+
+# print('ANOVA F')
+# anova = np.array(anova)
+# anova_p = np.array(anova_p)
+# print(anova)
+# print(anova_p)
+# print(anova.shape)
+# for row in range(len(methods)-1):
+#     reg[row,:] = reg[row,:]/np.nanmax(reg[row,:])
+#     anova[row,:] = anova[row,:]/np.nanmax(anova[row,:])
+# # reg = reg/np.nanmax(reg)
+# # anova = anova/np.nanmax(anova)
+
+# # sklearn.f_regression for regression tests giving F-statistic between each feature and labels and p-values 
+# # sklearn.f_classif() for ANOVA F-value between each feature and labels and p-values
+
+# # Make plots
+# print('Making plots...')
+# # Entry for the colorbar to be plotted
+# cmin = -0.3; cmax = 0.3; cint = 0.01
+# clevs = np.arange(cmin, cmax + cint, cint)
+# nlevs = len(clevs)
+
+# cmap  = plt.get_cmap(name = 'RdBu_r', lut = nlevs)
+
+# fig, ax = plt.subplots(figsize = [12, 8])
+# im = ax.imshow(cor, vmin = cmin, vmax = cmax, cmap = cmap)
+
+# # Add values into the confusion matrix
+# thresh = 0.2
+# #thresh = (cmin + cmax)/2
+# for i, j in product(range(len(methods)-1), range(len(features)-1)):
+#     # Color of the value (matches the background colorbar, but max/min color entry depending on value
+#     #color = im.cmap(nlevs) if cor[i, j] < thresh else im.cmap(0)
+#     color = 'black' if np.abs(cor[i, j]) < thresh else 'white'
+
+#     # Add the text
+#     text = format(cor[i,j], '0.3g')
+#     ax.text(j, i, text, ha = 'center', va = 'center', color = 'k', fontsize = 14)
+
+# # Tick labels
+# ax.set_xticklabels(features, fontsize = 14)
+
+# ax.set_xlabel('Features', fontsize = 14)
+
+# ax.set_yticklabels(methods, fontsize = 14)
+
+# ax.set_ylabel('FD Identification Method', fontsize = 14)
+
+# # Put the colorbar at the end; put it on a separate axis so it does not shrink the last plot
+# cbax = fig.add_axes([0.915, 0.13, 0.015, 0.72])
+# cbar = fig.colorbar(im, cax = cbax, orientation = 'vertical')
+# cbar.set_ticks(np.round(np.arange(cmin, cmax+cint, (cmax-cmin)/10), 2)) # Set a total of 10 ticks
+# for i in cbar.ax.yaxis.get_ticklabels():
+#     i.set_size(14)
+
+# # Add a title for each method/set of labels
+# ax.set_title('Correlation Coefficients', fontsize = 14)
+
+# plt.savefig('correlation_analyses.png', bbox_inches = 'tight')
+# plt.show(block = False)
+
+
+
+# # Entry for the colorbar to be plotted
+# cmin = 0; cmax = 1; cint = 0.01
+# clevs = np.arange(cmin, cmax + cint, cint)
+# nlevs = len(clevs)
+
+# cmap  = plt.get_cmap(name = 'Reds', lut = nlevs)
+
+# fig, ax = plt.subplots(figsize = [12, 8])
+# im = ax.imshow(reg, vmin = cmin, vmax = cmax, cmap = cmap)
+
+# # Add values into the confusion matrix
+# thresh = (cmin + cmax)/2
+# for i, j in product(range(len(methods)-1), range(len(features)-1)):
+#     # Color of the value (matches the background colorbar, but max/min color entry depending on value
+#     color = im.cmap(nlevs) if reg[i, j] < thresh else im.cmap(0)
+
+#     # Add the text
+#     text = format(reg[i,j], '0.3g')
+#     bold = 'bold' if reg_p[i,j] < 5 else '' # Bold text if statistically significant
+#     ax.text(j, i, text, ha = 'center', va = 'center', color = color, weight = bold, fontsize = 14)
+
+# # Tick labels
+# ax.set_xticklabels(features, fontsize = 14)
+
+# ax.set_xlabel('Features', fontsize = 14)
+
+# ax.set_yticklabels(methods, fontsize = 14)
+
+# ax.set_ylabel('FD Identification Method', fontsize = 14)
+
+# # Put the colorbar at the end; put it on a separate axis so it does not shrink the last plot
+# cbax = fig.add_axes([0.915, 0.13, 0.015, 0.72])
+# cbar = fig.colorbar(im, cax = cbax, orientation = 'vertical')
+# cbar.set_ticks(np.round(np.arange(cmin, cmax+cint, (cmax-cmin)/10), 2)) # Set a total of 10 ticks
+# for i in cbar.ax.yaxis.get_ticklabels():
+#     i.set_size(14)
+
+# # Add a title for each method/set of labels
+# ax.set_title('Regression F-Statistics (Normalized)', fontsize = 14)
+
+# plt.savefig('regression_f.png', bbox_inches = 'tight')
+# plt.show(block = False)
+
+
+
+# # Entry for the colorbar to be plotted
+# cmin = 0; cmax = 1; cint = 0.01
+# clevs = np.arange(cmin, cmax + cint, cint)
+# nlevs = len(clevs)
+
+# cmap  = plt.get_cmap(name = 'Reds', lut = nlevs)
+
+# fig, ax = plt.subplots(figsize = [12, 8])
+# im = ax.imshow(anova, vmin = cmin, vmax = cmax, cmap = cmap)
+
+# # Add values into the confusion matrix
+# thresh = (cmin + cmax)/2
+# for i, j in product(range(len(methods)-1), range(len(features)-1)):
+#     # Color of the value (matches the background colorbar, but max/min color entry depending on value
+#     color = im.cmap(nlevs) if anova[i, j] < thresh else im.cmap(0)
+
+#     # Add the text
+#     text = format(anova[i,j], '0.3g')
+#     bold = 'bold' if anova_p[i,j] < 5 else '' # Bold text if statistically significant
+#     ax.text(j, i, text, ha = 'center', va = 'center', color = color, weight = bold, fontsize = 14)
+
+# # Tick labels
+# ax.set_xticklabels(features, fontsize = 14)
+
+# ax.set_xlabel('Features', fontsize = 14)
+
+# ax.set_yticklabels(methods, fontsize = 14)
+
+# ax.set_ylabel('FD Identification Method', fontsize = 14)
+
+# # Put the colorbar at the end; put it on a separate axis so it does not shrink the last plot
+# cbax = fig.add_axes([0.915, 0.13, 0.015, 0.72])
+# cbar = fig.colorbar(im, cax = cbax, orientation = 'vertical')
+# cbar.set_ticks(np.round(np.arange(cmin, cmax+cint, (cmax-cmin)/10), 2)) # Set a total of 10 ticks
+# for i in cbar.ax.yaxis.get_ticklabels():
+#     i.set_size(14)
+
+# # Add a title for each method/set of labels
+# ax.set_title('ANOVA F-Statistics (Normalized)', fontsize = 14)
+
+# plt.savefig('anova_f.png', bbox_inches = 'tight')
+# plt.show(block = False)

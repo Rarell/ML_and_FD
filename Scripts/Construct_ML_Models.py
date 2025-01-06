@@ -61,6 +61,8 @@ from sklearn import ensemble
 from sklearn import svm
 from sklearn import metrics
 
+import xgboost as xgb
+
 # Tensorflow 2.x way of doing things
 from tensorflow.keras.layers import InputLayer, Dense, Dropout, Reshape, Masking, Flatten, RepeatVector
 from tensorflow.keras.layers import Input, Conv2D, MaxPooling2D, UpSampling2D, SpatialDropout2D, Concatenate
@@ -95,6 +97,9 @@ def build_sklearn_model(args):
         
     elif (args.ml_model.lower() == 'ada') | (args.ml_model.lower() == 'boosting') | (args.ml_model.lower() == 'ada_boosting'):
         model = build_adaboost_model(args)
+        
+    elif args.ml_model.lower() == 'xgboost':
+        model = build_xgboost_model(args)
     
     return model
 
@@ -173,13 +178,14 @@ def generate_model_fname_build(model, ml_model, method, rotation, lat_labels, lo
 ##############################################
 # Functions to load the ML models
 
-def load_single_model(fname, use_keras):
+def load_single_model(fname, use_keras, use_xgb = False):
     '''
     Load a single machine learning model
     
     Inputs:
     :param fname: The filename of the model being loaded
     :param use_keras: Boolean indicating whether a keras model is being loaded
+    :param use_xgb: Boolean indicating whether a XGBoost model is being loaded
     
     Outputs:
     :param model: The machine learning model that was loaded
@@ -189,8 +195,12 @@ def load_single_model(fname, use_keras):
     if use_keras:
         model = keras.models.load_model(fname)
     else:
-        with open('%s.pkl'%fname, 'rb') as fn:
-            model = pickle.load(fn)
+        if use_xgb:
+            model = xgb.XGBClassifier()
+            model.load_model('%s.json'%fname)
+        else:
+            with open('%s.pkl'%fname, 'rb') as fn:
+                model = pickle.load(fn)
             
     return model
 
@@ -323,7 +333,39 @@ def build_adaboost_model(args):
 
 
 
+#%%
+##############################################
 
+# Function to make an Ada Boosted tree model
+def build_xgboost_model(args):
+    '''
+    Construct a XG Boosting tree model
+    
+    :Inputs:
+    :param args: Argparse arguments
+    
+    Outputs:
+    :param model: XG Boosted Tree Classifier model
+    '''
+    
+    # Create the early stopper
+    early_stopping = xgb.callback.EarlyStopping(rounds = args.patience, metric_name = 'mlogloss')
+
+    # Build the model
+    model = xgb.XGBClassifier(n_estimators = args.ada_n_estimators, 
+                              max_depth = args.tree_depth, 
+                              learning_rate = args.ada_learning_rate, 
+                              reg_lambda = args.L2_regularization, 
+                              verbosity = 2, 
+                              #n_jobs = 2, 
+                              missing = np.nan, 
+                              importance_type = 'gain', 
+                              eval_metric = ['mlogloss', 'merror', 'auc'], 
+                              early_stopping_rounds = args.patience, 
+                              callbacks = [early_stopping])
+    
+    return model
+    
 
 #%%
 ##############################################
